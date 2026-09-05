@@ -292,27 +292,37 @@ function openOrSwitchToSite(url, matchUrl, callback) {
         });
       }
 
-      // 判断该标签页是否已经在职位列表页
-      const isJobPage = targetTab.url && (
-        targetTab.url.includes('/web/geek/job') ||
-        targetTab.url.includes('/zhaopin') ||
-        targetTab.url.includes('/wn/jobs')
-      );
+      chrome.tabs.update(targetTab.id, { active: true }, () => {
+        // 先用 PING 探针测试目标标签页的 Content Script 是否存活响应
+        chrome.tabs.sendMessage(targetTab.id, { type: 'PING' }, (pong) => {
+          if (chrome.runtime.lastError || !pong) {
+            // Content Script 离线或扩展刚更新重载导致上下文失效，强制导航/重载并等待就绪
+            console.log(`[ZIAVER] 目标标签页 ${domain} 通信未响应，执行重载激活...`);
+            chrome.tabs.update(targetTab.id, { url: url }, (updatedTab) => {
+              const tid = (updatedTab && updatedTab.id) || targetTab.id;
+              waitForPageLoad(tid, callback);
+            });
+          } else {
+            // Content Script 存活正常
+            const isJobPage = targetTab.url && (
+              targetTab.url.includes('/web/geek/job') ||
+              targetTab.url.includes('/zhaopin') ||
+              targetTab.url.includes('/wn/jobs')
+            );
 
-      if (isJobPage) {
-        // 已经在目标岗位页面，直接激活标签页并就绪
-        chrome.tabs.update(targetTab.id, { active: true }, () => {
-          setTimeout(() => {
-            callback(targetTab.id);
-          }, 1500);
+            if (isJobPage) {
+              setTimeout(() => {
+                callback(targetTab.id);
+              }, 1200);
+            } else {
+              chrome.tabs.update(targetTab.id, { url: url }, (updatedTab) => {
+                const tid = (updatedTab && updatedTab.id) || targetTab.id;
+                waitForPageLoad(tid, callback);
+              });
+            }
+          }
         });
-      } else {
-        // 不在岗位列表页，需要更新 URL 并等待全新加载完成
-        chrome.tabs.update(targetTab.id, { active: true, url: url }, (updatedTab) => {
-          const tid = (updatedTab && updatedTab.id) || targetTab.id;
-          waitForPageLoad(tid, callback);
-        });
-      }
+      });
     } else {
       // 标签页不存在，新建并等待加载完成
       chrome.tabs.create({ url, active: true }, (newTab) => {
@@ -366,17 +376,17 @@ function sendPipelineMessageWithRetry(tabId, message, retries = 6) {
       } else {
         const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex];
         const siteName = currentSite ? currentSite.name : '当前站点';
-        console.warn(`[ZIAVER Autopilot] 页面未响应或未登录，自动跳过【${siteName}】`);
+        console.warn(`[ZIAVER Autopilot] 页面通信未响应，自动跳过【${siteName}】`);
         if (currentSite) {
           cruisePipeline.siteStats[currentSite.id] = 0;
           cruisePipeline.siteSkipped = cruisePipeline.siteSkipped || {};
-          cruisePipeline.siteSkipped[currentSite.id] = '页面未就绪/未登录';
+          cruisePipeline.siteSkipped[currentSite.id] = '页面通信未响应';
           
           chrome.notifications.create('site_skipped_' + Date.now(), {
             type: 'basic',
             iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-            title: `⚠️【${siteName}】页面未就绪或未登录 · 自动跳过`,
-            message: `检测到【${siteName}】通信未就绪（可能未登录或重定向），已自动为您安全跳过并切换至下一站...`,
+            title: `⚠️【${siteName}】通信未就绪 · 自动跳过`,
+            message: `检测到【${siteName}】通信未就绪（请刷新该页面后重试），已自动跳过并切换至下一站...`,
             priority: 2
           });
 

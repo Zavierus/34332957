@@ -605,27 +605,41 @@
 
   // ================= 猎聘登录态智能识别 =================
   function checkIsLoggedIn() {
-    // 1. URL 检测
-    if (location.pathname.includes('/login') || location.hostname.includes('passport.liepin.com')) {
+    // 1. 明确的未登录路由
+    if (location.hostname.includes('passport.liepin.com') || location.pathname.startsWith('/login')) {
       return false;
     }
-    // 2. 存在显式未登录/登录按钮
-    const loginBtns = document.querySelectorAll('.header-login-btn, a[href*="/login/"], .user-menu-item a[href*="login"], .quick-login-btn, .btn-login');
-    for (const btn of loginBtns) {
-      if (btn.offsetParent !== null && (btn.textContent.includes('登录') || btn.textContent.includes('注册'))) {
+
+    // 2. 强特征：只要存在候选人已登录元素，坚决判定已登录
+    const loggedInIndicators = document.querySelectorAll(
+      '.header-avatar-box, .user-name, .user-menu-item .avatar, .nav-user-info, [data-selector="header-avatar"], .nav-user-avatar, .header-user-nav, .user-info, .header-quick-menu .name'
+    );
+    for (const ind of loggedInIndicators) {
+      if (ind && (ind.offsetWidth > 0 || ind.offsetHeight > 0 || ind.getClientRects().length > 0)) {
+        return true;
+      }
+    }
+
+    // 3. 检查是否有真实可见的登录弹窗
+    const loginModal = document.querySelector('.login-modal-wrapper, .quick-login-wrap, .ant-modal-content .login-container');
+    if (loginModal) {
+      const style = window.getComputedStyle(loginModal);
+      const rect = loginModal.getBoundingClientRect();
+      if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.width > 120 && rect.height > 120) {
         return false;
       }
     }
-    // 3. 弹出了登录/扫码弹窗
-    const loginModal = document.querySelector('.login-modal-wrapper, .quick-login-wrap, .scan-code-login, .ant-modal-content .login-container');
-    if (loginModal && loginModal.offsetParent !== null) {
-      return false;
+
+    // 4. 显式未登录按钮
+    const candidateLoginBtn = document.querySelector('.header-login-btn, .quick-login-btn');
+    if (candidateLoginBtn) {
+      const txt = candidateLoginBtn.textContent.trim();
+      const style = window.getComputedStyle(candidateLoginBtn);
+      if (style.display !== 'none' && (txt === '登录/注册' || txt === '登录' || txt === '注册')) {
+        return false;
+      }
     }
-    // 4. 登录特征元素检测（头像/用户名/个人菜单）
-    const loggedInIndicators = document.querySelectorAll('.header-avatar-box, .user-name, .user-menu-item .avatar, .nav-user-info, [data-selector="header-avatar"]');
-    if (loggedInIndicators.length > 0) {
-      return true;
-    }
+
     return true;
   }
 
@@ -655,15 +669,15 @@
     if (todayCount >= (config.dailyLimit || 30)) {
       if (isFromPipeline) {
         isSkipped = true;
-        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${config.dailyLimit || 30} 次)，自动向全网流水线交接...`);
+        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${todayCount}/${config.dailyLimit || 30} 次)，自动向全网流水线交接...`);
         chrome.runtime.sendMessage({
-          type: 'PIPELINE_SITE_FINISHED',
+          type: 'PIPELINE_SITE_SKIPPED',
           site: 'liepin',
-          count: 0
+          reason: `今日投递已满额 (${todayCount}/${config.dailyLimit || 30})`
         });
         return;
       } else {
-        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
+        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n当前今日已投递 ${todayCount} 次。为保护账号安全，自动停止投递。可在后台调整上限。`);
         return;
       }
     }
@@ -977,6 +991,9 @@
     } else if (request.type === 'STOP_CRUISE_PIPELINE') {
       stopLiepinCruise();
       sendResponse({ status: 'stopped' });
+      return true;
+    } else if (request.type === 'PING') {
+      sendResponse({ status: 'pong', platform: '猎聘网' });
       return true;
     }
   });

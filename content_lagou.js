@@ -691,33 +691,46 @@
 
   // ================= 拉勾登录态智能识别 =================
   function checkIsLoggedIn() {
-    // 1. URL 检测
-    if (location.hostname.includes('passport.lagou.com') || location.pathname.includes('/login')) {
+    // 1. 明确的未登录路由
+    if (location.hostname.includes('passport.lagou.com') || location.pathname.startsWith('/login')) {
       return false;
     }
-    // 2. 存在显式登录/注册按钮
-    const loginBtns = document.querySelectorAll('a[href*="passport.lagou.com/login"], .login-btn, .unlogin-box, .header-login, .login_btn, [data-lg-tj-id="header_login"]');
-    for (const btn of loginBtns) {
-      if (btn.offsetParent !== null && (btn.textContent.includes('登录') || btn.textContent.includes('注册'))) {
+
+    // 2. 强特征：只要存在候选人已登录元素，坚决判定已登录
+    const loggedInIndicators = document.querySelectorAll(
+      '.user_dropdown, .user-avatar, .user-info, .avatar_wrap, .login-success, #lg_tbar .user_nav, .header-user, [data-lg-tj-id="header_user"]'
+    );
+    for (const ind of loggedInIndicators) {
+      if (ind && (ind.offsetWidth > 0 || ind.offsetHeight > 0 || ind.getClientRects().length > 0)) {
+        return true;
+      }
+    }
+
+    // 3. 检查是否有真实可见的登录弹窗
+    const loginModal = document.querySelector('.login-modal, #lg_login, .passport-login-container, .modal-login');
+    if (loginModal) {
+      const style = window.getComputedStyle(loginModal);
+      const rect = loginModal.getBoundingClientRect();
+      if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.width > 120 && rect.height > 120) {
         return false;
       }
     }
-    // 3. 弹出了登录弹窗/二维码
-    const loginModal = document.querySelector('.login-modal, #lg_login, .passport-login-container, .modal-login, .modal-dialog .login-box');
-    if (loginModal && loginModal.offsetParent !== null) {
-      return false;
+
+    // 4. 检查显式未登录按钮
+    const candidateLoginBtn = document.querySelector('.unlogin-box, .header-login, [data-lg-tj-id="header_login"]');
+    if (candidateLoginBtn) {
+      const txt = candidateLoginBtn.textContent.trim();
+      const style = window.getComputedStyle(candidateLoginBtn);
+      if (style.display !== 'none' && (txt.includes('登录') || txt.includes('注册'))) {
+        return false;
+      }
     }
-    // 4. 登录特征元素检测（个人下拉/头像/用户名）
-    const loggedInIndicators = document.querySelectorAll('.user_dropdown, .user-avatar, .user-info, .avatar_wrap, .login-success');
-    if (loggedInIndicators.length > 0) {
-      return true;
-    }
+
     return true;
   }
 
   let isSkipped = false;
 
-  // ================= 巡航运行逻辑 =================
   // ================= 巡航运行逻辑 =================
   async function startAutopilot(targetCount = 10, isFromPipeline = false, initialSessionCount = 0) {
     if (isRunning) return;
@@ -744,15 +757,15 @@
     if (todayCount >= (config.dailyLimit || 30)) {
       if (isFromPipeline) {
         isSkipped = true;
-        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${config.dailyLimit || 30} 次)，自动向全网流水线交接...`);
+        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${todayCount}/${config.dailyLimit || 30} 次)，自动向全网流水线交接...`);
         chrome.runtime.sendMessage({
-          type: 'PIPELINE_SITE_FINISHED',
+          type: 'PIPELINE_SITE_SKIPPED',
           site: 'lagou',
-          count: 0
+          reason: `今日投递已满额 (${todayCount}/${config.dailyLimit || 30})`
         });
         return;
       } else {
-        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
+        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n当前今日已投递 ${todayCount} 次。为保护账号安全，自动停止投递。可在后台调整上限。`);
         return;
       }
     }
@@ -1110,6 +1123,9 @@
     } else if (request.type === 'STOP_CRUISE_PIPELINE') {
       stopAutopilot();
       sendResponse({ status: 'stopped' });
+      return true;
+    } else if (request.type === 'PING') {
+      sendResponse({ status: 'pong', platform: '拉勾招聘' });
       return true;
     }
   });

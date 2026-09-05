@@ -706,27 +706,42 @@
 
   // ================= 登录状态智能识别 =================
   function checkIsLoggedIn() {
-    // 1. URL 检查 (登录注册路由)
-    if (location.pathname.includes('/user/') || location.href.includes('login') || location.href.includes('signin')) {
+    // 1. 明确的未登录路由
+    if (location.hostname.startsWith('login.') || location.pathname.startsWith('/login') || location.pathname.startsWith('/user/login')) {
       return false;
     }
-    // 2. 页面显式存在未登录/登录/注册按钮
-    const loginBtns = document.querySelectorAll('.header-login-btn, a[ka*="header-login"], .btn-sign-in, .user-nav .login-btn');
-    for (const btn of loginBtns) {
-      if (btn.offsetParent !== null && (btn.textContent.includes('登录') || btn.textContent.includes('注册'))) {
+
+    // 2. 强特征：只要存在任何候选人已登录元素，坚决判定为已登录！
+    const loggedInIndicators = document.querySelectorAll(
+      '.nav-figure, .header-nav-user, .nav-item-geek, [ka*="header-geek"], .user-avatar, .nav-item-message, .nav-item-chat, a.nav-item-resume, [ka="header-resume"], [ka*="header-username"], .user-nav .avatar'
+    );
+    for (const ind of loggedInIndicators) {
+      if (ind && (ind.offsetWidth > 0 || ind.offsetHeight > 0 || ind.getClientRects().length > 0)) {
+        return true;
+      }
+    }
+
+    // 3. 检查是否有真正呈现在屏幕正中央的登录弹窗 (排除后台或APP下载二维码)
+    const loginModal = document.querySelector('.boss-login-dialog, .dialog-signin, .login-register-dialog');
+    if (loginModal) {
+      const style = window.getComputedStyle(loginModal);
+      const rect = loginModal.getBoundingClientRect();
+      if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.width > 120 && rect.height > 120) {
         return false;
       }
     }
-    // 3. 页面已弹出登录/扫码弹窗
-    const loginModal = document.querySelector('.boss-login-dialog, .dialog-signin, .login-register-content, .login-register-dialog, .sign-form, .dialog-wrap .qrcode-box');
-    if (loginModal && loginModal.offsetParent !== null) {
-      return false;
+
+    // 4. 只有在没有已登录标识、且明确存在“登录/注册”候选人按钮时，才判定未登录
+    const candidateLoginBtn = document.querySelector('.user-nav a[ka="header-login"], .header-login-btn');
+    if (candidateLoginBtn) {
+      const txt = candidateLoginBtn.textContent.trim();
+      const style = window.getComputedStyle(candidateLoginBtn);
+      if (style.display !== 'none' && (txt === '登录/注册' || txt === '登录' || txt === '注册')) {
+        return false;
+      }
     }
-    // 4. 登录特征元素检测（头像/消息/极客中心）
-    const loggedInIndicators = document.querySelectorAll('.nav-figure, .header-nav-user, .nav-item-message, .nav-item-geek, [ka*="header-geek"]');
-    if (loggedInIndicators.length > 0) {
-      return true;
-    }
+
+    // 5. 处于职位搜索列表页且有职位卡片展示，默认判定为正常可用态
     return true;
   }
 
@@ -757,15 +772,15 @@
     if (todayCount >= config.dailyLimit) {
       if (isFromPipeline) {
         isSkipped = true;
-        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${config.dailyLimit} 次)，自动向全网巡航下一站交接...`);
+        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${todayCount}/${config.dailyLimit} 次)，自动向全网巡航下一站交接...`);
         chrome.runtime.sendMessage({
-          type: 'PIPELINE_SITE_FINISHED',
+          type: 'PIPELINE_SITE_SKIPPED',
           site: 'boss',
-          count: 0
+          reason: `今日投递已满额 (${todayCount}/${config.dailyLimit})`
         });
         return;
       } else {
-        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit} 次)！\n为保护账号绝对安全，自动停止投递。可在后台调整上限。`);
+        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit} 次)！\n当前今日已投递 ${todayCount} 次。为保护账号绝对安全，自动停止投递。可在后台调整上限。`);
         return;
       }
     }
@@ -1108,6 +1123,9 @@
     } else if (request.type === 'STOP_CRUISE_PIPELINE') {
       stopAutopilot();
       sendResponse({ status: 'stopped' });
+      return true;
+    } else if (request.type === 'PING') {
+      sendResponse({ status: 'pong', platform: 'BOSS直聘' });
       return true;
     }
   });
