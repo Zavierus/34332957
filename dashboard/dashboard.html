@@ -665,7 +665,7 @@
             <p class="panel-desc">上传简历文件或直接粘贴文本，本地离线自动智能分类提炼【个人优势】、【工作经历与业绩】、【项目详情】、【专业技能】与【自我介绍】。随时一键复制到各大招聘平台或大厂网申填写框！</p>
           </div>
           <div class="header-actions">
-            <input type="file" id="resume-file-input" accept=".txt,.md,.json,.pdf,.docx" style="display:none;">
+            <input type="file" id="resume-file-input" accept=".txt,.md,.json,.pdf,.docx,.doc" style="display:none;">
             <button class="btn btn-secondary" id="btn-trigger-upload-file">📁 上传简历文件</button>
             <button class="btn btn-secondary" id="btn-export-resume-depot">📥 导出武器库 JSON</button>
             <button class="btn btn-primary" id="btn-save-resume-depot">💾 保存到本地网申库</button>
@@ -680,7 +680,7 @@
             <div class="resume-dropzone" id="resume-dropzone">
               <div class="dropzone-icon">📥</div>
               <div class="dropzone-title">点击或拖拽简历文件至此</div>
-              <div class="dropzone-sub">支持 .txt / .md / .json / .pdf 文本离线读取</div>
+              <div class="dropzone-sub">支持 .pdf / .docx / .txt / .md / .json 深度离线读取</div>
               <div class="dropzone-badge">🔒 100% 本地浏览器解析 · 零数据上传</div>
             </div>
 
@@ -871,6 +871,8 @@
     </div>
   </div>
 
+  <script src="libs/pdf.min.js"></script>
+  <script src="libs/jszip.min.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

@@ -1428,42 +1428,130 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    function handleResumeFile(file) {
-      const reader = new FileReader();
-      const filename = file.name.toLowerCase();
+    // PDF 纯离线全文精准提取
+    async function extractTextFromPDF(file) {
+      if (!window.pdfjsLib) {
+        throw new Error('PDF.js 组件未就绪，请刷新页面后重试！');
+      }
+      pdfjsLib.GlobalWorkerOptions.workerSrc = './libs/pdf.worker.js';
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      let fullText = '';
 
-      if (filename.endsWith('.json')) {
-        reader.onload = (ev) => {
-          try {
-            const data = JSON.parse(ev.target.result);
-            renderResumeDepot(data);
-            chrome.storage.local.set({ resumeDepot: data }, () => {
-              showCopyToast(`成功导入 JSON 武器库数据 (${file.name})！`);
-            });
-          } catch (err) {
-            alert('JSON 文件格式解析失败，请检查文件内容！');
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        let lastY = null;
+        let pageLines = [];
+        let currentLine = '';
+
+        const items = textContent.items || [];
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (!item.str) continue;
+          const currentY = item.transform[5];
+          // 纵坐标变动明显则代表段落或换行
+          if (lastY !== null && Math.abs(currentY - lastY) > 6) {
+            if (currentLine.trim()) {
+              pageLines.push(currentLine.trim());
+            }
+            currentLine = item.str;
+          } else {
+            // 同一行内的中英文间隔处理
+            if (currentLine && !currentLine.endsWith(' ') && !/[\u4e00-\u9fa5]/.test(currentLine.slice(-1)) && !/[\u4e00-\u9fa5]/.test(item.str[0])) {
+              currentLine += ' ';
+            }
+            currentLine += item.str;
           }
-        };
-        reader.readAsText(file, 'utf-8');
-      } else {
-        // 读取纯文本或尝试提取
-        reader.onload = (ev) => {
-          let text = ev.target.result;
-          // 若为PDF等二进制内容，简易清洗提取可见文本
-          if (filename.endsWith('.pdf')) {
-            text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ')
-                       .replace(/stream[\s\S]*?endstream/g, ' ')
-                       .replace(/obj[\s\S]*?endobj/g, ' ');
+          lastY = currentY;
+        }
+        if (currentLine.trim()) {
+          pageLines.push(currentLine.trim());
+        }
+        fullText += pageLines.join('\n') + '\n\n';
+      }
+
+      return fullText.trim();
+    }
+
+    // Word (.docx) 纯离线全文精准提取
+    async function extractTextFromDocx(file) {
+      if (!window.JSZip) {
+        throw new Error('JSZip 组件未就绪！');
+      }
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+      const docXmlFile = zip.file('word/document.xml');
+      if (!docXmlFile) {
+        throw new Error('未在 DOCX 中找到正文内容文档！');
+      }
+      const xmlStr = await docXmlFile.async('string');
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlStr, 'text/xml');
+      const paragraphs = xmlDoc.getElementsByTagName('w:p');
+      const lines = [];
+
+      for (let i = 0; i < paragraphs.length; i++) {
+        const p = paragraphs[i];
+        const textNodes = p.getElementsByTagName('w:t');
+        let lineText = '';
+        for (let j = 0; j < textNodes.length; j++) {
+          lineText += textNodes[j].textContent;
+        }
+        if (lineText.trim()) {
+          lines.push(lineText.trim());
+        }
+      }
+
+      return lines.join('\n');
+    }
+
+    async function handleResumeFile(file) {
+      const filename = file.name.toLowerCase();
+      const statusText = document.getElementById('parse-status-text');
+      if (statusText) statusText.textContent = `正在读取并解析简历文件: ${file.name}...`;
+
+      try {
+        if (filename.endsWith('.json')) {
+          const text = await file.text();
+          const data = JSON.parse(text);
+          renderResumeDepot(data);
+          chrome.storage.local.set({ resumeDepot: data }, () => {
+            showCopyToast(`成功导入 JSON 武器库数据 (${file.name})！`);
+          });
+          return;
+        }
+
+        let rawText = '';
+        if (filename.endsWith('.pdf')) {
+          if (statusText) statusText.textContent = `正在使用本地离线引擎深度解析 PDF 页面内容...`;
+          rawText = await extractTextFromPDF(file);
+          if (!rawText || rawText.length < 20) {
+            alert('该 PDF 文件未能提取出文字内容（可能是纯图片扫描件）。\n\n建议直接在 Word 中复制文字，或粘贴到右侧输入框即可快速解析！');
+            if (statusText) statusText.textContent = '提示：该 PDF 可能是纯图片扫描件，请直接粘贴文字';
+            return;
           }
-          if (rawTextEl) rawTextEl.value = text;
-          const parsed = parseResumeText(text);
-          if (parsed) {
-            renderResumeDepot(parsed);
-            chrome.storage.local.set({ resumeDepot: parsed });
-            showCopyToast(`已成功读取并分类解析简历文件 (${file.name})！`);
-          }
-        };
-        reader.readAsText(file, 'utf-8');
+        } else if (filename.endsWith('.docx')) {
+          if (statusText) statusText.textContent = `正在解压提取 Word DOCX 段落内容...`;
+          rawText = await extractTextFromDocx(file);
+        } else {
+          // .txt, .md, .doc 或纯文本文件
+          rawText = await file.text();
+        }
+
+        if (rawTextEl) rawTextEl.value = rawText;
+        const parsed = parseResumeText(rawText);
+        if (parsed) {
+          renderResumeDepot(parsed);
+          chrome.storage.local.set({ resumeDepot: parsed }, () => {
+            showCopyToast(`已成功深度解析简历 (${file.name}) 并保存至本地网申库！`);
+          });
+        }
+      } catch (err) {
+        console.error('简历文件读取异常:', err);
+        alert(`解析文件失败: ${err.message || '未知错误'}\n\n您可直接复制简历文字，粘贴至右侧文本框进行智能分类解析！`);
+        if (statusText) statusText.textContent = '解析失败：建议直接复制简历文字粘贴后解析';
       }
     }
 

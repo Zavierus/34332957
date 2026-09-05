@@ -15,30 +15,7 @@
   ],
   "options_page": "dashboard/dashboard.html",
   "host_permissions": [
-    "*://*.zhipin.com/*",
-    "*://*.liepin.com/*",
-    "*://*.lagou.com/*",
-    "*://*.51job.com/*",
-    "*://*.zhaopin.com/*",
-    "*://*.nowcoder.com/*",
-    "*://we.dji.com/*",
-    "*://dji.zhiye.com/*",
-    "*://*.insta360.com/*",
-    "*://arashivision.zhiye.com/*",
-    "*://careers.tencent.com/*",
-    "*://join.qq.com/*",
-    "*://tencent.zhiye.com/*",
-    "*://jobs.bytedance.com/*",
-    "*://job.bytedance.com/*",
-    "*://jobs.toutiao.com/*",
-    "*://join.163.com/*",
-    "*://campus.163.com/*",
-    "*://hr.163.com/*",
-    "*://*.mihoyo.com/*",
-    "*://*.zhiye.com/*",
-    "*://*.mokahr.com/*",
-    "*://*.dayee.com/*",
-    "*://*.hotjob.cn/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -104,35 +81,23 @@
     },
     {
       "matches": [
-        "*://*.zhipin.com/*",
-        "*://*.liepin.com/*",
-        "*://*.lagou.com/*",
-        "*://*.51job.com/*",
-        "*://*.zhaopin.com/*",
-        "*://*.nowcoder.com/*",
-        "*://we.dji.com/*",
-        "*://dji.zhiye.com/*",
-        "*://*.insta360.com/*",
-        "*://arashivision.zhiye.com/*",
-        "*://careers.tencent.com/*",
-        "*://join.qq.com/*",
-        "*://tencent.zhiye.com/*",
-        "*://jobs.bytedance.com/*",
-        "*://job.bytedance.com/*",
-        "*://jobs.toutiao.com/*",
-        "*://join.163.com/*",
-        "*://campus.163.com/*",
-        "*://hr.163.com/*",
-        "*://*.mihoyo.com/*",
-        "*://*.zhiye.com/*",
-        "*://*.mokahr.com/*",
-        "*://*.dayee.com/*",
-        "*://*.hotjob.cn/*"
+        "<all_urls>"
       ],
       "js": [
         "content_quickfill.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dashboard/libs/*",
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

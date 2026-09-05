@@ -48,7 +48,7 @@
     });
   }
 
-  // 2. 捕获网页中当前获得焦点的输入框 (Input/Textarea/ContentEditable)
+  // 2. 捕获网页中当前获得焦点的输入框 (兼容各类 Input/Textarea/富文本及在线文档)
   function isTextInput(el) {
     if (!el || el.nodeType !== 1) return false;
     // 排除插件自身的元素
@@ -60,8 +60,24 @@
       const type = (el.type || 'text').toLowerCase();
       return ['text', 'search', 'tel', 'url', 'email', 'number', 'password'].includes(type);
     }
-    if (el.isContentEditable) return true;
+    // 支持各类富文本与在线文档 (腾讯文档/飞书/Google Docs/WPS/Notion/语雀等)
+    if (el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.getAttribute('role') === 'textbox' || el.getAttribute('g_editable') === 'true') {
+      return true;
+    }
+    if (el.closest && el.closest('[contenteditable="true"], [role="textbox"], [g_editable="true"], .ProseMirror, .ql-editor, .DraftEditor-root, .kdocs-editor, .docs-editor, .feishu-editor')) {
+      return true;
+    }
     return false;
+  }
+
+  function getTargetInputContainer(el) {
+    if (!el || el.nodeType !== 1) return null;
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el;
+    if (el.closest) {
+      const richEditor = el.closest('[contenteditable="true"], [role="textbox"], [g_editable="true"], .ProseMirror, .ql-editor');
+      if (richEditor) return richEditor;
+    }
+    return el;
   }
 
   function getInputLabel(el) {
@@ -69,25 +85,26 @@
     const placeholder = el.getAttribute('placeholder') || '';
     const name = el.getAttribute('name') || el.getAttribute('id') || '';
     const aria = el.getAttribute('aria-label') || '';
-    const label = placeholder || aria || name || (el.tagName === 'TEXTAREA' ? '多行文本框' : '文本输入框');
-    return label.length > 18 ? label.slice(0, 18) + '...' : label;
+    const isDoc = el.isContentEditable || (el.closest && el.closest('[contenteditable="true"], [role="textbox"]'));
+    const label = placeholder || aria || name || (isDoc ? '在线文档/文本区域' : (el.tagName === 'TEXTAREA' ? '多行文本框' : '文本输入框'));
+    return label.length > 20 ? label.slice(0, 20) + '...' : label;
   }
 
   document.addEventListener('focusin', (e) => {
     if (isTextInput(e.target)) {
-      lastTargetInput = e.target;
+      lastTargetInput = getTargetInputContainer(e.target);
       updateTargetIndicator();
     }
   }, true);
 
   document.addEventListener('click', (e) => {
     if (isTextInput(e.target)) {
-      lastTargetInput = e.target;
+      lastTargetInput = getTargetInputContainer(e.target);
       updateTargetIndicator();
     }
   }, true);
 
-  // 3. 原生表单模拟填入 (兼容 React / Vue / AntD / ElementUI)
+  // 3. 原生表单与在线文档多层次智能填入 (兼容 React / Vue / 腾讯文档 / 飞书 / WPS / Google Docs)
   function fillNativeInput(element, value) {
     if (!element) return false;
     try {
@@ -95,26 +112,57 @@
       const isTextarea = element.tagName === 'TEXTAREA';
       const isInput = element.tagName === 'INPUT';
 
-      if (isTextarea) {
+      // 1. 标准表单输入框 (Bypass React/Vue 原生 Setter)
+      if (isTextarea || isInput) {
         const proto = Object.getPrototypeOf(element);
         const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set || Object.getOwnPropertyDescriptor(element, 'value')?.set;
         if (setter) setter.call(element, value);
         else element.value = value;
-      } else if (isInput) {
-        const proto = Object.getPrototypeOf(element);
-        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set || Object.getOwnPropertyDescriptor(element, 'value')?.set;
-        if (setter) setter.call(element, value);
-        else element.value = value;
-      } else if (element.isContentEditable) {
-        element.innerText = value;
-      } else {
-        element.value = value;
+
+        element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+        element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+        return true;
       }
 
+      // 2. 在线文档与富文本内核 (execCommand 原生光标处插入)
+      let commandExecuted = false;
+      try {
+        if (document.queryCommandSupported && document.queryCommandSupported('insertText')) {
+          commandExecuted = document.execCommand('insertText', false, value);
+        }
+      } catch (e) {
+        commandExecuted = false;
+      }
+
+      if (commandExecuted) {
+        element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        return true;
+      }
+
+      // 3. ContentEditable 节点替换或插入
+      if (element.isContentEditable || element.getAttribute('contenteditable') === 'true' || element.getAttribute('role') === 'textbox') {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const textNode = document.createTextNode(value);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.setEndAfter(textNode);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          element.innerText = value;
+        }
+        element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        return true;
+      }
+
+      // 4. 通用 fallback
+      element.value = value;
       element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-      element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-      element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
       return true;
     } catch (err) {
       console.warn('[JobCruise QuickFill] 表单填入异常:', err);
