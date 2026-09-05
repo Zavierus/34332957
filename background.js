@@ -205,6 +205,7 @@ function startCruisePipeline(perSiteTarget = 'follow_limit') {
     cruisePipeline.currentIndex = 0;
     cruisePipeline.currentSiteCount = 0;
     cruisePipeline.siteStats = {};
+    cruisePipeline.siteSkipped = {};
 
     chrome.notifications.create('pipeline_start_' + Date.now(), {
       type: 'basic',
@@ -311,6 +312,28 @@ function sendPipelineMessageWithRetry(tabId, message, retries = 4) {
         setTimeout(() => {
           sendPipelineMessageWithRetry(tabId, message, retries - 1);
         }, 2000);
+      } else {
+        const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex];
+        const siteName = currentSite ? currentSite.name : '当前站点';
+        console.warn(`[ZIAVER Autopilot] 页面未响应或未登录，自动跳过【${siteName}】`);
+        if (currentSite) {
+          cruisePipeline.siteStats[currentSite.id] = 0;
+          cruisePipeline.siteSkipped = cruisePipeline.siteSkipped || {};
+          cruisePipeline.siteSkipped[currentSite.id] = '页面未就绪/未登录';
+          
+          chrome.notifications.create('site_skipped_' + Date.now(), {
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+            title: `⚠️【${siteName}】页面未就绪或未登录 · 自动跳过`,
+            message: `检测到【${siteName}】通信未就绪（可能未登录或重定向），已自动为您安全跳过并切换至下一站...`,
+            priority: 2
+          });
+
+          cruisePipeline.currentIndex++;
+          setTimeout(() => {
+            launchCurrentPipelineSite();
+          }, 3500);
+        }
       }
     } else {
       console.log('[ZIAVER Autopilot] 流水线指令下发成功:', response);
@@ -326,9 +349,13 @@ function finishEntirePipeline() {
   Object.keys(cruisePipeline.siteStats).forEach(siteId => {
     const siteObj = PIPELINE_SITES.find(s => s.id === siteId);
     const name = siteObj ? siteObj.name : siteId;
-    const count = cruisePipeline.siteStats[siteId] || 0;
-    totalCount += count;
-    breakdown.push(`${name}: ${count}个`);
+    if (cruisePipeline.siteSkipped && cruisePipeline.siteSkipped[siteId]) {
+      breakdown.push(`${name}: 跳过(${cruisePipeline.siteSkipped[siteId]})`);
+    } else {
+      const count = cruisePipeline.siteStats[siteId] || 0;
+      totalCount += count;
+      breakdown.push(`${name}: ${count}个`);
+    }
   });
 
   chrome.notifications.create('pipeline_complete_' + Date.now(), {
@@ -365,6 +392,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       cruisePipeline.siteStats[request.site] = request.count;
     }
     sendResponse({ status: 'ok' });
+    return true;
+  } else if (request.type === 'PIPELINE_SITE_SKIPPED') {
+    const skippedSiteId = request.site;
+    const reason = request.reason || '未登录';
+    cruisePipeline.siteStats[skippedSiteId] = 0;
+    cruisePipeline.siteSkipped = cruisePipeline.siteSkipped || {};
+    cruisePipeline.siteSkipped[skippedSiteId] = reason;
+
+    const finishedSiteObj = PIPELINE_SITES.find(s => s.id === skippedSiteId);
+    const siteName = finishedSiteObj ? finishedSiteObj.name : skippedSiteId;
+
+    chrome.notifications.create('site_skipped_' + Date.now(), {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+      title: `⚠️【${siteName}】${reason} · 自动跳过`,
+      message: `检测到【${siteName}】${reason}，已自动为您安全跳过并切换至下一招聘网站...`,
+      priority: 2
+    });
+
+    cruisePipeline.currentIndex++;
+    setTimeout(() => {
+      launchCurrentPipelineSite();
+    }, 3500);
+
+    sendResponse({ status: 'site_skipped_next_triggered' });
     return true;
   } else if (request.type === 'PIPELINE_SITE_FINISHED') {
     const finishedSiteId = request.site;

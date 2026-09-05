@@ -704,9 +704,56 @@
     }, 4000);
   }
 
+  // ================= 登录状态智能识别 =================
+  function checkIsLoggedIn() {
+    // 1. URL 检查 (登录注册路由)
+    if (location.pathname.includes('/user/') || location.href.includes('login') || location.href.includes('signin')) {
+      return false;
+    }
+    // 2. 页面显式存在未登录/登录/注册按钮
+    const loginBtns = document.querySelectorAll('.header-login-btn, a[ka*="header-login"], .btn-sign-in, .user-nav .login-btn');
+    for (const btn of loginBtns) {
+      if (btn.offsetParent !== null && (btn.textContent.includes('登录') || btn.textContent.includes('注册'))) {
+        return false;
+      }
+    }
+    // 3. 页面已弹出登录/扫码弹窗
+    const loginModal = document.querySelector('.boss-login-dialog, .dialog-signin, .login-register-content, .login-register-dialog, .sign-form, .dialog-wrap .qrcode-box');
+    if (loginModal && loginModal.offsetParent !== null) {
+      return false;
+    }
+    // 4. 登录特征元素检测（头像/消息/极客中心）
+    const loggedInIndicators = document.querySelectorAll('.nav-figure, .header-nav-user, .nav-item-message, .nav-item-geek, [ka*="header-geek"]');
+    if (loggedInIndicators.length > 0) {
+      return true;
+    }
+    return true;
+  }
+
+  let isSkipped = false;
+
   // ================= 投递主流程 =================
   async function startAutopilot(target = null, isFromPipeline = false) {
     refreshConfig();
+    isSkipped = false;
+
+    // 智能登录态检测
+    if (!checkIsLoggedIn()) {
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD('<span class="highlight" style="color:#f59e0b;">[未登录检测]</span> 未检测到当前网站登录状态，全网流水线自动跳过本站...');
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_SKIPPED',
+          site: 'boss',
+          reason: '未登录账号'
+        });
+        return;
+      } else {
+        alert('⚠️ 检测到您尚未登录 BOSS 直聘（或会话已过期）！\n请先在页面右上角完成登录后再开启自动巡航。');
+        return;
+      }
+    }
+
     if (todayCount >= config.dailyLimit) {
       alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit} 次)！\n为保护账号绝对安全，自动停止投递。可在后台调整上限。`);
       return;
@@ -742,7 +789,7 @@
       const wasPipeline = pipelineMode;
       const finalCount = sessionCount;
       stopAutopilot();
-      if (wasPipeline) {
+      if (wasPipeline && !isSkipped) {
         logHUD(`<span class="success">[本站目标达成]</span> 已完成 ${finalCount} 个，汇报至全网巡航中枢...`);
         chrome.runtime.sendMessage({
           type: 'PIPELINE_SITE_FINISHED',
@@ -797,6 +844,18 @@
       }
 
       if (!jobCards || jobCards.length === 0) {
+        if (!checkIsLoggedIn()) {
+          isSkipped = true;
+          logHUD('<span class="highlight" style="color:#f59e0b;">[未登录检测]</span> 当前页面为未登录状态，自动跳过本站...');
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_SKIPPED',
+              site: 'boss',
+              reason: '未登录账号'
+            });
+          }
+          break;
+        }
         logHUD('<span class="skip">未在当前页面找到职位卡片，请打开 BOSS 职位搜索列表页。</span>');
         break;
       }
@@ -806,6 +865,19 @@
         while (isPaused) await sleep(1000);
         if (todayCount >= config.dailyLimit) break;
         if (pipelineMode && sessionCount >= pipelineTarget) break;
+
+        if (!checkIsLoggedIn()) {
+          isSkipped = true;
+          logHUD('<span class="highlight" style="color:#ef4444;">[登录态失效]</span> 检测到登录弹窗，已安全跳过本站...');
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_SKIPPED',
+              site: 'boss',
+              reason: '弹出登录弹窗'
+            });
+          }
+          break;
+        }
 
         const card = jobCards[i];
         if (card.dataset.ziaverHandled === 'true') continue;

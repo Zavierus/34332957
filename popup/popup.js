@@ -184,7 +184,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentIndex = status.currentIndex || 0;
 
       if (pipeLiveText) {
-        pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ${siteCount}/${target}`;
+        if (status.siteSkipped && status.siteSkipped[status.currentSite?.id]) {
+          pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ⚠️ ${status.siteSkipped[status.currentSite?.id]} (自动跳过)`;
+        } else {
+          pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ${siteCount}/${target}`;
+        }
       }
       
       const overallCurrent = currentIndex * target + Math.min(siteCount, target);

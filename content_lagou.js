@@ -689,10 +689,56 @@
     logBox.scrollTop = logBox.scrollHeight;
   }
 
+  // ================= 拉勾登录态智能识别 =================
+  function checkIsLoggedIn() {
+    // 1. URL 检测
+    if (location.hostname.includes('passport.lagou.com') || location.pathname.includes('/login')) {
+      return false;
+    }
+    // 2. 存在显式登录/注册按钮
+    const loginBtns = document.querySelectorAll('a[href*="passport.lagou.com/login"], .login-btn, .unlogin-box, .header-login, .login_btn, [data-lg-tj-id="header_login"]');
+    for (const btn of loginBtns) {
+      if (btn.offsetParent !== null && (btn.textContent.includes('登录') || btn.textContent.includes('注册'))) {
+        return false;
+      }
+    }
+    // 3. 弹出了登录弹窗/二维码
+    const loginModal = document.querySelector('.login-modal, #lg_login, .passport-login-container, .modal-login, .modal-dialog .login-box');
+    if (loginModal && loginModal.offsetParent !== null) {
+      return false;
+    }
+    // 4. 登录特征元素检测（个人下拉/头像/用户名）
+    const loggedInIndicators = document.querySelectorAll('.user_dropdown, .user-avatar, .user-info, .avatar_wrap, .login-success');
+    if (loggedInIndicators.length > 0) {
+      return true;
+    }
+    return true;
+  }
+
+  let isSkipped = false;
+
   // ================= 巡航运行逻辑 =================
   async function startAutopilot(targetCount = 10, isFromPipeline = false) {
     if (isRunning) return;
     refreshConfig();
+    isSkipped = false;
+
+    // 智能登录态检测
+    if (!checkIsLoggedIn()) {
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD('<span class="highlight" style="color:#f59e0b;">[未登录检测]</span> 未检测到拉勾登录状态，全网流水线自动跳过本站...');
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_SKIPPED',
+          site: 'lagou',
+          reason: '未登录账号'
+        });
+        return;
+      } else {
+        alert('⚠️ 检测到您尚未登录拉勾招聘（或会话已过期）！\n请先在页面右上角登录后再开启自动巡航。');
+        return;
+      }
+    }
 
     if (todayCount >= (config.dailyLimit || 30)) {
       alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
@@ -736,7 +782,7 @@
       const finalCount = sessionCount;
       stopAutopilot();
 
-      if (wasPipeline) {
+      if (wasPipeline && !isSkipped) {
         logHUD(`<span class="success">[本站目标达成]</span> 已完成 ${finalCount} 个，汇报至全网巡航中枢...`);
         chrome.runtime.sendMessage({
           type: 'PIPELINE_SITE_FINISHED',
@@ -791,6 +837,18 @@
       }
 
       if (!jobCards || jobCards.length === 0) {
+        if (!checkIsLoggedIn()) {
+          isSkipped = true;
+          logHUD('<span class="highlight" style="color:#f59e0b;">[未登录检测]</span> 拉勾页面为未登录状态，全网流水线自动跳过本站...');
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_SKIPPED',
+              site: 'lagou',
+              reason: '未登录账号'
+            });
+          }
+          break;
+        }
         logHUD('<span class="skip">当前未检测到职位卡片，请确保在拉勾深圳职位列表页。</span>');
         break;
       }
@@ -799,6 +857,19 @@
         if (!isRunning) break;
         while (isPaused) await sleep(1000);
         if (sessionCount >= pipelineTarget) break;
+
+        if (!checkIsLoggedIn()) {
+          isSkipped = true;
+          logHUD('<span class="highlight" style="color:#ef4444;">[登录态失效]</span> 检测到登录弹窗，已安全跳过本站...');
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_SKIPPED',
+              site: 'lagou',
+              reason: '弹出登录弹窗'
+            });
+          }
+          break;
+        }
 
         const card = jobCards[i];
         if (card.dataset.ziaverHandled === 'true') continue;

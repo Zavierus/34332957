@@ -603,8 +603,55 @@
     if (compactSess) compactSess.textContent = sessionCount;
   }
 
-  async function startLiepinCruise(target = 10, isFromPipeline = false) {
+  // ================= 猎聘登录态智能识别 =================
+  function checkIsLoggedIn() {
+    // 1. URL 检测
+    if (location.pathname.includes('/login') || location.hostname.includes('passport.liepin.com')) {
+      return false;
+    }
+    // 2. 存在显式未登录/登录按钮
+    const loginBtns = document.querySelectorAll('.header-login-btn, a[href*="/login/"], .user-menu-item a[href*="login"], .quick-login-btn, .btn-login');
+    for (const btn of loginBtns) {
+      if (btn.offsetParent !== null && (btn.textContent.includes('登录') || btn.textContent.includes('注册'))) {
+        return false;
+      }
+    }
+    // 3. 弹出了登录/扫码弹窗
+    const loginModal = document.querySelector('.login-modal-wrapper, .quick-login-wrap, .scan-code-login, .ant-modal-content .login-container');
+    if (loginModal && loginModal.offsetParent !== null) {
+      return false;
+    }
+    // 4. 登录特征元素检测（头像/用户名/个人菜单）
+    const loggedInIndicators = document.querySelectorAll('.header-avatar-box, .user-name, .user-menu-item .avatar, .nav-user-info, [data-selector="header-avatar"]');
+    if (loggedInIndicators.length > 0) {
+      return true;
+    }
+    return true;
+  }
+
+  let isSkipped = false;
+
+  async function startLiepinCruise(target = null, isFromPipeline = false) {
     refreshConfig();
+    isSkipped = false;
+
+    // 智能登录态检测
+    if (!checkIsLoggedIn()) {
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD('<span class="highlight" style="color:#f59e0b;">[未登录检测]</span> 未检测到猎聘登录状态，全网流水线自动跳过本站...');
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_SKIPPED',
+          site: 'liepin',
+          reason: '未登录账号'
+        });
+        return;
+      } else {
+        alert('⚠️ 检测到您尚未登录猎聘网（或会话已过期）！\n请先在页面右上角完成登录后再开启自动巡航。');
+        return;
+      }
+    }
+
     if (todayCount >= (config.dailyLimit || 30)) {
       alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
       return;
@@ -640,7 +687,7 @@
       const wasPipeline = pipelineMode;
       const finalCount = sessionCount;
       stopLiepinCruise();
-      if (wasPipeline) {
+      if (wasPipeline && !isSkipped) {
         logHUD(`<span class="highlight">[本站目标达成]</span> 已完成 ${finalCount} 个，汇报至全网巡航中枢...`);
         chrome.runtime.sendMessage({
           type: 'PIPELINE_SITE_FINISHED',
@@ -694,6 +741,18 @@
       }
 
       if (!cards || cards.length === 0) {
+        if (!checkIsLoggedIn()) {
+          isSkipped = true;
+          logHUD('<span class="highlight" style="color:#f59e0b;">[未登录检测]</span> 猎聘页面为未登录状态，全网流水线自动跳过本站...');
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_SKIPPED',
+              site: 'liepin',
+              reason: '未登录账号'
+            });
+          }
+          break;
+        }
         logHUD('<span class="skip">未找到职位卡片，请确保在猎聘职位列表页。</span>');
         break;
       }
@@ -708,6 +767,19 @@
 
         if (todayCount >= (config.dailyLimit || 30)) break;
         if (pipelineMode && sessionCount >= pipelineTarget) break;
+
+        if (!checkIsLoggedIn()) {
+          isSkipped = true;
+          logHUD('<span class="highlight" style="color:#ef4444;">[登录态失效]</span> 检测到登录弹窗，已安全跳过本站...');
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_SKIPPED',
+              site: 'liepin',
+              reason: '弹出登录弹窗'
+            });
+          }
+          break;
+        }
 
         const card = cards[i];
         if (card.dataset.ziaverHandled === 'true') continue;
