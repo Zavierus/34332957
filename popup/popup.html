@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>JobCruise 求职自动化助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 头部导航 -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-avatar">⚡</div>
+        <div>
+          <div class="brand-title">JobCruise 求职巡航 <span style="font-size:10px; background:rgba(0,242,254,0.15); color:#00f2fe; padding:1px 6px; border-radius:10px; margin-left:4px; font-weight:600;">v2.3</span></div>
+          <div class="brand-sub">高亮词条匹配 · 投递表格中心</div>
+        </div>
+      </div>
+      <button class="open-dash-btn" id="btn-open-full-dashboard" title="打开全功能后台">🖥️ 完整后台</button>
+    </header>
+
+    <!-- 今日战报卡片 -->
+    <div class="stats-banner">
+      <div class="stats-item">
+        <div class="stats-num" id="stat-today-count">0</div>
+        <div class="stats-label">今日已投递</div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stats-item">
+        <div class="stats-num" id="stat-daily-limit">30</div>
+        <div class="stats-label">每日安全上限</div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stats-item">
+        <div class="stats-num" id="stat-active-tags" style="color:#00f2fe;">0</div>
+        <div class="stats-label">生效高亮词条</div>
+      </div>
+    </div>
+
+    <!-- 全网流水线自动化巡航面板 -->
+    <div class="pipeline-card" id="pipeline-control-card">
+      <div class="pipeline-header">
+        <div class="pipeline-title">
+          <span style="font-size:15px;">🌐</span>
+          <span>一键今日全网巡航</span>
+          <span class="pipeline-status-badge" id="pipe-status-tag">待命就绪</span>
+        </div>
+        <div class="pipeline-target-selector">
+          <span style="font-size:11px; color:#94a3b8;">每站目标:</span>
+          <select id="pipe-target-select" class="target-select">
+            <option value="5">5 个 / 站</option>
+            <option value="10" selected>10 个 / 站</option>
+            <option value="15">15 个 / 站</option>
+            <option value="20">20 个 / 站</option>
+          </select>
+        </div>
+      </div>
+      <div class="pipeline-desc">
+        多网站全自动交接：<b>BOSS直聘</b> → <b>猎聘网</b> → <b>拉勾招聘</b>。严格高亮词条与9K门槛，达标自动切下一站。
+      </div>
+
+      <div class="pipeline-progress-bar-wrap" id="pipe-progress-wrap" style="display: none;">
+        <div class="pipeline-live-info">
+          <span id="pipe-live-text">正在巡航: BOSS直聘 (0/10)</span>
+          <span id="pipe-percent-text" style="color:#00f2fe; font-weight:700;">0%</span>
+        </div>
+        <div class="pipeline-bar-track">
+          <div class="pipeline-bar-fill" id="pipe-bar-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <div class="pipeline-btn-group">
+        <button class="pipe-start-btn" id="btn-start-pipeline">
+          <span>🚀 一键开启今日全网巡航</span>
+        </button>
+        <button class="pipe-stop-btn" id="btn-stop-pipeline" style="display: none;">
+          <span>🛑 终止全网巡航</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 快捷大按钮：进入完整后台与复盘中心 -->
+    <div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px;">
+      <button class="dash-hero-btn" id="btn-hero-dashboard">
+        <span>🖥️ 打开完整后台控制台</span>
+        <span style="font-size:11px; opacity:0.85;">(管理高亮词条 / 查看导出投递表格 / 参数自定义) ↗</span>
+      </button>
+      <button class="dash-hero-btn" id="btn-hero-retro" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.22) 0%, rgba(59, 130, 246, 0.22) 100%); border-color: rgba(168, 85, 247, 0.5);">
+        <span>🧠 每日投递复盘与战略顾问</span>
+        <span style="font-size:11px; color:#c084fc;">(五维未回复归因 / 行业前沿雷达 / 大厂专项破局) ↗</span>
+      </button>
+    </div>
+
+    <!-- 标签页切换 -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="sites">🎯 目标网站</button>
+      <button class="tab-btn" data-tab="settings">⚙️ 快速参数</button>
+      <button class="tab-btn" data-tab="logs">📋 最近投递</button>
+    </div>
+
+    <!-- Tab 1: 目标网站定制矩阵 -->
+    <div class="tab-content active" id="tab-sites">
+      <div class="site-list">
+        <!-- BOSS 直聘 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">BOSS直聘</span>
+              <span class="badge-tag badge-cyan">全自动巡航</span>
+            </div>
+            <div class="site-desc">只投高亮选中词条 / 动态打招呼 / HR回复双音强提醒</div>
+          </div>
+          <button class="launch-btn" data-url="https://www.zhipin.com/web/geek/job?city=101280600">前往</button>
+        </div>
+
+        <!-- 猎聘网 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">猎聘网 (深圳)</span>
+              <span class="badge-tag badge-purple">中高端应聘</span>
+            </div>
+            <div class="site-desc">高亮词条匹配 / 过滤猎头虚挂外包 / 定制自荐信</div>
+          </div>
+          <button class="launch-btn" data-url="https://www.liepin.com/zhaopin/?city=050090">前往</button>
+        </div>
+
+        <!-- 拉勾招聘 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">拉勾招聘 (深圳)</span>
+              <span class="badge-tag" style="background:rgba(16,185,129,0.2); color:#34d399;">互联网全自动</span>
+            </div>
+            <div class="site-desc">高亮词条匹配 / 薪资门槛拦截 / 动态话术自然沟通</div>
+          </div>
+          <button class="launch-btn" data-url="https://www.lagou.com/wn/jobs?city=%E6%B7%B1%E5%9C%B3">前往</button>
+        </div>
+
+        <!-- 大疆招聘 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">大疆招聘 (DJI)</span>
+              <span class="badge-tag badge-blue">影像/创作者生态</span>
+            </div>
+            <div class="site-desc">一键智能填表 / 5年商业摄影高光注入 / 作品集直达</div>
+          </div>
+          <button class="launch-btn" data-url="https://we.dji.com/zh-CN/social">前往</button>
+        </div>
+
+        <!-- 影石招聘 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">影石 Insta360</span>
+              <span class="badge-tag badge-yellow">全球达人BD/运营</span>
+            </div>
+            <div class="site-desc">达人拓展SOP / 618千万级GMV / 数码极客亮点一键复制</div>
+          </div>
+          <button class="launch-btn" data-url="https://www.insta360.com/careers">前往</button>
+        </div>
+
+        <!-- 腾讯招聘 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">腾讯招聘 (IEG/PCG)</span>
+              <span class="badge-tag badge-sky">游戏/音乐副驾驶</span>
+            </div>
+            <div class="site-desc">硬核游戏机制拆解 / 业务匹配文案 / 秒级自动填表</div>
+          </div>
+          <button class="launch-btn" data-url="https://careers.tencent.com/search.html">前往</button>
+        </div>
+
+        <!-- 字节跳动招聘 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">字节跳动招聘 (社招)</span>
+              <span class="badge-tag badge-indigo">大促实操</span>
+            </div>
+            <div class="site-desc">电商运营与内容矩阵 / 个人自荐文案一键注入</div>
+          </div>
+          <button class="launch-btn" data-url="https://jobs.bytedance.com/">前往</button>
+        </div>
+
+        <div style="font-size:11px; font-weight:700; color:#38bdf8; margin: 10px 0 6px 2px; display:flex; align-items:center; gap:4px;">
+          <span>🎓 大厂校招 / 应届专场 (支持雷达高亮 & 表单自动注入)</span>
+        </div>
+
+        <!-- 腾讯校招 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">腾讯校园招聘</span>
+              <span class="badge-tag badge-sky">校招/补录</span>
+            </div>
+            <div class="site-desc">IEG互娱/PCG长音频 / 毕业生校招与补录通道 / 自动填表</div>
+          </div>
+          <button class="launch-btn" data-url="https://join.qq.com/post.html">前往</button>
+        </div>
+
+        <!-- 字节校招 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">字节跳动校招</span>
+              <span class="badge-tag badge-blue">电商/运营</span>
+            </div>
+            <div class="site-desc">抖音电商/TikTok/社区 / 24-25届大厂回流专场</div>
+          </div>
+          <button class="launch-btn" data-url="https://jobs.bytedance.com/campus/position">前往</button>
+        </div>
+
+        <!-- 大疆校招 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">大疆创新校招</span>
+              <span class="badge-tag badge-cyan">影像/生态</span>
+            </div>
+            <div class="site-desc">无人机与手持云台影像生态 / 5年商业摄影高光</div>
+          </div>
+          <button class="launch-btn" data-url="https://we.dji.com/zh-CN/campus">前往</button>
+        </div>
+
+        <!-- 影石校招 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">影石 Insta360 校招</span>
+              <span class="badge-tag badge-yellow">达人/数码</span>
+            </div>
+            <div class="site-desc">全球达人拓展/新媒体 / 北森系统秒级回填</div>
+          </div>
+          <button class="launch-btn" data-url="https://insta360.zhiye.com/campus">前往</button>
+        </div>
+
+        <!-- 网易校招 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">网易校园招聘</span>
+              <span class="badge-tag" style="background:rgba(244,63,94,0.15); color:#fb7185;">互娱/音乐</span>
+            </div>
+            <div class="site-desc">互娱游戏运营/云音乐内容 / 表单快速回填</div>
+          </div>
+          <button class="launch-btn" data-url="https://campus.163.com/">前往</button>
+        </div>
+
+        <!-- 米哈游校招 -->
+        <div class="site-card">
+          <div class="site-info">
+            <div class="site-title-row">
+              <span class="site-name">米哈游校招</span>
+              <span class="badge-tag" style="background:rgba(6,182,212,0.15); color:#22d3ee;">二次元/社区</span>
+            </div>
+            <div class="site-desc">核心玩家运营/同人生态 / 万小时游戏模型拆解</div>
+          </div>
+          <button class="launch-btn" data-url="https://jobs.mihoyo.com/campus-recruitment/mihoyo/position">前往</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: 快速参数 -->
+    <div class="tab-content" id="tab-settings">
+      <form id="settings-form">
+        <div class="form-group">
+          <label for="cfg-daily-limit">每日安全投递上限</label>
+          <div class="input-with-unit">
+            <input type="number" id="cfg-daily-limit" min="5" max="60" value="30">
+            <span class="unit">个 / 天</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>投递间隔延迟 (拟人化防风控)</label>
+          <div class="range-row">
+            <div class="input-with-unit">
+              <input type="number" id="cfg-min-delay" min="5" max="30" value="9">
+              <span class="unit">秒</span>
+            </div>
+            <span style="color:#64748b;">至</span>
+            <div class="input-with-unit">
+              <input type="number" id="cfg-max-delay" min="10" max="60" value="15">
+              <span class="unit">秒</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-min-salary">最低薪资门槛</label>
+          <div class="input-with-unit">
+            <input type="number" id="cfg-min-salary" min="5" max="30" value="9">
+            <span class="unit">K</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-blacklist">企业/标签黑名单 (触发跳过)</label>
+          <textarea id="cfg-blacklist" rows="2" placeholder="外包,单休,大小周,电话销售,无底薪,客服,劳务派遣"></textarea>
+        </div>
+
+        <button type="submit" class="save-btn" id="btn-save-settings">💾 保存快速设置</button>
+      </form>
+    </div>
+
+    <!-- Tab 3: 最近投递 -->
+    <div class="tab-content" id="tab-logs">
+      <div class="log-container" id="log-list">
+        <div class="empty-log">暂无今日投递记录。可在完整后台查看详细报表与导出表格。</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>JobCruise · 开源求职巡航助手</span>
+      <span class="status-indicator">🟢 巡航核心运行中</span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

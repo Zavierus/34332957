@@ -1,0 +1,456 @@
+// JobCruise 求职自动化助手 - Background Service Worker v2.3 (Manifest V3)
+
+const DEFAULT_JOB_TAGS = [
+  // 1. 电商/达人赛道 (17个)
+  { id: 'tag_1', category: '电商/达人', name: '达人运营', active: true },
+  { id: 'tag_2', category: '电商/达人', name: '电商运营', active: true },
+  { id: 'tag_3', category: '电商/达人', name: '千川投放', active: true },
+  { id: 'tag_4', category: '电商/达人', name: '直播运营', active: true },
+  { id: 'tag_5', category: '电商/达人', name: '达播BD', active: true },
+  { id: 'tag_6', category: '电商/达人', name: '店铺运营', active: true },
+  { id: 'tag_7', category: '电商/达人', name: '流量增长', active: true },
+  { id: 'tag_8', category: '电商/达人', name: 'KOL运营', active: true },
+  { id: 'tag_9', category: '电商/达人', name: 'KOC运营', active: true },
+  { id: 'tag_10', category: '电商/达人', name: '达人拓展', active: true },
+  { id: 'tag_11', category: '电商/达人', name: '主播运营', active: true },
+  { id: 'tag_12', category: '电商/达人', name: '直播间运营', active: true },
+  { id: 'tag_13', category: '电商/达人', name: '巨量千川', active: true },
+  { id: 'tag_14', category: '电商/达人', name: '信息流投放', active: true },
+  { id: 'tag_15', category: '电商/达人', name: '商家运营', active: true },
+  { id: 'tag_16', category: '电商/达人', name: '选品运营', active: true },
+  { id: 'tag_17', category: '电商/达人', name: 'TikTok运营', active: true },
+
+  // 2. 游戏/社区赛道 (17个)
+  { id: 'tag_18', category: '游戏/社区', name: '游戏运营', active: true },
+  { id: 'tag_19', category: '游戏/社区', name: '游戏社区', active: true },
+  { id: 'tag_20', category: '游戏/社区', name: '玩家运营', active: true },
+  { id: 'tag_21', category: '游戏/社区', name: '电竞赛事', active: true },
+  { id: 'tag_22', category: '游戏/社区', name: '游戏策划', active: true },
+  { id: 'tag_23', category: '游戏/社区', name: '社群运营', active: true },
+  { id: 'tag_24', category: '游戏/社区', name: '游戏发行', active: true },
+  { id: 'tag_25', category: '游戏/社区', name: '游戏活动运营', active: true },
+  { id: 'tag_26', category: '游戏/社区', name: '版本运营', active: true },
+  { id: 'tag_27', category: '游戏/社区', name: '游戏商业化', active: true },
+  { id: 'tag_28', category: '游戏/社区', name: '核心玩家生态', active: true },
+  { id: 'tag_29', category: '游戏/社区', name: '游戏创作者生态', active: true },
+  { id: 'tag_30', category: '游戏/社区', name: '游戏二创运营', active: true },
+  { id: 'tag_31', category: '游戏/社区', name: '二次元游戏', active: true },
+  { id: 'tag_32', category: '游戏/社区', name: '电竞运营', active: true },
+  { id: 'tag_33', category: '游戏/社区', name: '海外游戏社区', active: true },
+  { id: 'tag_34', category: '游戏/社区', name: 'TapTap运营', active: true },
+
+  // 3. 影像/视觉赛道 (17个)
+  { id: 'tag_35', category: '影像/视觉', name: '商业摄影', active: true },
+  { id: 'tag_36', category: '影像/视觉', name: '视频编导', active: true },
+  { id: 'tag_37', category: '影像/视觉', name: '视觉策划', active: true },
+  { id: 'tag_38', category: '影像/视觉', name: '数码影像', active: true },
+  { id: 'tag_39', category: '影像/视觉', name: '内容运营', active: true },
+  { id: 'tag_40', category: '影像/视觉', name: '短视频运营', active: true },
+  { id: 'tag_41', category: '影像/视觉', name: '商业摄影师', active: true },
+  { id: 'tag_42', category: '影像/视觉', name: '产品摄影', active: true },
+  { id: 'tag_43', category: '影像/视觉', name: '静物摄影', active: true },
+  { id: 'tag_44', category: '影像/视觉', name: '人像摄影', active: true },
+  { id: 'tag_45', category: '影像/视觉', name: '修图师', active: true },
+  { id: 'tag_46', category: '影像/视觉', name: '调色师', active: true },
+  { id: 'tag_47', category: '影像/视觉', name: '视频剪辑', active: true },
+  { id: 'tag_48', category: '影像/视觉', name: '短视频编导', active: true },
+  { id: 'tag_49', category: '影像/视觉', name: '美术策划', active: true },
+  { id: 'tag_50', category: '影像/视觉', name: '3D视觉', active: true },
+  { id: 'tag_51', category: '影像/视觉', name: 'AIGC内容', active: true },
+
+  // 4. 音乐/音频赛道 (8个)
+  { id: 'tag_52', category: '音乐/音频', name: '音乐运营', active: true },
+  { id: 'tag_53', category: '音乐/音频', name: '音频内容', active: true },
+  { id: 'tag_54', category: '音乐/音频', name: '汽水音乐', active: true },
+  { id: 'tag_55', category: '音乐/音频', name: '音乐版权运营', active: true },
+  { id: 'tag_56', category: '音乐/音频', name: '音乐宣发', active: true },
+  { id: 'tag_57', category: '音乐/音频', name: '音乐企划', active: true },
+  { id: 'tag_58', category: '音乐/音频', name: '流媒体运营', active: true },
+  { id: 'tag_59', category: '音乐/音频', name: '播客运营', active: true },
+
+  // 5. 综合/市场赛道 (10个)
+  { id: 'tag_60', category: '综合/市场', name: '综合运营', active: true },
+  { id: 'tag_61', category: '综合/市场', name: '品牌市场', active: true },
+  { id: 'tag_62', category: '综合/市场', name: '活动策划', active: true },
+  { id: 'tag_63', category: '综合/市场', name: '新媒体运营', active: true },
+  { id: 'tag_64', category: '综合/市场', name: '用户运营', active: true },
+  { id: 'tag_65', category: '综合/市场', name: '用户增长', active: true },
+  { id: 'tag_66', category: '综合/市场', name: '内容营销', active: true },
+  { id: 'tag_67', category: '综合/市场', name: '整合营销', active: true },
+  { id: 'tag_68', category: '综合/市场', name: 'KOL媒介投放', active: true },
+  { id: 'tag_69', category: '综合/市场', name: '品牌公关', active: true }
+];
+
+const DEFAULT_GREETING = '您好！看到咱们在招「{jobTitle}」，感觉整体要求跟我还蛮匹配的。我有相关业务实战经验，执行力强、看重数据和实际业务落地。简历在附件中，如果合适随时沟通交流，祝您工作顺利、天天开心～';
+
+function initOrUpdateStorage() {
+  chrome.storage.local.get(['config', 'jobTags', 'applyLog'], (res) => {
+    const today = new Date().toISOString().split('T')[0];
+    const initialConfig = {
+      dailyLimit: 30,
+      minDelaySec: 9,
+      maxDelaySec: 15,
+      minSalaryK: 9,
+      audioAlert: true,
+      desktopNotification: true,
+      blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,培训生',
+      enableDynamicGreeting: true,
+      useCustomGreeting: true,
+      customGreetingTemplate: DEFAULT_GREETING,
+      lastActiveDate: today,
+      todayCount: 0
+    };
+
+    const updates = {};
+
+    // 1. 配置项智能合并
+    if (!res.config) {
+      updates.config = initialConfig;
+    } else {
+      const mergedConfig = { ...initialConfig, ...res.config };
+      // 若尚未设置过话术，赋默认新风格
+      if (!res.config.customGreetingTemplate) {
+        mergedConfig.customGreetingTemplate = DEFAULT_GREETING;
+        mergedConfig.useCustomGreeting = true;
+      }
+      updates.config = mergedConfig;
+    }
+
+    // 2. 词条库无损增量合并
+    if (!res.jobTags || res.jobTags.length === 0) {
+      updates.jobTags = DEFAULT_JOB_TAGS;
+    } else {
+      const existingNames = new Set(res.jobTags.map(t => (t.name || '').trim().toLowerCase()));
+      const newTagsToAdd = DEFAULT_JOB_TAGS.filter(t => !existingNames.has((t.name || '').trim().toLowerCase()));
+      if (newTagsToAdd.length > 0) {
+        updates.jobTags = [...res.jobTags, ...newTagsToAdd];
+        console.log(`[ZIAVER Autopilot] 词库增量合并已追加 ${newTagsToAdd.length} 个新词条`);
+      }
+    }
+
+    // 3. 投递日志保护
+    if (!res.applyLog) {
+      updates.applyLog = [];
+    }
+
+    if (Object.keys(updates).length > 0) {
+      chrome.storage.local.set(updates, () => {
+        console.log('[ZIAVER Autopilot] 插件存储状态已无损更新');
+      });
+    }
+  });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('[ZIAVER Autopilot] 插件安装/更新');
+  initOrUpdateStorage();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  console.log('[ZIAVER Autopilot] 浏览器启动检查');
+  initOrUpdateStorage();
+});
+
+// Service Worker 加载时立即执行一次增量同步检查，保证重载即时生效
+initOrUpdateStorage();
+
+// ================= 全网多平台流水线巡航调度中心 (Pipeline Engine) =================
+const PIPELINE_SITES = [
+  {
+    id: 'boss',
+    name: 'BOSS直聘',
+    url: 'https://www.zhipin.com/web/geek/job?city=101280600',
+    matchUrl: '*://*.zhipin.com/*'
+  },
+  {
+    id: 'liepin',
+    name: '猎聘网',
+    url: 'https://www.liepin.com/zhaopin/?city=050090',
+    matchUrl: '*://*.liepin.com/*'
+  },
+  {
+    id: 'lagou',
+    name: '拉勾招聘',
+    url: 'https://www.lagou.com/wn/jobs?city=%E6%B7%B1%E5%9C%B3',
+    matchUrl: '*://*.lagou.com/*'
+  }
+];
+
+let cruisePipeline = {
+  isActive: false,
+  perSiteTarget: 10,
+  currentIndex: 0,
+  currentSiteCount: 0,
+  activeTabId: null,
+  siteStats: {}
+};
+
+function startCruisePipeline(perSiteTarget = 10) {
+  cruisePipeline.isActive = true;
+  cruisePipeline.perSiteTarget = perSiteTarget;
+  cruisePipeline.currentIndex = 0;
+  cruisePipeline.currentSiteCount = 0;
+  cruisePipeline.siteStats = {};
+
+  chrome.notifications.create('pipeline_start_' + Date.now(), {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+    title: '🚀 全网流水线巡航已开启！',
+    message: `目标: 每个平台各投递 ${perSiteTarget} 个符合高亮词条与薪资门槛的岗位。第一站：【${PIPELINE_SITES[0].name}】`,
+    priority: 2
+  });
+
+  launchCurrentPipelineSite();
+}
+
+function stopCruisePipeline() {
+  cruisePipeline.isActive = false;
+
+  // 广播停止指令至所有页面
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach(t => {
+      chrome.tabs.sendMessage(t.id, { type: 'STOP_CRUISE_PIPELINE' }, () => {
+        if (chrome.runtime.lastError) { /* ignore */ }
+      });
+    });
+  });
+
+  chrome.notifications.create('pipeline_stop_' + Date.now(), {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+    title: '🛑 全网流水线巡航已终止',
+    message: '已向各网页发送停止指令，所有自动操作已安全退出。',
+    priority: 1
+  });
+}
+
+function launchCurrentPipelineSite() {
+  if (!cruisePipeline.isActive) return;
+
+  if (cruisePipeline.currentIndex >= PIPELINE_SITES.length) {
+    finishEntirePipeline();
+    return;
+  }
+
+  const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex];
+  cruisePipeline.currentSiteCount = 0;
+
+  chrome.notifications.create('site_switch_' + Date.now(), {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+    title: `🌐 巡航切换：第 ${cruisePipeline.currentIndex + 1}/${PIPELINE_SITES.length} 站【${currentSite.name}】`,
+    message: `正在自动打开或聚焦 ${currentSite.name}，并启动定向高亮匹配巡航...`,
+    priority: 2
+  });
+
+  openOrSwitchToSite(currentSite.url, currentSite.matchUrl, (tabId) => {
+    cruisePipeline.activeTabId = tabId;
+    // 页面完全就绪后下发启动巡航指令
+    sendPipelineMessageWithRetry(tabId, {
+      type: 'START_PIPELINE_RUN',
+      target: cruisePipeline.perSiteTarget,
+      siteId: currentSite.id
+    }, 4);
+  });
+}
+
+function openOrSwitchToSite(url, matchUrl, callback) {
+  chrome.tabs.query({ url: matchUrl }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      const tab = tabs[0];
+      chrome.windows.update(tab.windowId, { focused: true });
+      chrome.tabs.update(tab.id, { active: true, url: url }, (updatedTab) => {
+        waitForTabComplete(updatedTab.id, callback);
+      });
+    } else {
+      chrome.tabs.create({ url, active: true }, (newTab) => {
+        waitForTabComplete(newTab.id, callback);
+      });
+    }
+  });
+}
+
+function waitForTabComplete(tabId, callback) {
+  const listener = (tid, changeInfo) => {
+    if (tid === tabId && changeInfo.status === 'complete') {
+      chrome.tabs.onUpdated.removeListener(listener);
+      setTimeout(() => {
+        callback(tabId);
+      }, 3000);
+    }
+  };
+  chrome.tabs.onUpdated.addListener(listener);
+
+  // 防御性超时 fallback
+  setTimeout(() => {
+    chrome.tabs.onUpdated.removeListener(listener);
+    callback(tabId);
+  }, 12000);
+}
+
+function sendPipelineMessageWithRetry(tabId, message, retries = 4) {
+  if (!cruisePipeline.isActive) return;
+  chrome.tabs.sendMessage(tabId, message, (response) => {
+    if (chrome.runtime.lastError || !response) {
+      if (retries > 0) {
+        setTimeout(() => {
+          sendPipelineMessageWithRetry(tabId, message, retries - 1);
+        }, 2000);
+      }
+    } else {
+      console.log('[ZIAVER Autopilot] 流水线指令下发成功:', response);
+    }
+  });
+}
+
+function finishEntirePipeline() {
+  cruisePipeline.isActive = false;
+
+  let totalCount = 0;
+  const breakdown = [];
+  Object.keys(cruisePipeline.siteStats).forEach(siteId => {
+    const siteObj = PIPELINE_SITES.find(s => s.id === siteId);
+    const name = siteObj ? siteObj.name : siteId;
+    const count = cruisePipeline.siteStats[siteId] || 0;
+    totalCount += count;
+    breakdown.push(`${name}: ${count}个`);
+  });
+
+  chrome.notifications.create('pipeline_complete_' + Date.now(), {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+    title: '🎉 今日全网巡航大功告成！',
+    message: `已自动完成全部目标平台投递！累计精准沟通 ${totalCount} 家企业 (${breakdown.join('，')})。详细记录已全部存入报表！`,
+    priority: 2,
+    requireInteraction: true
+  });
+}
+
+// 处理来自各页面的消息通信
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'START_CRUISE_PIPELINE') {
+    const target = request.perSiteTarget || 10;
+    startCruisePipeline(target);
+    sendResponse({ status: 'ok', pipeline: cruisePipeline });
+    return true;
+  } else if (request.type === 'STOP_CRUISE_PIPELINE') {
+    stopCruisePipeline();
+    sendResponse({ status: 'ok' });
+    return true;
+  } else if (request.type === 'GET_PIPELINE_STATUS') {
+    const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex] || null;
+    sendResponse({
+      ...cruisePipeline,
+      currentSite,
+      sites: PIPELINE_SITES
+    });
+    return true;
+  } else if (request.type === 'PIPELINE_SITE_PROGRESS') {
+    cruisePipeline.currentSiteCount = request.count || 0;
+    if (request.site) {
+      cruisePipeline.siteStats[request.site] = request.count;
+    }
+    sendResponse({ status: 'ok' });
+    return true;
+  } else if (request.type === 'PIPELINE_SITE_FINISHED') {
+    const finishedSiteId = request.site;
+    const count = request.count || 0;
+    cruisePipeline.siteStats[finishedSiteId] = count;
+
+    const finishedSiteObj = PIPELINE_SITES.find(s => s.id === finishedSiteId);
+    const siteName = finishedSiteObj ? finishedSiteObj.name : finishedSiteId;
+
+    chrome.notifications.create('site_finished_' + Date.now(), {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+      title: `✅【${siteName}】投递目标已达成 (${count}个)！`,
+      message: '正在为您安全冷却并平滑切换至下一招聘网站...',
+      priority: 2
+    });
+
+    cruisePipeline.currentIndex++;
+    setTimeout(() => {
+      launchCurrentPipelineSite();
+    }, 3500);
+
+    sendResponse({ status: 'next_site_triggered' });
+    return true;
+  } else if (request.type === 'HR_REPLY_ALERT') {
+    // HR 新消息回复系统桌面强提醒
+    chrome.notifications.create('hr_reply_' + Date.now(), {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+      title: '🔔 BOSS 直聘 · 检测到 HR 新回复！',
+      message: request.text || '有企业 HR 正在与您互动，请切换回浏览器及时跟进！',
+      priority: 2,
+      requireInteraction: true
+    });
+    sendResponse({ status: 'ok' });
+  } else if (request.type === 'APPLY_LOG') {
+    // 写入投递记录表格
+    chrome.storage.local.get(['config', 'applyLog'], (res) => {
+      const config = res.config || {};
+      const today = new Date().toISOString().split('T')[0];
+      if (config.lastActiveDate !== today) {
+        config.lastActiveDate = today;
+        config.todayCount = 0;
+      }
+      config.todayCount = (config.todayCount || 0) + 1;
+      
+      const log = res.applyLog || [];
+      const now = new Date();
+      const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      
+      log.unshift({
+        id: Date.now(),
+        time: timeStr,
+        platform: request.data.platform || 'BOSS直聘',
+        company: request.data.company || '企业',
+        title: request.data.title || '运营',
+        salary: request.data.salary || '面议',
+        matchedTag: request.data.matchedTag || '综合匹配',
+        greeting: request.data.greeting || '',
+        status: request.data.status || '已沟通'
+      });
+
+      // 保持最近 500 条详尽记录
+      if (log.length > 500) log.pop();
+
+      chrome.storage.local.set({ config, applyLog: log }, () => {
+        sendResponse({ success: true, count: config.todayCount });
+      });
+    });
+    return true;
+  } else if (request.type === 'OPEN_PAGE') {
+    // 跨页面切换调度
+    if (request.url) {
+      chrome.tabs.create({ 
+        url: request.url, 
+        active: request.active !== undefined ? request.active : true 
+      });
+      sendResponse({ status: 'ok' });
+    }
+  } else if (request.type === 'BATCH_OPEN_PAGES') {
+    // 批量在后台标签页打开职位（防浏览器卡死，间隔打开）
+    const urls = request.urls || [];
+    let opened = 0;
+    urls.forEach((url, idx) => {
+      setTimeout(() => {
+        chrome.tabs.create({ url, active: false });
+      }, idx * 600);
+      opened++;
+    });
+    sendResponse({ status: 'ok', count: opened });
+    return true;
+  }
+});
+
+// 点击桌面通知时，自动切换聚焦到招聘标签页
+chrome.notifications.onClicked.addListener(() => {
+  chrome.tabs.query({ url: ['*://*.zhipin.com/*', '*://*.liepin.com/*', '*://*.lagou.com/*'] }, (tabs) => {
+    if (tabs.length > 0) {
+      chrome.windows.update(tabs[0].windowId, { focused: true });
+      chrome.tabs.update(tabs[0].id, { active: true });
+    }
+  });
+});

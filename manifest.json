@@ -1,0 +1,100 @@
+{
+  "manifest_version": 3,
+  "name": "JobCruise - 求职自动化巡航助手 (Job Autopilot)",
+  "version": "2.3.0",
+  "description": "现代化智能求职巡航框架。支持多招聘平台全自动流水线协同巡航、职业词条高亮匹配、投递复盘归因诊断与大厂网申辅助。",
+  "icons": {
+    "16": "icons/icon_16.png",
+    "48": "icons/icon_48.png",
+    "128": "icons/icon_128.png"
+  },
+  "permissions": [
+    "storage",
+    "notifications",
+    "activeTab"
+  ],
+  "options_page": "dashboard/dashboard.html",
+  "host_permissions": [
+    "*://*.zhipin.com/*",
+    "*://*.liepin.com/*",
+    "*://*.lagou.com/*",
+    "*://we.dji.com/*",
+    "*://dji.zhiye.com/*",
+    "*://*.insta360.com/*",
+    "*://arashivision.zhiye.com/*",
+    "*://careers.tencent.com/*",
+    "*://join.qq.com/*",
+    "*://tencent.zhiye.com/*",
+    "*://jobs.bytedance.com/*",
+    "*://job.bytedance.com/*",
+    "*://jobs.toutiao.com/*",
+    "*://join.163.com/*",
+    "*://campus.163.com/*",
+    "*://hr.163.com/*",
+    "*://*.mihoyo.com/*",
+    "*://*.zhiye.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon_16.png",
+      "48": "icons/icon_48.png"
+    },
+    "default_title": "JobCruise 求职自动化助手"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.zhipin.com/*"
+      ],
+      "js": [
+        "content_boss.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.liepin.com/*"
+      ],
+      "js": [
+        "content_liepin.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.lagou.com/*"
+      ],
+      "js": [
+        "content_lagou.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://we.dji.com/*",
+        "*://dji.zhiye.com/*",
+        "*://*.insta360.com/*",
+        "*://arashivision.zhiye.com/*",
+        "*://careers.tencent.com/*",
+        "*://join.qq.com/*",
+        "*://tencent.zhiye.com/*",
+        "*://jobs.bytedance.com/*",
+        "*://job.bytedance.com/*",
+        "*://jobs.toutiao.com/*",
+        "*://join.163.com/*",
+        "*://campus.163.com/*",
+        "*://hr.163.com/*",
+        "*://*.mihoyo.com/*",
+        "*://*.zhiye.com/*"
+      ],
+      "js": [
+        "content_ats.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

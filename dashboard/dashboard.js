@@ -1,0 +1,908 @@
+// JobCruise 求职自动化后台控制中心 Controller v2.3
+
+document.addEventListener('DOMContentLoaded', () => {
+  // 1. 侧边栏导航切换
+  const navItems = document.querySelectorAll('.nav-item');
+  const viewPanels = document.querySelectorAll('.view-panel');
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const targetView = item.getAttribute('data-view');
+      navItems.forEach(n => n.classList.remove('active'));
+      viewPanels.forEach(p => p.classList.remove('active'));
+
+      item.classList.add('active');
+      const panel = document.getElementById(targetView);
+      if (panel) panel.classList.add('active');
+    });
+  });
+
+  // 2. 状态变量
+  let currentTags = [];
+  let currentLogs = [];
+  let currentConfig = {};
+
+  // 3. 数据初始化
+  function loadAllData() {
+    chrome.storage.local.get(['jobTags', 'applyLog', 'config'], (res) => {
+      currentTags = res.jobTags || [];
+      currentLogs = res.applyLog || [];
+      currentConfig = res.config || {};
+
+      renderTagsLibrary();
+      renderLogTable();
+      populateSettings();
+      updateBadges();
+    });
+  }
+
+  function updateBadges() {
+    const activeCount = currentTags.filter(t => t.active).length;
+    document.getElementById('sidebar-tag-count').textContent = activeCount;
+    document.getElementById('sidebar-log-count').textContent = currentLogs.length;
+
+    const dashPipeTagsEl = document.getElementById('dash-pipe-active-tags-num');
+    if (dashPipeTagsEl) dashPipeTagsEl.textContent = activeCount;
+
+    // 今日统计
+    const today = new Date().toISOString().split('T')[0];
+    const todayCount = currentLogs.filter(l => (l.time || '').startsWith(today)).length;
+    document.getElementById('stat-today-applied').textContent = todayCount;
+    document.getElementById('stat-total-applied').textContent = currentLogs.length;
+  }
+
+  // ================= 4. 职业词条高亮选择库 =================
+  const tagsContainer = document.getElementById('tags-category-list');
+
+  function renderTagsLibrary() {
+    tagsContainer.innerHTML = '';
+
+    // 按分类聚合
+    const grouped = {};
+    currentTags.forEach(tag => {
+      const cat = tag.category || '其他分类';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(tag);
+    });
+
+    const categoryIcons = {
+      '电商/达人': '🛍️',
+      '游戏/社区': '🎮',
+      '影像/视觉': '📷',
+      '音乐/音频': '🎵',
+      '综合/市场': '⚡'
+    };
+
+    Object.keys(grouped).forEach(cat => {
+      const card = document.createElement('div');
+      card.className = 'category-card';
+
+      const tagsInCat = grouped[cat];
+      const activeInCat = tagsInCat.filter(t => t.active).length;
+      const icon = categoryIcons[cat] || '📌';
+
+      card.innerHTML = `
+        <div class="category-header">
+          <div class="category-title">
+            <span>${icon}</span>
+            <span>${cat}</span>
+          </div>
+          <div class="category-stats">已高亮: ${activeInCat} / ${tagsInCat.length}</div>
+        </div>
+        <div class="chips-wrap" id="chips-${cat}"></div>
+      `;
+
+      const chipsWrap = card.querySelector('.chips-wrap');
+      tagsInCat.forEach(tag => {
+        const chip = document.createElement('div');
+        chip.className = `tag-chip ${tag.active ? 'active' : ''}`;
+        chip.setAttribute('data-id', tag.id);
+        chip.innerHTML = `
+          <span class="chip-check">${tag.active ? '✓' : '+'}</span>
+          <span>${tag.name}</span>
+          ${tag.id.startsWith('custom_') ? '<span class="chip-remove" title="删除词条">×</span>' : ''}
+        `;
+
+        // 点击切换高亮状态
+        chip.addEventListener('click', (e) => {
+          if (e.target.classList.contains('chip-remove')) {
+            // 删除自定义词条
+            currentTags = currentTags.filter(t => t.id !== tag.id);
+            saveTags();
+            return;
+          }
+          tag.active = !tag.active;
+          saveTags();
+        });
+
+        chipsWrap.appendChild(chip);
+      });
+
+      tagsContainer.appendChild(card);
+    });
+  }
+
+  function saveTags() {
+    chrome.storage.local.set({ jobTags: currentTags }, () => {
+      renderTagsLibrary();
+      updateBadges();
+    });
+  }
+
+  // 全部高亮 / 全部取消
+  document.getElementById('btn-select-all-tags').addEventListener('click', () => {
+    currentTags.forEach(t => t.active = true);
+    saveTags();
+  });
+
+  document.getElementById('btn-unselect-all-tags').addEventListener('click', () => {
+    currentTags.forEach(t => t.active = false);
+    saveTags();
+  });
+
+  // 添加自定义词条弹窗
+  const addModal = document.getElementById('add-tag-modal');
+  document.getElementById('btn-open-add-tag-modal').addEventListener('click', () => {
+    addModal.style.display = 'flex';
+  });
+
+  document.getElementById('btn-close-modal').addEventListener('click', () => {
+    addModal.style.display = 'none';
+  });
+  document.getElementById('btn-cancel-modal').addEventListener('click', () => {
+    addModal.style.display = 'none';
+  });
+
+  document.getElementById('btn-confirm-add-tag').addEventListener('click', () => {
+    const cat = document.getElementById('new-tag-category').value;
+    const nameInput = document.getElementById('new-tag-name');
+    const name = nameInput.value.trim();
+
+    if (!name) {
+      alert('请输入词条名称！');
+      return;
+    }
+
+    currentTags.push({
+      id: 'custom_' + Date.now(),
+      category: cat,
+      name: name,
+      active: true
+    });
+
+    saveTags();
+    nameInput.value = '';
+    addModal.style.display = 'none';
+  });
+
+  // ================= 5. 每日投递记录表格 =================
+  const tableBody = document.getElementById('application-table-body');
+  const searchInput = document.getElementById('table-search-input');
+  const platformFilter = document.getElementById('table-platform-filter');
+
+  function renderLogTable() {
+    const searchVal = searchInput.value.trim().toLowerCase();
+    const platVal = platformFilter.value;
+
+    let filtered = currentLogs.filter(item => {
+      const matchSearch = !searchVal || 
+        (item.company || '').toLowerCase().includes(searchVal) ||
+        (item.title || '').toLowerCase().includes(searchVal);
+      
+      const matchPlat = platVal === 'ALL' || item.platform === platVal;
+      return matchSearch && matchPlat;
+    });
+
+    tableBody.innerHTML = '';
+    if (filtered.length === 0) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center; padding: 40px; color: #64748b;">
+            暂无匹配的投递记录
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    filtered.forEach(log => {
+      const tr = document.createElement('tr');
+      const platClass = log.platform === 'BOSS直聘' ? 'badge-boss' : 
+                        log.platform === '猎聘网' ? 'badge-liepin' : 
+                        log.platform === '拉勾招聘' ? 'badge-lagou' : 'badge-ats';
+
+      tr.innerHTML = `
+        <td>${log.time || ''}</td>
+        <td><span class="badge-platform ${platClass}">${log.platform || 'BOSS直聘'}</span></td>
+        <td style="font-weight:700; color:#fff;">${log.company || ''}</td>
+        <td>${log.title || ''}</td>
+        <td style="color:#00f2fe; font-weight:600;">${log.salary || '面议'}</td>
+        <td><span class="badge-tag-matched">${log.matchedTag || '高亮词条'}</span></td>
+        <td><span style="color:#10b981;">✓ ${log.status || '已沟通'}</span></td>
+        <td><span class="action-link btn-view-greeting" data-id="${log.id}">查看文案</span></td>
+      `;
+
+      tr.querySelector('.btn-view-greeting').addEventListener('click', () => {
+        showGreetingModal(log);
+      });
+
+      tableBody.appendChild(tr);
+    });
+  }
+
+  searchInput.addEventListener('input', renderLogTable);
+  platformFilter.addEventListener('change', renderLogTable);
+
+  // 查看打招呼文案弹窗
+  const greetingModal = document.getElementById('view-greeting-modal');
+  function showGreetingModal(log) {
+    document.getElementById('modal-greeting-title').textContent = `${log.company} · ${log.title} (沟通文案)`;
+    document.getElementById('modal-greeting-text').textContent = log.greeting || '无文案记录';
+    greetingModal.style.display = 'flex';
+  }
+
+  document.getElementById('btn-close-greeting-modal').addEventListener('click', () => {
+    greetingModal.style.display = 'none';
+  });
+
+  // 导出 CSV 表格
+  document.getElementById('btn-export-csv').addEventListener('click', () => {
+    if (currentLogs.length === 0) {
+      alert('当前暂无投递记录可导出！');
+      return;
+    }
+
+    let csvContent = '\uFEFF投递时间,目标平台,企业名称,岗位名称,薪资待遇,匹配的高亮词条,投递状态,打招呼沟通文案\n';
+    currentLogs.forEach(row => {
+      const cleanGreeting = (row.greeting || '').replace(/"/g, '""').replace(/\n/g, ' ');
+      csvContent += `"${row.time}","${row.platform}","${row.company}","${row.title}","${row.salary}","${row.matchedTag}","${row.status}","${cleanGreeting}"\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `JobCruise_每日求职投递报表_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // 清空所有记录
+  document.getElementById('btn-clear-logs').addEventListener('click', () => {
+    if (confirm('确定要清空全部投递历史记录吗？（清空后不可恢复）')) {
+      chrome.storage.local.set({ applyLog: [] }, () => {
+        currentLogs = [];
+        renderLogTable();
+        updateBadges();
+      });
+    }
+  });
+
+  // ================= 6. 跨网页调度中心 =================
+  document.querySelectorAll('.launch-site-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const url = btn.getAttribute('data-url');
+      if (url) {
+        chrome.tabs.create({ url });
+      }
+    });
+  });
+
+  // ================= 7. 全局参数设置 =================
+  const DEFAULT_RECOMMENDED_GREETING = '您好！看到贵司在招「{jobTitle}」，整体要求与我的背景非常契合。我具备相关领域的实操经验，执行力强，注重数据与实际成果落地。简历已附上，期待与您进一步沟通交流，祝您工作顺利、身体健康～';
+
+  function populateSettings() {
+    const cfg = currentConfig;
+    if (cfg.dailyLimit !== undefined) document.getElementById('set-daily-limit').value = cfg.dailyLimit;
+    if (cfg.minSalaryK !== undefined) document.getElementById('set-min-salary').value = cfg.minSalaryK;
+    if (cfg.minDelaySec !== undefined) document.getElementById('set-min-delay').value = cfg.minDelaySec;
+    if (cfg.maxDelaySec !== undefined) document.getElementById('set-max-delay').value = cfg.maxDelaySec;
+    if (cfg.blacklistKeywords !== undefined) document.getElementById('set-blacklist').value = cfg.blacklistKeywords;
+    if (cfg.audioAlert !== undefined) document.getElementById('set-audio-alert').checked = cfg.audioAlert;
+    if (cfg.desktopNotification !== undefined) document.getElementById('set-desktop-notif').checked = cfg.desktopNotification;
+    
+    // 话术设置
+    const greetingBox = document.getElementById('set-custom-greeting');
+    if (greetingBox) {
+      greetingBox.value = cfg.customGreetingTemplate || DEFAULT_RECOMMENDED_GREETING;
+    }
+    const useCustomBox = document.getElementById('set-use-custom-greeting');
+    if (useCustomBox) {
+      useCustomBox.checked = cfg.useCustomGreeting !== false;
+    }
+
+    // 个人资料与档案回显
+    chrome.storage.local.get(['applicantProfile'], (res) => {
+      const prof = res.applicantProfile || {};
+      if (prof.name && document.getElementById('prof-name')) document.getElementById('prof-name').value = prof.name;
+      if (prof.phone && document.getElementById('prof-phone')) document.getElementById('prof-phone').value = prof.phone;
+      if (prof.wechat && document.getElementById('prof-wechat')) document.getElementById('prof-wechat').value = prof.wechat;
+      if (prof.email && document.getElementById('prof-email')) document.getElementById('prof-email').value = prof.email;
+      if (prof.school && document.getElementById('prof-school')) document.getElementById('prof-school').value = prof.school;
+      if (prof.degree && document.getElementById('prof-degree')) document.getElementById('prof-degree').value = prof.degree;
+      if (prof.major && document.getElementById('prof-major')) document.getElementById('prof-major').value = prof.major;
+      if (prof.gradYear && document.getElementById('prof-grad-year')) document.getElementById('prof-grad-year').value = prof.gradYear;
+      if (prof.city && document.getElementById('prof-city')) document.getElementById('prof-city').value = prof.city;
+      if (prof.targetSalary && document.getElementById('prof-salary')) document.getElementById('prof-salary').value = prof.targetSalary;
+      if (prof.portfolioUrl && document.getElementById('prof-portfolio')) document.getElementById('prof-portfolio').value = prof.portfolioUrl;
+
+      if (prof.name && document.getElementById('sidebar-user-name')) {
+        document.getElementById('sidebar-user-name').textContent = prof.name;
+      }
+      if (prof.city && document.getElementById('sidebar-user-city')) {
+        document.getElementById('sidebar-user-city').textContent = `${prof.city} · ${prof.targetSalary || '求职中'}`;
+      }
+    });
+  }
+
+  // 恢复默认话术按钮
+  const btnResetGreeting = document.getElementById('btn-reset-greeting');
+  if (btnResetGreeting) {
+    btnResetGreeting.addEventListener('click', () => {
+      const greetingBox = document.getElementById('set-custom-greeting');
+      if (greetingBox) {
+        greetingBox.value = DEFAULT_RECOMMENDED_GREETING;
+        greetingBox.focus();
+      }
+    });
+  }
+
+  document.getElementById('global-settings-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+
+    const greetingVal = document.getElementById('set-custom-greeting')?.value.trim() || DEFAULT_RECOMMENDED_GREETING;
+    const useCustomVal = document.getElementById('set-use-custom-greeting')?.checked ?? true;
+
+    const newConfig = {
+      ...currentConfig,
+      dailyLimit: parseInt(document.getElementById('set-daily-limit').value, 10) || 30,
+      minSalaryK: parseInt(document.getElementById('set-min-salary').value, 10) || 9,
+      minDelaySec: parseInt(document.getElementById('set-min-delay').value, 10) || 9,
+      maxDelaySec: parseInt(document.getElementById('set-max-delay').value, 10) || 15,
+      blacklistKeywords: document.getElementById('set-blacklist').value.trim(),
+      audioAlert: document.getElementById('set-audio-alert').checked,
+      desktopNotification: document.getElementById('set-desktop-notif').checked,
+      customGreetingTemplate: greetingVal,
+      useCustomGreeting: useCustomVal,
+      portfolioUrl: document.getElementById('prof-portfolio')?.value.trim() || ''
+    };
+
+    const newProfile = {
+      name: document.getElementById('prof-name')?.value.trim() || '',
+      phone: document.getElementById('prof-phone')?.value.trim() || '',
+      wechat: document.getElementById('prof-wechat')?.value.trim() || '',
+      email: document.getElementById('prof-email')?.value.trim() || '',
+      school: document.getElementById('prof-school')?.value.trim() || '',
+      degree: document.getElementById('prof-degree')?.value.trim() || '',
+      major: document.getElementById('prof-major')?.value.trim() || '',
+      gradYear: document.getElementById('prof-grad-year')?.value.trim() || '',
+      city: document.getElementById('prof-city')?.value.trim() || '',
+      targetSalary: document.getElementById('prof-salary')?.value.trim() || '',
+      portfolioUrl: document.getElementById('prof-portfolio')?.value.trim() || ''
+    };
+
+    chrome.storage.local.set({ config: newConfig, applicantProfile: newProfile }, () => {
+      currentConfig = newConfig;
+      if (newProfile.name && document.getElementById('sidebar-user-name')) {
+        document.getElementById('sidebar-user-name').textContent = newProfile.name;
+      }
+      if (newProfile.city && document.getElementById('sidebar-user-city')) {
+        document.getElementById('sidebar-user-city').textContent = `${newProfile.city} · ${newProfile.targetSalary || '求职中'}`;
+      }
+      const btn = document.getElementById('btn-save-all-settings');
+      const origText = btn.textContent;
+      btn.textContent = '✓ 所有参数与网申资料已保存并生效！';
+      btn.style.background = '#10b981';
+      setTimeout(() => {
+        btn.textContent = origText;
+        btn.style.background = '';
+      }, 1500);
+    });
+  });
+
+  // ================= 8. 全网流水线多平台协同控制 =================
+  const dashPipeProgressBox = document.getElementById('dash-pipe-progress-box');
+  const dashPipeLiveSite = document.getElementById('dash-pipe-live-site');
+  const dashPipePercent = document.getElementById('dash-pipe-percent');
+  const dashPipeBar = document.getElementById('dash-pipe-bar');
+  const dashPipeTarget = document.getElementById('dash-pipe-target');
+  const btnDashStartPipeline = document.getElementById('btn-dash-start-pipeline');
+  const btnDashStopPipeline = document.getElementById('btn-dash-stop-pipeline');
+
+  function updateDashPipelineUI(status) {
+    if (!status) return;
+    if (status.isActive) {
+      if (btnDashStartPipeline) btnDashStartPipeline.style.display = 'none';
+      if (btnDashStopPipeline) btnDashStopPipeline.style.display = 'block';
+      if (dashPipeProgressBox) dashPipeProgressBox.style.display = 'block';
+
+      const siteName = status.currentSite?.name || '当前平台';
+      const siteCount = status.currentSiteCount || 0;
+      const target = status.perSiteTarget || 10;
+      const totalSites = (status.sites && status.sites.length) || 3;
+      const currentIndex = status.currentIndex || 0;
+
+      if (dashPipeLiveSite) {
+        dashPipeLiveSite.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ${siteCount}/${target} 个已投`;
+      }
+
+      const overallCurrent = currentIndex * target + Math.min(siteCount, target);
+      const overallTarget = totalSites * target;
+      const pct = Math.min(Math.round((overallCurrent / overallTarget) * 100), 100);
+
+      if (dashPipePercent) dashPipePercent.textContent = `${pct}%`;
+      if (dashPipeBar) dashPipeBar.style.width = `${pct}%`;
+    } else {
+      if (btnDashStartPipeline) btnDashStartPipeline.style.display = 'block';
+      if (btnDashStopPipeline) btnDashStopPipeline.style.display = 'none';
+      if (dashPipeProgressBox) dashPipeProgressBox.style.display = 'none';
+    }
+  }
+
+  function fetchDashPipelineStatus() {
+    chrome.runtime.sendMessage({ type: 'GET_PIPELINE_STATUS' }, (res) => {
+      if (chrome.runtime.lastError || !res) return;
+      updateDashPipelineUI(res);
+    });
+  }
+
+  if (btnDashStartPipeline) {
+    btnDashStartPipeline.addEventListener('click', () => {
+      const target = parseInt(dashPipeTarget.value, 10) || 10;
+      chrome.runtime.sendMessage({
+        type: 'START_CRUISE_PIPELINE',
+        perSiteTarget: target
+      }, () => {
+        fetchDashPipelineStatus();
+      });
+    });
+  }
+
+  if (btnDashStopPipeline) {
+    btnDashStopPipeline.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'STOP_CRUISE_PIPELINE' }, () => {
+        fetchDashPipelineStatus();
+      });
+    });
+  }
+
+  // 定时刷新全网流水线状态
+  fetchDashPipelineStatus();
+  setInterval(fetchDashPipelineStatus, 1500);
+
+  // ================= 9. 每日投递复盘与大厂AI战略顾问中心 =================
+
+  const INDUSTRY_RADAR_DATA = {
+    ecommerce: {
+      title: '🛍️ 电商与达人运营赛道',
+      trend: '2026年抖音电商全域兴趣电商进入存量深水区，纯货架与内容场双轮驱动。达人端由以往的单纯头部大主播专场，转向中腰部垂类达人矩阵式分发+短视频切片授权矩阵化。品牌店播对高转化投放（千川）和高效率达播商务撮合人才需求持续旺盛。出海方面，TikTok Shop 美区与东南亚重点放量，亟需具备国内大促操盘与出海达人拓展复合经验的运营者。',
+      hotJobs: ['达人运营', '电商运营', '千川投放', '达播BD', 'TikTok电商运营', '直播间运营', '商家运营', '流量增长'],
+      criteria: '核心偏好：看重【真实的达人建联落地漏斗数据】、【大促战役节点把控】与【GMV归因能力】，拒绝虚数和无意义的形容词堆砌。',
+      matchAdvice: '若有电商全周期操盘或达人拓展经历，这是绝对的王牌加分项，简历与沟通中务必突出“大促全链路执行与达人建联闭环”，用清晰的建联漏斗与ROI说话！'
+    },
+    game: {
+      title: '🎮 游戏与核心社区运营赛道',
+      trend: '2026国内游戏市场重度产品注重精细化长线运营与用户生命周期（LTV）延展，小游戏（微信/抖音小游戏）爆发带来大量轻量化运营需求。在海外，二次元与SLG品类强调全球化社群（Discord/Twitter/Reddit）及创作者二创生态建设。各大厂互娱部门对懂硬核游戏机制、能深入玩家圈层的运营人员求贤若渴。',
+      hotJobs: ['游戏运营', '玩家社区运营', '核心玩家生态', '游戏活动策划', '版本运营', '二创生态运营', '电竞赛事', '海外游戏社区'],
+      criteria: '核心偏好：极度看重【是否为真正懂游戏机制的硬核高玩】、【能否独立产出竞品数值与社交机制拆解】、【社群舆情敏锐度与同人创作者激励SOP】。',
+      matchAdvice: '具备深度硬核游戏经历是许多非核心玩家无法比拟的壁垒，建议务必把“硬核玩家机制拆解报告与社群活动复盘”作为破局钥匙！'
+    },
+    photo: {
+      title: '📷 数码影像与商业视觉策划赛道',
+      trend: '大疆 (DJI) 与影石 (Insta360) 引领的智能影像设备市场热度空前，Action 运动相机、Pocket 云台相机、全景相机全面渗透户外骑行、旅行街拍与Vlog创作者。硬件厂商极需既懂摄影技术参数、又具备创作者社区和商业摄影审美的复合型人才；同时，AIGC 商业图文辅助工作流逐步并入商业摄影制作管线。',
+      hotJobs: ['商业摄影师', '视觉策划', '数码影像运营', '创作者生态运营', '短视频编导', 'AIGC内容策划', '修图师', '美术策划'],
+      criteria: '核心偏好：过硬的视觉审美、商业布光与成片落地能力、摄影师与数码KOL社群语言体系、能否独立输出标杆样片案例。',
+      matchAdvice: '拥有扎实的商业摄影/视觉实操经验与精美作品集，是进入影像创作者生态最直接的敲门砖，务必在简历开头直接附上高清作品集链接！'
+    },
+    audio: {
+      title: '🎵 音频与音乐内容运营赛道',
+      trend: '字节汽水音乐借助抖音生态扶持独立音乐人与热歌宣发；腾讯TME聚焦长音频、播客及车载智能座舱音频场景分发；音频版权精细化运营与高粘性听众社群成为商业化重点。',
+      hotJobs: ['音乐运营', '音频内容运营', '汽水音乐', '播客运营', '音乐宣发', '流媒体运营', '音乐版权运营'],
+      criteria: '核心偏好：流行内容嗅觉敏锐、音乐版权商务拓展能力、音频社区促活与播客创作者撮合经验。',
+      matchAdvice: '建议结合流行文化敏锐度与年轻群体内容审美，主攻流媒体音乐、播客创作者生态与音频社区促活板块。'
+    }
+  };
+
+  const BIG_TECH_PLANS = [
+    {
+      name: '大疆创新 (DJI)',
+      tag: '影像生态 / 社区运营',
+      pain: '硬件产品线极其强大，但非常需要既懂传感器、色彩科学与商业摄影实操，又能与全球影像创作者同频沟通的“摄影极客”。',
+      strategy: '将【扎实摄影/影像视觉实操背景】与作品集链接直接置顶于自荐信第一行。突出对布光构图、商业静物/人像出片的理解，展现极高即战力与业务同频度。',
+      action: '在作品集补充《大疆手持影像在商业人像与微电影场景中的样片企划案》，直接击穿面试官防线。'
+    },
+    {
+      name: '影石 Insta360',
+      tag: '全球达人BD / 新媒体运营',
+      pain: '海外与国内户外运动、街拍全景达人爆发式增长，急需具备规模化建联破冰SOP、高情商撮合以及大促转化的年轻运营。',
+      strategy: '打出【精细化达人拓展】与【达人建联落地闭环】，强调数据驱动、抗压执行力强。突出视觉与审美功底能为达人提供内容脚本与视觉指导。',
+      action: '自荐信突出：“曾主导全链路达人建联撮合，深谙科技数码KOL痛点，可即插即用落地达人拓展与转化闭环”。'
+    },
+    {
+      name: '腾讯 (IEG互娱 / PCG内容)',
+      tag: '游戏社区运营 / 长音频内容',
+      pain: '传统运营不懂核心玩家心理，社区活动流于形式容易引发玩家负面舆情；需要真正懂底层经济模型和玩家情绪价值的重度高玩。',
+      strategy: '打出【重度硬核玩家深度机制拆解】标签，随自荐信附带一份《竞品机制逆向拆解与版本社群促活提案》，主攻互娱或内容社区部门。',
+      action: '准备 1 份精简 PDF《某爆款游戏版本促活机制拆解》，面试时作为降维打击王牌。'
+    },
+    {
+      name: '字节跳动 (抖音电商 / 汽水音乐)',
+      tag: '大促操盘 / 达人运营',
+      pain: '字节崇尚数据说话、高压高产出、大促期间对落地执行力的极端考核，非大促操盘经历者适应周期极长。',
+      strategy: '文案完全匹配互联网敏捷与数据驱动风格（“痛点-抓手-链路-数据归因-落地复盘”），强调极强抗压力与快速执行力。',
+      action: '强调“熟悉系统与达人拓展节奏、具备极强大促抗压力与敏捷执行力”。'
+    },
+    {
+      name: '网易游戏 / 米哈游 (miHoYo)',
+      tag: '玩家生态 / 二创同人社群',
+      pain: '重度ACG与二次元游戏极度依赖玩家二创与同人社群自发安利裂变，需要对同人文化深度浸润的圈内人。',
+      strategy: '展示对主流游戏二创生态的敏锐度，提供同人创作者激励方案；突出对同人画师、创作者社群的共鸣与促活能力。',
+      action: '自荐信附上同人创作者激励机制与长线玩家社群促活思路。'
+    }
+  ];
+
+  function runDailyRetrospective() {
+    const today = new Date().toISOString().split('T')[0];
+    let logs = currentLogs.filter(l => (l.time || '').startsWith(today));
+    let isFallback = false;
+
+    if (logs.length === 0) {
+      logs = currentLogs.slice(0, 25);
+      isFallback = true;
+    }
+
+    const todayCount = logs.length;
+    const limit = currentConfig.dailyLimit || 30;
+    const replyCount = logs.filter(l => l.status === '已沟通' || l.status === '已回复' || l.status === '已查看').length;
+    const replyRate = todayCount > 0 ? ((replyCount / todayCount) * 100).toFixed(1) : '0.0';
+
+    // 统计高频词条
+    const tagCountMap = {};
+    logs.forEach(l => {
+      const tag = l.matchedTag || '综合匹配';
+      tagCountMap[tag] = (tagCountMap[tag] || 0) + 1;
+    });
+    const sortedTags = Object.entries(tagCountMap).sort((a, b) => b[1] - a[1]);
+    const topTagStr = sortedTags.length > 0 ? `${sortedTags[0][0]} (${sortedTags[0][1]}次)` : '暂无数据';
+    const tagDistStr = sortedTags.slice(0, 3).map(t => `${t[0]}:${t[1]}`).join(' / ') || '分布均衡';
+
+    // 投递时间分析
+    let goldenHourCount = 0;
+    logs.forEach(l => {
+      const timePart = (l.time || '').split(' ')[1];
+      if (timePart) {
+        const hour = parseInt(timePart.split(':')[0], 10);
+        const min = parseInt(timePart.split(':')[1], 10);
+        const timeVal = hour + min / 60;
+        if ((timeVal >= 9.5 && timeVal <= 11.5) || (timeVal >= 14 && timeVal <= 17.5)) {
+          goldenHourCount++;
+        }
+      }
+    });
+
+    const goldenPct = todayCount > 0 ? Math.round((goldenHourCount / todayCount) * 100) : 0;
+    let timingScore = '88分 · 良好';
+    let timingScoreClass = 'text-green';
+    if (goldenPct >= 70) {
+      timingScore = `${goldenPct}% · 极佳时段`;
+    } else if (goldenPct >= 40) {
+      timingScore = `${goldenPct}% · 良好时段`;
+    } else if (todayCount > 0) {
+      timingScore = `${goldenPct}% · 建议调整`;
+      timingScoreClass = 'text-warn';
+    } else {
+      timingScore = '待巡航';
+    }
+
+    // 回填概览卡片
+    const elTodayCount = document.getElementById('retro-today-count');
+    const elTodayLimit = document.getElementById('retro-today-limit');
+    const elReplyCount = document.getElementById('retro-reply-count');
+    const elReplyRate = document.getElementById('retro-reply-rate');
+    const elTopTag = document.getElementById('retro-top-tag');
+    const elTagDist = document.getElementById('retro-tag-distribution');
+    const elTimingScore = document.getElementById('retro-timing-score');
+    const elTimingDesc = document.getElementById('retro-timing-desc');
+
+    if (elTodayCount) elTodayCount.textContent = todayCount;
+    if (elTodayLimit) elTodayLimit.textContent = isFallback ? '历史最近样本' : `今日安全上限: ${limit}`;
+    if (elReplyCount) elReplyCount.textContent = replyCount;
+    if (elReplyRate) elReplyRate.textContent = `响应沟通率: ${replyRate}%`;
+    if (elTopTag) elTopTag.textContent = topTagStr;
+    if (elTagDist) elTagDist.textContent = tagDistStr;
+    if (elTimingScore) elTimingScore.textContent = timingScore;
+    if (elTimingDesc) elTimingDesc.textContent = `HR黄金时间占比: ${goldenPct}%`;
+
+    // 渲染五维归因诊断
+    renderAttributionAnalysis(logs, goldenPct);
+    renderFilterEvolutionAdvice(logs, sortedTags);
+  }
+
+  function renderAttributionAnalysis(logs, goldenPct) {
+    const listEl = document.getElementById('retro-attribution-list');
+    if (!listEl) return;
+
+    const cardsData = [
+      {
+        title: '⏰ 1. 投递时效窗口与 HR 查看波峰归因',
+        status: goldenPct >= 60 ? '时段健康' : '时段需微调',
+        statusClass: goldenPct >= 60 ? 'status-good' : 'status-warn',
+        body: '招聘端存在极强的时间周期效应。上午 9:30-11:30、下午 14:00-17:30 为 HR 批量沟通的高峰期，周二至周四查看率最高。夜间 20:00 之后或周末投递，次日工作日早晨会被成百上千条新打招呼淹没。',
+        advice: goldenPct >= 60 
+          ? '✓ 当前投递集中在黄金工作时段，保持该节奏，早间 10:00 与下午 14:30 启动全网巡航转化最佳。'
+          : '⚠️ 检测到非黄金时段投递比例较高。建议调整巡航启动时间为上午 10:00 或下午 14:30，确保消息排在 HR 沟通列表顶端。'
+      },
+      {
+        title: '🔄 2. 平台生态与反馈周期客观时延',
+        status: '客观周期差异',
+        statusClass: 'status-good',
+        body: '三大目标平台反馈节奏完全不同：<b>BOSS直聘</b> 为即时沟通，若 24 小时内未读或已读不回，常为岗位已收满或虚挂；<b>猎聘网</b> 80% 为猎头或企业HRBP统筹，常规筛选流程需 2~5 个工作日；<b>拉勾网</b> HR 习惯每周固定 1~2 天批量下载简历初筛。',
+        advice: '💡 无需因当日无回音产生心理压力：BOSS 直聘看当日即时互动，猎聘网与拉勾网请以 3~5 天后的集中邀约为评估周期。'
+      },
+      {
+        title: '🎯 3. 岗位隐形门槛与年限倒挂排查',
+        status: '初筛过滤排查',
+        statusClass: 'status-warn',
+        body: '在标有“3-5年团队管理”或中高阶岗位上，企业 ATS 算法常设“工作年限”硬性拦截规则，若年限不符容易被系统规则误伤。',
+        advice: '🎯 优化筛选范围：优先锁定“1-3年”、“应届生/校招补录”、“经验不限”的高质量岗位，命中算法初筛的通过率将提升 300% 以上。'
+      },
+      {
+        title: '💬 4. 沟通自荐信钩子锐度与差异化击穿',
+        status: '温和风格就绪',
+        statusClass: 'status-good',
+        body: '插件默认合成的话术自然温和且带健康祝福，亲和力极佳。但针对不同赛道，第一句的“钩子”可进一步锐化：电商岗最看重 GMV 与达人漏斗，游戏岗最看重机制拆解，摄影岗最看重作品集链接。',
+        advice: '🔥 建议在后台针对不同目标岗位微调占位话术：投电商必提【GMV与达人漏斗】，投游戏必提【核心机制拆解】，投视觉必将【作品集直链置顶】。'
+      },
+      {
+        title: '🏢 5. 招聘端活跃度与“幽灵HC/虚挂岗位”识别',
+        status: '行业常态防坑',
+        statusClass: 'status-alert',
+        body: '招聘软件上约有 25%~35% 的常年挂载岗位属于企业“展示雇主形象”或“购买套餐后系统自动刷新挂着”，HR 甚至数周未登录后台，此类岗位投递无回复属于系统性噪音。',
+        advice: '🛡️ 插件已内置起薪过滤与黑名单跳过，在浏览卡片时如见 HR 标注“半年前活跃”可直接在后台将该企业拉入黑名单，聚焦“今日活跃”优质企业。'
+      }
+    ];
+
+    listEl.innerHTML = '';
+    cardsData.forEach(card => {
+      const div = document.createElement('div');
+      div.className = 'retro-attribution-card';
+      div.innerHTML = `
+        <div class="retro-attribution-header">
+          <div class="retro-attribution-title">${card.title}</div>
+          <span class="retro-attribution-status ${card.statusClass}">${card.status}</span>
+        </div>
+        <div class="retro-attribution-body">${card.body}</div>
+        <div class="retro-attribution-advice">${card.advice}</div>
+      `;
+      listEl.appendChild(div);
+    });
+  }
+
+  function renderIndustryRadar(category = 'ecommerce') {
+    const bodyEl = document.getElementById('retro-industry-body');
+    if (!bodyEl) return;
+
+    const data = INDUSTRY_RADAR_DATA[category] || INDUSTRY_RADAR_DATA.ecommerce;
+
+    bodyEl.innerHTML = `
+      <div class="industry-intel-card">
+        <div class="intel-section">
+          <div class="intel-label">📡 赛道前沿风向与招聘趋势</div>
+          <div class="intel-desc">${data.trend}</div>
+        </div>
+        <div class="intel-section">
+          <div class="intel-label">🔥 近期高频紧缺岗位标签</div>
+          <div class="intel-tags-row">
+            ${data.hotJobs.map(j => `<span class="intel-chip">${j}</span>`).join('')}
+          </div>
+        </div>
+        <div class="intel-section">
+          <div class="intel-label">🎯 大厂与优质雇主面试痛点偏好</div>
+          <div class="intel-desc" style="color:#f1f5f9;">${data.criteria}</div>
+        </div>
+        <div class="intel-section" style="background:rgba(0,242,254,0.06); padding:10px 14px; border-radius:8px; border-left:3px solid #00f2fe;">
+          <div class="intel-label" style="color:#00f2fe;">💡 建议破局切入点</div>
+          <div class="intel-desc" style="color:#e2e8f0;">${data.matchAdvice}</div>
+        </div>
+      </div>
+    `;
+
+    // 绑定 tab 切换
+    document.querySelectorAll('.retro-ind-tab').forEach(tab => {
+      tab.classList.remove('active');
+      if (tab.getAttribute('data-ind') === category) {
+        tab.classList.add('active');
+      }
+      tab.onclick = () => {
+        const ind = tab.getAttribute('data-ind');
+        renderIndustryRadar(ind);
+      };
+    });
+  }
+
+  function renderBigTechStrategies() {
+    const listEl = document.getElementById('retro-bigtech-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '';
+    BIG_TECH_PLANS.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'retro-bigtech-card';
+      card.innerHTML = `
+        <div class="retro-bigtech-header">
+          <div class="retro-bigtech-name">
+            <span>⚡</span>
+            <span>${item.name}</span>
+          </div>
+          <span class="retro-bigtech-target">${item.tag}</span>
+        </div>
+        <div class="retro-bigtech-pain"><b>🎯 业务痛点：</b>${item.pain}</div>
+        <div class="retro-bigtech-strategy"><b>💡 针对性击穿战略：</b>${item.strategy}</div>
+        <div class="retro-bigtech-action"><b>🚀 推荐落地行动：</b>${item.action}</div>
+      `;
+      listEl.appendChild(card);
+    });
+  }
+
+  function renderResumeAndPortfolioAdvice() {
+    const resumeListEl = document.getElementById('retro-resume-advice-list');
+    const portfolioListEl = document.getElementById('retro-portfolio-advice-list');
+
+    if (resumeListEl) {
+      resumeListEl.innerHTML = `
+        <div class="retro-advice-card">
+          <h4>🛍️ 电商运营向微调 (主攻字节/品牌电商)</h4>
+          将【字节电商618全周期操盘】置顶首位，用数据化公式展开：<b>负责X类目达人拓展，单月撮合达人Y位，大促期间达成Z万GMV，千川投放投产比达到N</b>；删除模糊形容词，突出执行力与数据归因闭环。
+        </div>
+        <div class="retro-advice-card">
+          <h4>🎮 游戏社区向微调 (主攻腾讯/米哈游/网易)</h4>
+          在个人优势首行突出：<b>10000+小时硬核主机/Steam/手游经验，熟悉竞品经济系统与抽卡数值节奏</b>；社群运营经历重点强调“活跃率提升%”、“核心玩家KOL/二创作者孵化数”。
+        </div>
+        <div class="retro-advice-card">
+          <h4>📷 商业摄影与视觉向微调 (主攻大疆/影石)</h4>
+          突出：<b>5年商业摄影实战、商业布光与视觉质感把控</b>，服务品牌及成片发布数；简历最上方置顶个人在线作品集直链（workers.dev），方便用人部门秒级浏览。
+        </div>
+      `;
+    }
+
+    if (portfolioListEl) {
+      portfolioListEl.innerHTML = `
+        <div class="retro-advice-card">
+          <span class="portfolio-card-badge">建议补充板卡 1</span>
+          <h4>📊《618电商大促全周期操盘复盘看板》</h4>
+          <b>形式：</b>在 Workers 展板增加 1 个专属图文锚点或在线 PDF；<br>
+          <b>核心内容：</b>大促节奏甘特图、达人分层撮合漏斗图、直播间货盘策略与最终 GMV 增长曲线，直观展示大促统筹操盘素养。
+        </div>
+        <div class="retro-advice-card">
+          <span class="portfolio-card-badge">建议补充板卡 2</span>
+          <h4>🎮《头部竞品游戏机制与社区促活深度拆解报告》</h4>
+          <b>形式：</b>在线预览 2~3 页专业 PDF；<br>
+          <b>核心内容：</b>以某款主流游戏（如原神/绝区零/三角洲/DNF）为案例，逆向拆解版本活动设计亮点、玩家流失痛点与社区舆情引导演练，一击证明万小时硬核玩家深度。
+        </div>
+        <div class="retro-advice-card">
+          <span class="portfolio-card-badge">建议补充板卡 3</span>
+          <h4>📷《商业摄影与产品布光策划高清特辑》</h4>
+          <b>形式：</b>瀑布流高清组图板卡；<br>
+          <b>核心内容：</b>商业人像打光图、静物产品微距质感、科技数码实拍场景，直观展现摄影师语言与高级审美，是大疆与影石用人主管最青睐的即战力证明。
+        </div>
+      `;
+    }
+  }
+
+  function renderFilterEvolutionAdvice(logs, sortedTags) {
+    const adviceEl = document.getElementById('retro-filter-evolution-content');
+    if (!adviceEl) return;
+
+    adviceEl.innerHTML = `
+      <div>
+        <b>🌟 基于今日投递与行业数据的筛选器迭代建议：</b>
+        <ul>
+          <li><b>高亮词条微调：</b>当前匹配最多的前三词条为 <code>${sortedTags.slice(0, 3).map(t => t[0]).join(', ') || '达人运营、电商运营、游戏运营'}</code>。建议保持“电商/达人”与“游戏/社区”的双主攻高亮，若主攻影像数码，可点亮新扩容的“创作者生态”与“海外游戏社区”词条。</li>
+          <li><b>薪资门槛自适应：</b>深圳 9-15K 属于中初级优质核心区间。对于拉勾招聘和猎聘网，建议保持 9K 起薪过滤，有效剔除地推销售类虚挂岗；BOSS 直聘可保持 8-10K 灵活区间以防错失应届生管培好职位。</li>
+          <li><b>黑名单词库扩充：</b>建议在黑名单中增加 <code>地推,骑手,保险代理,无责底薪2000</code>，确保全网流水线投递的每一家企业均为正规科技、互联网与消费电子企业。</li>
+          <li><b>黄金启动时间：</b>建议每日上午 <b>10:00</b> 或下午 <b>14:30</b> 点击「🚀 一键开启今日全网巡航」，消息将直接排在企业 HR 沟通列表最顶端。</li>
+        </ul>
+      </div>
+    `;
+  }
+
+  function exportRetrospectiveMarkdown() {
+    const today = new Date().toISOString().split('T')[0];
+    const todayCount = document.getElementById('retro-today-count')?.textContent || '0';
+    const replyRate = document.getElementById('retro-reply-rate')?.textContent || '0.0%';
+    const topTag = document.getElementById('retro-top-tag')?.textContent || '电商/达人运营';
+    const timing = document.getElementById('retro-timing-score')?.textContent || '良好';
+
+    let md = `# ⚡ JobCruise 求职每日投递复盘与战略诊断报告\n\n`;
+    md += `> **生成日期**：${today}  \n`;
+    md += `> **生成系统**：JobCruise 求职自动化巡航助手 (框架开源版)  \n\n`;
+    md += `---\n\n`;
+    md += `## 📊 一、今日投递大盘战报\n\n`;
+    md += `- **今日投递总量**：${todayCount} 个岗位\n`;
+    md += `- **响应与沟通表现**：${replyRate}\n`;
+    md += `- **高频主攻赛道**：${topTag}\n`;
+    md += `- **投递时效健康度**：${timing}\n\n`;
+    md += `---\n\n`;
+    md += `## 🧐 二、五维未回复智能归因诊断\n\n`;
+    md += `1. **时效时段归因**：HR查看高峰集中在 9:30-11:30、14:00-17:30，非工作时段投递易被新消息冲刷，建议固定在黄金窗口开启巡航。\n`;
+    md += `2. **平台生态时延**：BOSS直聘为即时微聊（24h无应答常为虚挂）；猎聘网为中高端猎头顾问制（正常审核周期2~5工作日）；拉勾网为批量导出制，无需单日焦虑。\n`;
+    md += `3. **岗位隐形门槛**：标有“3-5年经验”岗位易被初筛算法误伤，建议主攻“1-3年”、“应届/校招补录”、“经验不限”岗位。\n`;
+    md += `4. **沟通文案钩子**：电商突出大促千万GMV与达人漏斗，游戏突出万小时硬核拆解，摄影突出作品集直链。\n`;
+    md += `5. **虚挂假HC识别**：注意辨别“半年前活跃”的长期展示死职位，优先聚焦“今日活跃”优质雇主。\n\n`;
+    md += `---\n\n`;
+    md += `## 🎯 三、大厂专项靶向破局建议\n\n`;
+    BIG_TECH_PLANS.forEach(item => {
+      md += `### ⚡ ${item.name} (${item.tag})\n`;
+      md += `- **业务痛点**：${item.pain}\n`;
+      md += `- **针对性击穿战略**：${item.strategy}\n`;
+      md += `- **落地行动**：${item.action}\n\n`;
+    });
+    md += `---\n\n`;
+    md += `## 📝 四、个人作品集/展板建议扩充板卡清单\n\n`;
+    md += `1. **【电商】《电商大促全周期操盘复盘看板》**：甘特图、达人撮合漏斗图、GMV归因曲线。\n`;
+    md += `2. **【游戏】《头部竞品游戏机制与社区促活深度拆解报告》**：2~3页在线PDF，证明硬核高玩素养。\n`;
+    md += `3. **【摄影】《商业摄影与产品布光策划高清特辑》**：人像打光图、静物产品微距质感样片。\n\n`;
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `JobCruise_求职复盘与战略诊断报告_${today}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // 绑定复盘中心按钮事件
+  const btnRefreshRetro = document.getElementById('btn-refresh-retro');
+  const btnRefreshIntel = document.getElementById('btn-refresh-intel');
+  const btnExportRetro = document.getElementById('btn-export-retro-md');
+
+  if (btnRefreshRetro) {
+    btnRefreshRetro.addEventListener('click', () => {
+      runDailyRetrospective();
+      const orig = btnRefreshRetro.textContent;
+      btnRefreshRetro.textContent = '✓ 诊断已刷新！';
+      setTimeout(() => { btnRefreshRetro.textContent = orig; }, 1200);
+    });
+  }
+
+  if (btnRefreshIntel) {
+    btnRefreshIntel.addEventListener('click', () => {
+      renderIndustryRadar('ecommerce');
+      const orig = btnRefreshIntel.textContent;
+      btnRefreshIntel.textContent = '✓ 行业风向已更新！';
+      setTimeout(() => { btnRefreshIntel.textContent = orig; }, 1200);
+    });
+  }
+
+  if (btnExportRetro) {
+    btnExportRetro.addEventListener('click', exportRetrospectiveMarkdown);
+  }
+
+  // 监听 URL 参数自动定位到指定 Tab (如 ?view=view-retrospective)
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetViewParam = urlParams.get('view');
+  if (targetViewParam) {
+    navItems.forEach(n => {
+      if (n.getAttribute('data-view') === targetViewParam) {
+        n.classList.add('active');
+      } else {
+        n.classList.remove('active');
+      }
+    });
+    viewPanels.forEach(p => {
+      if (p.id === targetViewParam) {
+        p.classList.add('active');
+      } else {
+        p.classList.remove('active');
+      }
+    });
+  }
+
+  // 初始化加载
+  loadAllData();
+  runDailyRetrospective();
+  renderIndustryRadar('ecommerce');
+  renderBigTechStrategies();
+  renderResumeAndPortfolioAdvice();
+});
