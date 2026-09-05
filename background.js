@@ -271,53 +271,91 @@ function launchCurrentPipelineSite() {
 }
 
 function openOrSwitchToSite(url, matchUrl, callback) {
-  chrome.tabs.query({ url: matchUrl }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      const tab = tabs[0];
-      // 唤醒防休眠：若当前窗口处于最小化，自动将其恢复为 normal，防止 Chromium 冻结 DOM 与定时器
-      chrome.windows.get(tab.windowId, (win) => {
-        const updateInfo = { focused: true };
-        if (win && win.state === 'minimized') {
-          updateInfo.state = 'normal';
-        }
-        chrome.windows.update(tab.windowId, updateInfo, () => {
-          chrome.tabs.update(tab.id, { active: true, url: url }, (updatedTab) => {
-            waitForTabComplete(updatedTab.id, callback);
-          });
+  chrome.tabs.query({}, (allTabs) => {
+    let targetTab = null;
+    let domain = '';
+    try {
+      domain = new URL(url).hostname.replace(/^www\./, '');
+    } catch (e) {
+      domain = matchUrl.replace(/[\*\:\/]/g, '').replace('www.', '');
+    }
+
+    if (allTabs && allTabs.length > 0) {
+      targetTab = allTabs.find(t => t.url && domain && t.url.includes(domain));
+    }
+
+    if (targetTab) {
+      // 聚焦目标标签页所在窗口
+      if (targetTab.windowId) {
+        chrome.windows.update(targetTab.windowId, { focused: true, state: 'normal' }, () => {
+          if (chrome.runtime.lastError) { /* ignore */ }
         });
-      });
+      }
+
+      // 判断该标签页是否已经在职位列表页
+      const isJobPage = targetTab.url && (
+        targetTab.url.includes('/web/geek/job') ||
+        targetTab.url.includes('/zhaopin') ||
+        targetTab.url.includes('/wn/jobs')
+      );
+
+      if (isJobPage) {
+        // 已经在目标岗位页面，直接激活标签页并就绪
+        chrome.tabs.update(targetTab.id, { active: true }, () => {
+          setTimeout(() => {
+            callback(targetTab.id);
+          }, 1500);
+        });
+      } else {
+        // 不在岗位列表页，需要更新 URL 并等待全新加载完成
+        chrome.tabs.update(targetTab.id, { active: true, url: url }, (updatedTab) => {
+          const tid = (updatedTab && updatedTab.id) || targetTab.id;
+          waitForPageLoad(tid, callback);
+        });
+      }
     } else {
-      chrome.windows.getCurrent((win) => {
-        if (win && win.state === 'minimized') {
-          chrome.windows.update(win.id, { state: 'normal', focused: true });
+      // 标签页不存在，新建并等待加载完成
+      chrome.tabs.create({ url, active: true }, (newTab) => {
+        if (newTab && newTab.windowId) {
+          chrome.windows.update(newTab.windowId, { focused: true, state: 'normal' }, () => {
+            if (chrome.runtime.lastError) { /* ignore */ }
+          });
         }
-        chrome.tabs.create({ url, active: true }, (newTab) => {
-          waitForTabComplete(newTab.id, callback);
-        });
+        waitForPageLoad(newTab.id, callback);
       });
     }
   });
 }
 
-function waitForTabComplete(tabId, callback) {
+function waitForPageLoad(tabId, callback) {
+  let finished = false;
+  let timerId = null;
+
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    if (timerId) clearTimeout(timerId);
+    chrome.tabs.onUpdated.removeListener(listener);
+    // 预留 2.5 秒确保页面脚本及 DOM 挂载就绪
+    setTimeout(() => {
+      callback(tabId);
+    }, 2500);
+  };
+
   const listener = (tid, changeInfo) => {
     if (tid === tabId && changeInfo.status === 'complete') {
-      chrome.tabs.onUpdated.removeListener(listener);
-      setTimeout(() => {
-        callback(tabId);
-      }, 3000);
+      done();
     }
   };
   chrome.tabs.onUpdated.addListener(listener);
 
-  // 防御性超时 fallback
-  setTimeout(() => {
-    chrome.tabs.onUpdated.removeListener(listener);
-    callback(tabId);
-  }, 12000);
+  // 10 秒兜底超时
+  timerId = setTimeout(() => {
+    done();
+  }, 10000);
 }
 
-function sendPipelineMessageWithRetry(tabId, message, retries = 4) {
+function sendPipelineMessageWithRetry(tabId, message, retries = 6) {
   if (!cruisePipeline.isActive) return;
   chrome.tabs.sendMessage(tabId, message, (response) => {
     if (chrome.runtime.lastError || !response) {
@@ -349,7 +387,7 @@ function sendPipelineMessageWithRetry(tabId, message, retries = 4) {
         }
       }
     } else {
-      console.log('[ZIAVER Autopilot] 流水线指令下发成功:', response);
+      console.log(`[ZIAVER Autopilot] 成功启动【${message.siteId || '本站'}】巡航:`, response);
     }
   });
 }

@@ -718,7 +718,8 @@
   let isSkipped = false;
 
   // ================= 巡航运行逻辑 =================
-  async function startAutopilot(targetCount = 10, isFromPipeline = false) {
+  // ================= 巡航运行逻辑 =================
+  async function startAutopilot(targetCount = 10, isFromPipeline = false, initialSessionCount = 0) {
     if (isRunning) return;
     refreshConfig();
     isSkipped = false;
@@ -741,13 +742,35 @@
     }
 
     if (todayCount >= (config.dailyLimit || 30)) {
-      alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
-      return;
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${config.dailyLimit || 30} 次)，自动向全网流水线交接...`);
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_FINISHED',
+          site: 'lagou',
+          count: 0
+        });
+        return;
+      } else {
+        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
+        return;
+      }
     }
 
     if (activeTags.length === 0) {
-      alert('⚠️ 当前没有高亮选中的生效职业词条！请打开后台管理勾选。');
-      return;
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD('<span class="highlight" style="color:#f59e0b;">[无生效词条]</span> 当前未勾选生效职业词条，全网流水线跳过本站...');
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_SKIPPED',
+          site: 'lagou',
+          reason: '未勾选高亮职业词条'
+        });
+        return;
+      } else {
+        alert('⚠️ 当前没有高亮选中的生效职业词条！请打开后台管理勾选。');
+        return;
+      }
     }
 
     pipelineMode = isFromPipeline;
@@ -755,7 +778,7 @@
 
     isRunning = true;
     isPaused = false;
-    sessionCount = 0;
+    sessionCount = initialSessionCount || 0;
 
     const btnToggle = shadowRoot?.getElementById('btn-toggle-run');
     const btnPause = shadowRoot?.getElementById('btn-pause-run');
@@ -770,7 +793,7 @@
     }
 
     updateHUD();
-    logHUD(`<span class="highlight">[拉勾巡航启动]</span> 目标数量: ${pipelineTarget} 个，当前生效词条: ${activeTags.slice(0, 4).join(', ')} 等 ${activeTags.length} 个`);
+    logHUD(`<span class="highlight">[拉勾巡航启动]</span> 目标数量: ${pipelineTarget} 个 (已完成 ${sessionCount})，当前生效词条: ${activeTags.slice(0, 4).join(', ')} 等 ${activeTags.length} 个`);
     if (document.hidden) {
       logHUD('<span class="skip" style="color:#fbbf24;">[提示] 建议保持窗口展开（或放至 Win+Tab 虚拟桌面），避免最小化被系统节能休眠限速。</span>');
     }
@@ -783,6 +806,9 @@
     } finally {
       const wasPipeline = pipelineMode;
       const finalCount = sessionCount;
+      try {
+        sessionStorage.removeItem('ziaver_pipeline_lagou_state');
+      } catch (e) {}
       stopAutopilot();
 
       if (wasPipeline && !isSkipped) {
@@ -797,6 +823,9 @@
   }
 
   function stopAutopilot() {
+    try {
+      sessionStorage.removeItem('ziaver_pipeline_lagou_state');
+    } catch (e) {}
     isRunning = false;
     isPaused = false;
     const btnToggle = shadowRoot?.getElementById('btn-toggle-run');
@@ -978,6 +1007,17 @@
         }
       }
 
+      // 强校验：卡片遍历结束后，若今日上限已达或流水线本站目标已达成，立刻终止循环，坚决禁止执行翻页！
+      if (!isRunning) break;
+      if (todayCount >= (config.dailyLimit || 30)) {
+        logHUD(`<span class="highlight">[安全上限熔断]</span> 今日已达安全上限 ${config.dailyLimit || 30} 次，停止投递！`);
+        break;
+      }
+      if (pipelineMode && sessionCount >= pipelineTarget) {
+        logHUD(`<span class="success">[本站目标达成]</span> 已完成拉勾设定目标 (${sessionCount}/${pipelineTarget})，停止翻页并向中枢交接！`);
+        break;
+      }
+
       // 翻页处理
       if (isRunning && !isPaused && sessionCount < pipelineTarget) {
         logHUD('<span>[翻页检测]</span> 尝试翻到下一页...');
@@ -985,6 +1025,16 @@
           '.ant-pagination-next:not(.ant-pagination-disabled) button, a.pagination-next, [class*="pagination-next"]'
         );
         if (nextPageBtn) {
+          if (pipelineMode) {
+            try {
+              sessionStorage.setItem('ziaver_pipeline_lagou_state', JSON.stringify({
+                inPipeline: true,
+                target: pipelineTarget,
+                sessionCount: sessionCount,
+                timestamp: Date.now()
+              }));
+            } catch (e) {}
+          }
           nextPageBtn.click();
           await sleep(4000);
         } else {
@@ -1019,6 +1069,34 @@
     }
   }
 
+  function checkAndResumePipeline() {
+    try {
+      const raw = sessionStorage.getItem('ziaver_pipeline_lagou_state');
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (!state || !state.inPipeline) return;
+      if (Date.now() - state.timestamp > 300000) {
+        sessionStorage.removeItem('ziaver_pipeline_lagou_state');
+        return;
+      }
+
+      chrome.runtime.sendMessage({ type: 'GET_PIPELINE_STATUS' }, (res) => {
+        if (chrome.runtime.lastError || !res) return;
+        const currentSite = res.sites && res.sites[res.currentIndex];
+        if (res.isActive && currentSite && currentSite.id === 'lagou') {
+          logHUD(`<span class="highlight">[跨页续航]</span> 正在恢复全网流水线 (进度: ${state.sessionCount || 0}/${state.target})...`);
+          setTimeout(() => {
+            startAutopilot(state.target, true, state.sessionCount || 0);
+          }, 1500);
+        } else {
+          sessionStorage.removeItem('ziaver_pipeline_lagou_state');
+        }
+      });
+    } catch (e) {
+      console.warn('[ZIAVER] 检查续航异常:', e);
+    }
+  }
+
   // ================= 消息总线监听 =================
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'START_PIPELINE_RUN') {
@@ -1040,10 +1118,16 @@
   if (location.hostname.includes('lagou.com')) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
-        refreshConfig(createHUD);
+        refreshConfig(() => {
+          createHUD();
+          checkAndResumePipeline();
+        });
       });
     } else {
-      refreshConfig(createHUD);
+      refreshConfig(() => {
+        createHUD();
+        checkAndResumePipeline();
+      });
     }
   }
 })();

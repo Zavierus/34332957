@@ -11,7 +11,8 @@
   "permissions": [
     "storage",
     "notifications",
-    "activeTab"
+    "activeTab",
+    "tabs"
   ],
   "options_page": "dashboard/dashboard.html",
   "host_permissions": [

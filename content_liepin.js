@@ -631,7 +631,7 @@
 
   let isSkipped = false;
 
-  async function startLiepinCruise(target = null, isFromPipeline = false) {
+  async function startLiepinCruise(target = null, isFromPipeline = false, initialSessionCount = 0) {
     refreshConfig();
     isSkipped = false;
 
@@ -653,18 +653,40 @@
     }
 
     if (todayCount >= (config.dailyLimit || 30)) {
-      alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
-      return;
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD(`<span class="highlight" style="color:#f59e0b;">[安全上限已达]</span> 今日已达安全上限 (${config.dailyLimit || 30} 次)，自动向全网流水线交接...`);
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_FINISHED',
+          site: 'liepin',
+          count: 0
+        });
+        return;
+      } else {
+        alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
+        return;
+      }
     }
 
     if (activeTags.length === 0) {
-      alert('⚠️ 当前没有高亮选中的生效职业词条！请打开后台管理勾选。');
-      return;
+      if (isFromPipeline) {
+        isSkipped = true;
+        logHUD('<span class="highlight" style="color:#f59e0b;">[无生效词条]</span> 当前未勾选生效职业词条，全网流水线跳过本站...');
+        chrome.runtime.sendMessage({
+          type: 'PIPELINE_SITE_SKIPPED',
+          site: 'liepin',
+          reason: '未勾选高亮职业词条'
+        });
+        return;
+      } else {
+        alert('⚠️ 当前没有高亮选中的生效职业词条！请打开后台管理勾选。');
+        return;
+      }
     }
 
     pipelineMode = !!isFromPipeline;
     pipelineTarget = target || (config.dailyLimit || 30);
-    sessionCount = 0;
+    sessionCount = initialSessionCount || 0;
 
     isRunning = true;
     isPaused = false;
@@ -676,7 +698,7 @@
     btn.className = 'btn btn-stop';
     btnPause.style.display = 'flex';
 
-    logHUD(`<span class="highlight">[启动]</span> ${pipelineMode ? `全网流水线模式 (本站目标: ${pipelineTarget})！` : ''}开始扫描卡片，校验高亮词条...`);
+    logHUD(`<span class="highlight">[启动]</span> ${pipelineMode ? `全网流水线模式 (本站目标: ${pipelineTarget}，已完成: ${sessionCount})！` : ''}开始扫描卡片，校验高亮词条...`);
     if (document.hidden) {
       logHUD('<span class="skip" style="color:#fbbf24;">[提示] 建议保持窗口展开（或放至 Win+Tab 虚拟桌面），避免最小化被系统节能休眠限速。</span>');
     }
@@ -689,6 +711,9 @@
     } finally {
       const wasPipeline = pipelineMode;
       const finalCount = sessionCount;
+      try {
+        sessionStorage.removeItem('ziaver_pipeline_liepin_state');
+      } catch (e) {}
       stopLiepinCruise();
       if (wasPipeline && !isSkipped) {
         logHUD(`<span class="highlight">[本站目标达成]</span> 已完成 ${finalCount} 个，汇报至全网巡航中枢...`);
@@ -702,6 +727,9 @@
   }
 
   function stopLiepinCruise() {
+    try {
+      sessionStorage.removeItem('ziaver_pipeline_liepin_state');
+    } catch (e) {}
     isRunning = false;
     isPaused = false;
     const btn = shadowRoot?.getElementById('btn-toggle-run');
@@ -877,13 +905,62 @@
         }
       }
 
+      // 强拦截：卡片遍历结束后，若今日上限已达或流水线本站目标已达成，立刻终止循环，坚决禁止执行翻页！
+      if (!isRunning) break;
+      if (todayCount >= (config.dailyLimit || 30)) {
+        logHUD(`<span class="highlight">[安全上限熔断]</span> 今日已达安全上限 ${config.dailyLimit || 30} 次，停止投递！`);
+        break;
+      }
+      if (pipelineMode && sessionCount >= pipelineTarget) {
+        logHUD(`<span class="success">[本站目标达成]</span> 已完成猎聘设定目标 (${sessionCount}/${pipelineTarget})，停止翻页并向中枢交接！`);
+        break;
+      }
+
       const nextPage = document.querySelector('.ant-pagination-next:not(.ant-pagination-disabled) button, a.pagination-next');
       if (nextPage) {
+        if (pipelineMode) {
+          try {
+            sessionStorage.setItem('ziaver_pipeline_liepin_state', JSON.stringify({
+              inPipeline: true,
+              target: pipelineTarget,
+              sessionCount: sessionCount,
+              timestamp: Date.now()
+            }));
+          } catch (e) {}
+        }
         nextPage.click();
         await sleep(3500);
       } else {
         break;
       }
+    }
+  }
+
+  function checkAndResumePipeline() {
+    try {
+      const raw = sessionStorage.getItem('ziaver_pipeline_liepin_state');
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (!state || !state.inPipeline) return;
+      if (Date.now() - state.timestamp > 300000) {
+        sessionStorage.removeItem('ziaver_pipeline_liepin_state');
+        return;
+      }
+
+      chrome.runtime.sendMessage({ type: 'GET_PIPELINE_STATUS' }, (res) => {
+        if (chrome.runtime.lastError || !res) return;
+        const currentSite = res.sites && res.sites[res.currentIndex];
+        if (res.isActive && currentSite && currentSite.id === 'liepin') {
+          logHUD(`<span class="highlight">[跨页续航]</span> 正在恢复全网流水线 (进度: ${state.sessionCount || 0}/${state.target})...`);
+          setTimeout(() => {
+            startLiepinCruise(state.target, true, state.sessionCount || 0);
+          }, 1500);
+        } else {
+          sessionStorage.removeItem('ziaver_pipeline_liepin_state');
+        }
+      });
+    } catch (e) {
+      console.warn('[ZIAVER] 检查续航异常:', e);
     }
   }
 
@@ -907,10 +984,16 @@
   if (location.hostname.includes('liepin.com')) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
-        refreshConfig(createHUD);
+        refreshConfig(() => {
+          createHUD();
+          checkAndResumePipeline();
+        });
       });
     } else {
-      refreshConfig(createHUD);
+      refreshConfig(() => {
+        createHUD();
+        checkAndResumePipeline();
+      });
     }
   }
 })();
