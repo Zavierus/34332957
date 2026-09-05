@@ -191,12 +191,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       
-      const overallCurrent = currentIndex * target + Math.min(siteCount, target);
-      const overallTarget = totalSites * target;
-      const pct = Math.min(Math.round((overallCurrent / overallTarget) * 100), 100);
+      const pct = status.overallPercent !== undefined ? status.overallPercent : Math.min(Math.round(((currentIndex * target + Math.min(siteCount, target)) / (totalSites * target)) * 100), 100);
 
       if (pipePercentText) pipePercentText.textContent = `${pct}%`;
       if (pipeBarFill) pipeBarFill.style.width = `${pct}%`;
+
+      const pipeStepsText = document.getElementById('pipe-steps-text');
+      if (pipeStepsText && status.sitesStatus) {
+        pipeStepsText.textContent = status.sitesStatus.map(s => {
+          if (s.skipped) return `${s.name}(跳过)`;
+          if (s.isPassed) return `${s.name}(${s.done})✓`;
+          if (s.isCurrent) return `${s.name}(${s.done}/${s.target})🚀`;
+          return `${s.name}(待启动)`;
+        }).join(' → ');
+      }
     } else {
       if (pipeStatusTag) {
         pipeStatusTag.textContent = '待命就绪';

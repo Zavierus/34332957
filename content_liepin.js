@@ -16,6 +16,8 @@
   let pipelineMode = false;
   let pipelineTarget = 10;
   let activeTags = [];
+  let currentTagIndex = 0;
+  let pipelineStatusCache = null;
 
   let config = {
     dailyLimit: 30,
@@ -65,15 +67,73 @@
     return `您好！看到咱们在招「${cleanTitle}」，感觉整体要求跟我还蛮匹配的。我有相关方向的实战经验，执行力强、比较看重数据和落地。简历在附件中，如果合适随时沟通交流，祝您工作顺利、天天开心～`;
   }
 
-  function screenJob(title, salary, company) {
+  function screenJob(title, salary, company, card) {
     if (!title) return { pass: false, reason: '未获取到职位标题' };
 
-    // 1. 检查命中高亮职业词条
+    // 提取卡片业务标签 (猎聘卡片通常带有业务领域/核心技能标签)
+    let cardLabels = '';
+    if (card) {
+      const labelEls = card.querySelectorAll('.labels-box, .job-labels-box, .tag-item, .tag-box span, .labels-item, .job-tag, .tag-list span, .job-labels span');
+      cardLabels = Array.from(labelEls).map(el => el.textContent.trim()).filter(Boolean).join(' ');
+    }
+
+    const fullCardText = `${title} ${cardLabels}`.toLowerCase();
+
+    // 1. 检查命中高亮职业词条 (精准标题匹配 + 业务标签命中 + 柔性语义匹配)
     let matchedTag = null;
+    let matchType = '';
+
     for (const tag of activeTags) {
-      if (title.toLowerCase().includes(tag.toLowerCase())) {
+      const lowerTag = tag.toLowerCase();
+      // A. 标题直接包含完整词条
+      if (title.toLowerCase().includes(lowerTag)) {
         matchedTag = tag;
+        matchType = '标题命中';
         break;
+      }
+      // B. 卡片标签命中完整词条
+      if (cardLabels.toLowerCase().includes(lowerTag)) {
+        matchedTag = tag;
+        matchType = '业务标签命中';
+        break;
+      }
+      // C. 柔性赛道意图匹配 (大幅提高猎聘卡片命中率)
+      if (lowerTag === '达人运营' || lowerTag === '达播bd' || lowerTag === '达人拓展') {
+        if (fullCardText.includes('达人') && (fullCardText.includes('运营') || fullCardText.includes('bd') || fullCardText.includes('商务') || fullCardText.includes('合作') || fullCardText.includes('媒介'))) {
+          matchedTag = tag;
+          matchType = '达人赛道柔性命中';
+          break;
+        }
+      } else if (lowerTag === '千川投放' || lowerTag === '巨量千川') {
+        if (fullCardText.includes('千川') || (fullCardText.includes('信息流') && fullCardText.includes('投放'))) {
+          matchedTag = tag;
+          matchType = '千川投放柔性命中';
+          break;
+        }
+      } else if (lowerTag === '电商运营' || lowerTag === '店铺运营') {
+        if ((fullCardText.includes('电商') || fullCardText.includes('店铺') || fullCardText.includes('天猫') || fullCardText.includes('抖音') || fullCardText.includes('淘系')) && (fullCardText.includes('运营') || fullCardText.includes('店长') || fullCardText.includes('操盘') || fullCardText.includes('专员'))) {
+          matchedTag = tag;
+          matchType = '电商赛道柔性命中';
+          break;
+        }
+      } else if (lowerTag === '直播运营' || lowerTag === '直播间运营') {
+        if (fullCardText.includes('直播') && (fullCardText.includes('运营') || fullCardText.includes('场控') || fullCardText.includes('中控') || fullCardText.includes('排品'))) {
+          matchedTag = tag;
+          matchType = '直播赛道柔性命中';
+          break;
+        }
+      } else if (lowerTag === '短视频运营' || lowerTag === '短视频编导') {
+        if (fullCardText.includes('短视频') && (fullCardText.includes('运营') || fullCardText.includes('编导') || fullCardText.includes('剪辑'))) {
+          matchedTag = tag;
+          matchType = '短视频赛道柔性命中';
+          break;
+        }
+      } else if (lowerTag === '游戏运营' || lowerTag === '游戏社区' || lowerTag === '玩家运营') {
+        if (fullCardText.includes('游戏') && (fullCardText.includes('运营') || fullCardText.includes('社区') || fullCardText.includes('发行') || fullCardText.includes('生态'))) {
+          matchedTag = tag;
+          matchType = '游戏赛道柔性命中';
+          break;
+        }
       }
     }
 
@@ -82,7 +142,7 @@
     }
 
     // 2. 黑名单过滤
-    const text = (title + ' ' + company).toLowerCase();
+    const text = (title + ' ' + company + ' ' + cardLabels).toLowerCase();
     const blacklist = (config.blacklistKeywords || '').split(/[,，|、\s]+/).filter(Boolean);
     for (const b of blacklist) {
       if (text.includes(b.toLowerCase())) {
@@ -99,7 +159,7 @@
       }
     }
 
-    return { pass: true, matchedTag };
+    return { pass: true, matchedTag, matchType };
   }
 
   function sleep(ms) {
@@ -356,6 +416,70 @@
         font-size: 12px;
         font-weight: 700;
       }
+      /* 全网流水线专属进度卡片样式 */
+      .pipeline-card {
+        background: rgba(168, 85, 247, 0.12);
+        border: 1px solid rgba(168, 85, 247, 0.45);
+        border-radius: 8px;
+        padding: 9px 11px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .pipeline-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        font-weight: 700;
+        color: #e9d5ff;
+      }
+      .pipe-pulse-dot {
+        width: 7px;
+        height: 7px;
+        background: #34d399;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+        box-shadow: 0 0 8px #34d399;
+        animation: pipePulse 1.5s infinite;
+      }
+      @keyframes pipePulse {
+        0% { transform: scale(0.9); opacity: 0.7; }
+        50% { transform: scale(1.3); opacity: 1; }
+        100% { transform: scale(0.9); opacity: 0.7; }
+      }
+      .pipe-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(168, 85, 247, 0.35);
+        color: #e9d5ff;
+      }
+      .pipeline-info-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11.5px;
+      }
+      .pipeline-bar-wrap {
+        height: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 3px;
+        overflow: hidden;
+        margin: 2px 0;
+      }
+      .pipeline-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #a855f7 0%, #ec4899 100%);
+        border-radius: 3px;
+        transition: width 0.4s ease;
+      }
+      .pipeline-total-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
     `;
 
     const hudHtml = document.createElement('div');
@@ -374,7 +498,35 @@
         <div class="hud-body" id="hud-body">
           <div class="compact-stat-row" id="compact-stat-row">
             <span>今日: <b id="compact-val-today" style="color:#c084fc;">0/30</b> | 本次: <b id="compact-val-sess" style="color:#c084fc;">0</b></span>
+            <span id="compact-pipe-stat" style="display:none; color:#c084fc; font-weight:700;">🌐 全网 0%</span>
             <span id="compact-status-tag" style="color:#34d399; font-size:10px;">🟢 就绪</span>
+          </div>
+
+          <!-- 全网流水线专属进度卡片 (Pipeline Banner) -->
+          <div class="pipeline-card" id="hud-pipeline-card" style="display: none;">
+            <div class="pipeline-header">
+              <div style="display:flex; align-items:center;">
+                <span class="pipe-pulse-dot"></span>
+                <span class="pipe-title">🌐 全网流水线协同巡航中</span>
+              </div>
+              <span class="pipe-badge" id="hud-pipe-site-tag">第 2/3 站</span>
+            </div>
+            <div class="pipeline-info-row">
+              <span id="hud-pipe-site-text" style="color:#e2e8f0; font-weight:700;">【猎聘网】</span>
+              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">本站: <b id="hud-pipe-site-count" style="color:#c084fc;">0</b>/<span id="hud-pipe-site-target">10</span></span>
+            </div>
+            <div class="pipeline-bar-wrap">
+              <div class="pipeline-bar-fill" id="hud-pipe-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="pipeline-total-row">
+              <span id="hud-pipe-step-list" style="font-size:10px; color:#94a3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:210px;">BOSS ✓ → 猎聘 🚀 → 拉勾 ⏳</span>
+              <span id="hud-pipe-percent-text" style="font-size:11px; font-weight:800; color:#c084fc;">0%</span>
+            </div>
+            <div style="margin-top: 4px;">
+              <button class="btn btn-stop-pipeline" id="btn-hud-stop-pipeline" style="width:100%; padding:5px 8px; font-size:10.5px; background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius:6px; cursor:pointer; font-weight:600;">
+                🛑 终止全网流水线巡航
+              </button>
+            </div>
           </div>
 
           <div class="stats-grid">
@@ -432,7 +584,7 @@
         </div>
       </div>
       <div class="pill-badge" id="hud-pill-badge">
-        ⚡ 猎聘巡航 (<span id="pill-count">0</span>/<span id="pill-limit">30</span>)
+        ⚡ 猎聘巡航 (<span id="pill-count">0</span>/<span id="pill-limit">30</span>)<span id="pill-pipe-stat" style="display:none; margin-left:4px; color:#c084fc;"> | 🌐 0%</span>
       </div>
     `;
 
@@ -510,6 +662,15 @@
       window.dispatchEvent(new CustomEvent('JOBCRUISE_TOGGLE_QUICKFILL'));
     });
 
+    // 终止全网流水线巡航
+    shadowRoot.getElementById('btn-hud-stop-pipeline')?.addEventListener('click', () => {
+      logHUD('<span class="highlight">[终止巡航]</span> 正在终止全网流水线协同调度...');
+      chrome.runtime.sendMessage({ type: 'STOP_CRUISE_PIPELINE' }, () => {
+        stopLiepinCruise();
+        renderPipelineHUD({ isActive: false });
+      });
+    });
+
     // 跨网站切换按钮
     shadowRoot.querySelectorAll('.site-chip-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -581,6 +742,63 @@
     }
   }
 
+  // 渲染全网流水线实时协同卡片
+  function renderPipelineHUD(status) {
+    if (!shadowRoot) return;
+    pipelineStatusCache = status;
+    const card = shadowRoot.getElementById('hud-pipeline-card');
+    const compactPipe = shadowRoot.getElementById('compact-pipe-stat');
+    const pillPipe = shadowRoot.getElementById('pill-pipe-stat');
+    if (!card) return;
+
+    if (status && status.isActive) {
+      card.style.display = 'flex';
+      const siteTag = shadowRoot.getElementById('hud-pipe-site-tag');
+      const siteText = shadowRoot.getElementById('hud-pipe-site-text');
+      const siteCountEl = shadowRoot.getElementById('hud-pipe-site-count');
+      const siteTargetEl = shadowRoot.getElementById('hud-pipe-site-target');
+      const barFill = shadowRoot.getElementById('hud-pipe-bar-fill');
+      const stepList = shadowRoot.getElementById('hud-pipe-step-list');
+      const pctText = shadowRoot.getElementById('hud-pipe-percent-text');
+
+      const totalSites = (status.sites && status.sites.length) || 3;
+      const curIdx = status.currentIndex !== undefined ? status.currentIndex : 0;
+      const curSite = status.currentSite || (status.sites && status.sites[curIdx]);
+      const siteName = curSite ? curSite.name : '猎聘网';
+
+      if (siteTag) siteTag.textContent = `第 ${curIdx + 1}/${totalSites} 站`;
+      if (siteText) siteText.textContent = `【${siteName}】`;
+      if (siteCountEl) siteCountEl.textContent = status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount;
+      if (siteTargetEl) siteTargetEl.textContent = status.perSiteTarget || 30;
+
+      const pct = status.overallPercent !== undefined ? status.overallPercent : 0;
+      if (barFill) barFill.style.width = `${pct}%`;
+      if (pctText) pctText.textContent = `${pct}%`;
+
+      if (compactPipe) {
+        compactPipe.style.display = 'inline';
+        compactPipe.textContent = `🌐 全网 ${pct}%`;
+      }
+      if (pillPipe) {
+        pillPipe.style.display = 'inline';
+        pillPipe.textContent = ` | 🌐 ${pct}%`;
+      }
+
+      if (stepList && status.sitesStatus) {
+        stepList.textContent = status.sitesStatus.map(s => {
+          if (s.skipped) return `${s.name}(跳过)`;
+          if (s.isPassed) return `${s.name}(${s.done})✓`;
+          if (s.isCurrent) return `${s.name}(${s.done}/${s.target})🚀`;
+          return `${s.name}(待启动)`;
+        }).join(' → ');
+      }
+    } else {
+      card.style.display = 'none';
+      if (compactPipe) compactPipe.style.display = 'none';
+      if (pillPipe) pillPipe.style.display = 'none';
+    }
+  }
+
   function updateHUD() {
     if (!shadowRoot) return;
     const todayEl = shadowRoot.getElementById('val-today-count');
@@ -601,6 +819,10 @@
     if (tagCountEl) tagCountEl.textContent = activeTags.length;
     if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
     if (compactSess) compactSess.textContent = sessionCount;
+
+    // 同步更新流水线卡片当前站计数
+    const pipeCountEl = shadowRoot.getElementById('hud-pipe-site-count');
+    if (pipeCountEl) pipeCountEl.textContent = sessionCount;
   }
 
   // ================= 猎聘登录态智能识别 =================
@@ -645,9 +867,10 @@
 
   let isSkipped = false;
 
-  async function startLiepinCruise(target = null, isFromPipeline = false, initialSessionCount = 0) {
+  async function startLiepinCruise(target = null, isFromPipeline = false, initialSessionCount = 0, tagIdx = 0) {
     refreshConfig();
     isSkipped = false;
+    currentTagIndex = tagIdx || 0;
 
     // 智能登录态检测
     if (!checkIsLoggedIn()) {
@@ -702,6 +925,28 @@
     pipelineTarget = target || (config.dailyLimit || 30);
     sessionCount = initialSessionCount || 0;
 
+    // 智能定向检索关键词校验：如果猎聘当前为广谱推荐流且未带 key= 参数，自动导航至精准搜索
+    const currentUrl = window.location.href;
+    const targetTag = activeTags[currentTagIndex] || activeTags[0] || '';
+    if (targetTag && !currentUrl.includes('key=')) {
+      logHUD(`<span class="highlight">[定向检索重定向]</span> 猎聘当前为广谱推荐流，正在自动进入【${targetTag}】精准定向搜索...`);
+      if (pipelineMode) {
+        try {
+          sessionStorage.setItem('ziaver_pipeline_liepin_state', JSON.stringify({
+            inPipeline: true,
+            target: pipelineTarget,
+            sessionCount: sessionCount,
+            currentTagIndex: currentTagIndex,
+            timestamp: Date.now()
+          }));
+        } catch (e) {}
+      }
+      setTimeout(() => {
+        window.location.href = `https://www.liepin.com/zhaopin/?city=050090&key=${encodeURIComponent(targetTag)}`;
+      }, 1200);
+      return;
+    }
+
     isRunning = true;
     isPaused = false;
     const btn = shadowRoot.getElementById('btn-toggle-run');
@@ -712,7 +957,7 @@
     btn.className = 'btn btn-stop';
     btnPause.style.display = 'flex';
 
-    logHUD(`<span class="highlight">[启动]</span> ${pipelineMode ? `全网流水线模式 (本站目标: ${pipelineTarget}，已完成: ${sessionCount})！` : ''}开始扫描卡片，校验高亮词条...`);
+    logHUD(`<span class="highlight">[启动]</span> ${pipelineMode ? `全网流水线模式 (本站目标: ${pipelineTarget}，当前检索词:【${targetTag}】)！` : `当前检索词:【${targetTag}】`}开始精准扫描卡片...`);
     if (document.hidden) {
       logHUD('<span class="skip" style="color:#fbbf24;">[提示] 建议保持窗口展开（或放至 Win+Tab 虚拟桌面），避免最小化被系统节能休眠限速。</span>');
     }
@@ -802,6 +1047,8 @@
         break;
       }
 
+      let pageMatchedCount = 0;
+
       for (let i = 0; i < cards.length; i++) {
         if (!isRunning) break;
         while (isPaused) {
@@ -838,12 +1085,13 @@
         const salary = salaryEl ? salaryEl.textContent.trim() : '';
         const company = companyEl ? companyEl.textContent.trim() : '';
 
-        const screenResult = screenJob(title, salary, company);
+        const screenResult = screenJob(title, salary, company, card);
         if (!screenResult.pass) {
           logHUD(`<span class="skip">${screenResult.reason}</span>`);
           continue;
         }
 
+        pageMatchedCount++;
         const matchedTag = screenResult.matchedTag;
 
         // 寻找“应聘”或“立即沟通”
@@ -863,7 +1111,7 @@
 
         if (applyBtn) {
           const noteText = generateDynamicNote(title, matchedTag, company);
-          logHUD(`<span class="highlight">[命中词条: ${matchedTag}]</span> ${company} · ${title} (${salary})`);
+          logHUD(`<span class="highlight">[命中高亮词条: ${matchedTag}${screenResult.matchType ? ` · ${screenResult.matchType}` : ''}]</span> ${company} · ${title} (${salary})`);
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
           await sleep(1000);
 
@@ -931,6 +1179,29 @@
       }
 
       const nextPage = document.querySelector('.ant-pagination-next:not(.ant-pagination-disabled) button, a.pagination-next');
+
+      // 智能换词判定：如果当前页没有产生任何命中，且无下一页(或已翻完)，自动轮转下一个高亮词条继续巡航
+      if (!nextPage || pageMatchedCount === 0) {
+        if (currentTagIndex + 1 < activeTags.length && (!pipelineMode || sessionCount < pipelineTarget)) {
+          const nextTag = activeTags[currentTagIndex + 1];
+          logHUD(`<span class="highlight">[智能换词轮转]</span> 词条【${activeTags[currentTagIndex]}】暂无可投岗位，自动换词切换至【${nextTag}】继续搜寻...`);
+          if (pipelineMode) {
+            try {
+              sessionStorage.setItem('ziaver_pipeline_liepin_state', JSON.stringify({
+                inPipeline: true,
+                target: pipelineTarget,
+                sessionCount: sessionCount,
+                currentTagIndex: currentTagIndex + 1,
+                timestamp: Date.now()
+              }));
+            } catch (e) {}
+          }
+          await sleep(2000);
+          window.location.href = `https://www.liepin.com/zhaopin/?city=050090&key=${encodeURIComponent(nextTag)}`;
+          return;
+        }
+      }
+
       if (nextPage) {
         if (pipelineMode) {
           try {
@@ -938,6 +1209,7 @@
               inPipeline: true,
               target: pipelineTarget,
               sessionCount: sessionCount,
+              currentTagIndex: currentTagIndex,
               timestamp: Date.now()
             }));
           } catch (e) {}
@@ -945,6 +1217,7 @@
         nextPage.click();
         await sleep(3500);
       } else {
+        logHUD('<span>[翻页结束]</span> 猎聘职位列表已无更多新岗位。');
         break;
       }
     }
@@ -953,21 +1226,26 @@
   function checkAndResumePipeline() {
     try {
       const raw = sessionStorage.getItem('ziaver_pipeline_liepin_state');
-      if (!raw) return;
-      const state = JSON.parse(raw);
-      if (!state || !state.inPipeline) return;
-      if (Date.now() - state.timestamp > 300000) {
-        sessionStorage.removeItem('ziaver_pipeline_liepin_state');
-        return;
-      }
-
       chrome.runtime.sendMessage({ type: 'GET_PIPELINE_STATUS' }, (res) => {
         if (chrome.runtime.lastError || !res) return;
+        renderPipelineHUD(res);
+
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (!state || !state.inPipeline) return;
+        if (Date.now() - state.timestamp > 300000) {
+          sessionStorage.removeItem('ziaver_pipeline_liepin_state');
+          return;
+        }
+
         const currentSite = res.sites && res.sites[res.currentIndex];
         if (res.isActive && currentSite && currentSite.id === 'liepin') {
-          logHUD(`<span class="highlight">[跨页续航]</span> 正在恢复全网流水线 (进度: ${state.sessionCount || 0}/${state.target})...`);
+          const tagIdx = state.currentTagIndex || 0;
+          currentTagIndex = tagIdx;
+          const searchKeyword = activeTags[tagIdx] || '运营';
+          logHUD(`<span class="highlight">[跨页续航]</span> 正在恢复全网流水线 (进度: ${state.sessionCount || 0}/${state.target}，当前检索词:【${searchKeyword}】)...`);
           setTimeout(() => {
-            startLiepinCruise(state.target, true, state.sessionCount || 0);
+            startLiepinCruise(state.target, true, state.sessionCount || 0, tagIdx);
           }, 1500);
         } else {
           sessionStorage.removeItem('ziaver_pipeline_liepin_state');
@@ -982,15 +1260,24 @@
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'START_PIPELINE_RUN') {
       const target = request.target || 10;
-      console.log('[ZIAVER Autopilot] 猎聘网收到全网流水线启动指令，目标:', target);
+      if (request.activeTags && Array.isArray(request.activeTags) && request.activeTags.length > 0) {
+        activeTags = request.activeTags;
+      }
+      currentTagIndex = request.currentTagIndex || 0;
+      console.log('[ZIAVER Autopilot] 猎聘网收到全网流水线启动指令，目标:', target, '词条索引:', currentTagIndex);
       refreshConfig(() => {
-        startLiepinCruise(target, true);
+        startLiepinCruise(target, true, 0, currentTagIndex);
       });
       sendResponse({ status: 'started', platform: '猎聘网' });
       return true;
     } else if (request.type === 'STOP_CRUISE_PIPELINE') {
       stopLiepinCruise();
+      renderPipelineHUD({ isActive: false });
       sendResponse({ status: 'stopped' });
+      return true;
+    } else if (request.type === 'PIPELINE_BROADCAST_STATUS') {
+      renderPipelineHUD(request.status);
+      sendResponse({ status: 'ok' });
       return true;
     } else if (request.type === 'PING') {
       sendResponse({ status: 'pong', platform: '猎聘网' });

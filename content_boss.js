@@ -427,6 +427,70 @@
         font-size: 12px;
         font-weight: 700;
       }
+      /* 全网流水线专属进度卡片样式 */
+      .pipeline-card {
+        background: rgba(0, 242, 254, 0.1);
+        border: 1px solid rgba(0, 242, 254, 0.4);
+        border-radius: 8px;
+        padding: 9px 11px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .pipeline-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        font-weight: 700;
+        color: #a5f3fc;
+      }
+      .pipe-pulse-dot {
+        width: 7px;
+        height: 7px;
+        background: #00f2fe;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+        box-shadow: 0 0 8px #00f2fe;
+        animation: pipePulseBoss 1.5s infinite;
+      }
+      @keyframes pipePulseBoss {
+        0% { transform: scale(0.9); opacity: 0.7; }
+        50% { transform: scale(1.3); opacity: 1; }
+        100% { transform: scale(0.9); opacity: 0.7; }
+      }
+      .pipe-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(0, 242, 254, 0.25);
+        color: #a5f3fc;
+      }
+      .pipeline-info-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11.5px;
+      }
+      .pipeline-bar-wrap {
+        height: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 3px;
+        overflow: hidden;
+        margin: 2px 0;
+      }
+      .pipeline-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
+        border-radius: 3px;
+        transition: width 0.4s ease;
+      }
+      .pipeline-total-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
     `;
 
     const hudHtml = document.createElement('div');
@@ -445,7 +509,35 @@
         <div class="hud-body" id="hud-body">
           <div class="compact-stat-row" id="compact-stat-row">
             <span>今日: <b id="compact-val-today" style="color:#00f2fe;">0/30</b> | 本次: <b id="compact-val-sess" style="color:#00f2fe;">0</b></span>
+            <span id="compact-pipe-stat" style="display:none; color:#00f2fe; font-weight:700;">🌐 全网 0%</span>
             <span id="compact-status-tag" style="color:#10b981; font-size:10px;">🟢 就绪</span>
+          </div>
+
+          <!-- 全网流水线专属进度卡片 (Pipeline Banner) -->
+          <div class="pipeline-card" id="hud-pipeline-card" style="display: none;">
+            <div class="pipeline-header">
+              <div style="display:flex; align-items:center;">
+                <span class="pipe-pulse-dot"></span>
+                <span class="pipe-title">🌐 全网流水线协同巡航中</span>
+              </div>
+              <span class="pipe-badge" id="hud-pipe-site-tag">第 1/3 站</span>
+            </div>
+            <div class="pipeline-info-row">
+              <span id="hud-pipe-site-text" style="color:#e2e8f0; font-weight:700;">【BOSS直聘】</span>
+              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">本站: <b id="hud-pipe-site-count" style="color:#00f2fe;">0</b>/<span id="hud-pipe-site-target">30</span></span>
+            </div>
+            <div class="pipeline-bar-wrap">
+              <div class="pipeline-bar-fill" id="hud-pipe-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="pipeline-total-row">
+              <span id="hud-pipe-step-list" style="font-size:10px; color:#94a3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:210px;">BOSS 🚀 → 猎聘 ⏳ → 拉勾 ⏳</span>
+              <span id="hud-pipe-percent-text" style="font-size:11px; font-weight:800; color:#00f2fe;">0%</span>
+            </div>
+            <div style="margin-top: 4px;">
+              <button class="btn btn-stop-pipeline" id="btn-hud-stop-pipeline" style="width:100%; padding:5px 8px; font-size:10.5px; background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; border-radius:6px; cursor:pointer; font-weight:600;">
+                🛑 终止全网流水线巡航
+              </button>
+            </div>
           </div>
 
           <div class="stats-grid">
@@ -503,7 +595,7 @@
         </div>
       </div>
       <div class="pill-badge" id="hud-pill-badge">
-        ⚡ BOSS巡航 (<span id="pill-count">0</span>/<span id="pill-limit">30</span>)
+        ⚡ BOSS巡航 (<span id="pill-count">0</span>/<span id="pill-limit">30</span>)<span id="pill-pipe-stat" style="display:none; margin-left:4px; color:#00f2fe;"> | 🌐 0%</span>
       </div>
     `;
 
@@ -581,6 +673,15 @@
       window.dispatchEvent(new CustomEvent('JOBCRUISE_TOGGLE_QUICKFILL'));
     });
 
+    // 终止全网流水线巡航
+    shadowRoot.getElementById('btn-hud-stop-pipeline')?.addEventListener('click', () => {
+      logHUD('<span class="highlight">[终止巡航]</span> 正在终止全网流水线协同调度...');
+      chrome.runtime.sendMessage({ type: 'STOP_CRUISE_PIPELINE' }, () => {
+        stopAutopilot();
+        renderPipelineHUD({ isActive: false });
+      });
+    });
+
     // 跨网站切换按钮
     shadowRoot.querySelectorAll('.site-chip-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -652,6 +753,62 @@
     }
   }
 
+  // 渲染全网流水线实时协同卡片
+  function renderPipelineHUD(status) {
+    if (!shadowRoot) return;
+    const card = shadowRoot.getElementById('hud-pipeline-card');
+    const compactPipe = shadowRoot.getElementById('compact-pipe-stat');
+    const pillPipe = shadowRoot.getElementById('pill-pipe-stat');
+    if (!card) return;
+
+    if (status && status.isActive) {
+      card.style.display = 'flex';
+      const siteTag = shadowRoot.getElementById('hud-pipe-site-tag');
+      const siteText = shadowRoot.getElementById('hud-pipe-site-text');
+      const siteCountEl = shadowRoot.getElementById('hud-pipe-site-count');
+      const siteTargetEl = shadowRoot.getElementById('hud-pipe-site-target');
+      const barFill = shadowRoot.getElementById('hud-pipe-bar-fill');
+      const stepList = shadowRoot.getElementById('hud-pipe-step-list');
+      const pctText = shadowRoot.getElementById('hud-pipe-percent-text');
+
+      const totalSites = (status.sites && status.sites.length) || 3;
+      const curIdx = status.currentIndex !== undefined ? status.currentIndex : 0;
+      const curSite = status.currentSite || (status.sites && status.sites[curIdx]);
+      const siteName = curSite ? curSite.name : 'BOSS直聘';
+
+      if (siteTag) siteTag.textContent = `第 ${curIdx + 1}/${totalSites} 站`;
+      if (siteText) siteText.textContent = `【${siteName}】`;
+      if (siteCountEl) siteCountEl.textContent = status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount;
+      if (siteTargetEl) siteTargetEl.textContent = status.perSiteTarget || 30;
+
+      const pct = status.overallPercent !== undefined ? status.overallPercent : 0;
+      if (barFill) barFill.style.width = `${pct}%`;
+      if (pctText) pctText.textContent = `${pct}%`;
+
+      if (compactPipe) {
+        compactPipe.style.display = 'inline';
+        compactPipe.textContent = `🌐 全网 ${pct}%`;
+      }
+      if (pillPipe) {
+        pillPipe.style.display = 'inline';
+        pillPipe.textContent = ` | 🌐 ${pct}%`;
+      }
+
+      if (stepList && status.sitesStatus) {
+        stepList.textContent = status.sitesStatus.map(s => {
+          if (s.skipped) return `${s.name}(跳过)`;
+          if (s.isPassed) return `${s.name}(${s.done})✓`;
+          if (s.isCurrent) return `${s.name}(${s.done}/${s.target})🚀`;
+          return `${s.name}(待启动)`;
+        }).join(' → ');
+      }
+    } else {
+      card.style.display = 'none';
+      if (compactPipe) compactPipe.style.display = 'none';
+      if (pillPipe) pillPipe.style.display = 'none';
+    }
+  }
+
   function updateHUD() {
     if (!shadowRoot) return;
     const todayEl = shadowRoot.getElementById('val-today-count');
@@ -672,6 +829,10 @@
     if (tagCountEl) tagCountEl.textContent = activeTags.length;
     if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
     if (compactSess) compactSess.textContent = sessionCount;
+
+    // 同步更新流水线卡片当前站计数
+    const pipeCountEl = shadowRoot.getElementById('hud-pipe-site-count');
+    if (pipeCountEl) pipeCountEl.textContent = sessionCount;
   }
 
   // ================= HR 回复未读监听 =================
@@ -1085,16 +1246,18 @@
   function checkAndResumePipeline() {
     try {
       const raw = sessionStorage.getItem('ziaver_pipeline_boss_state');
-      if (!raw) return;
-      const state = JSON.parse(raw);
-      if (!state || !state.inPipeline) return;
-      if (Date.now() - state.timestamp > 300000) {
-        sessionStorage.removeItem('ziaver_pipeline_boss_state');
-        return;
-      }
-
       chrome.runtime.sendMessage({ type: 'GET_PIPELINE_STATUS' }, (res) => {
         if (chrome.runtime.lastError || !res) return;
+        renderPipelineHUD(res);
+
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (!state || !state.inPipeline) return;
+        if (Date.now() - state.timestamp > 300000) {
+          sessionStorage.removeItem('ziaver_pipeline_boss_state');
+          return;
+        }
+
         const currentSite = res.sites && res.sites[res.currentIndex];
         if (res.isActive && currentSite && currentSite.id === 'boss') {
           logHUD(`<span class="highlight">[跨页续航]</span> 正在恢复全网流水线 (进度: ${state.sessionCount || 0}/${state.target})...`);
@@ -1117,12 +1280,20 @@
       console.log('[ZIAVER Autopilot] BOSS 直聘收到全网流水线启动指令，目标:', target);
       refreshConfig(() => {
         startAutopilot(target, true);
+        chrome.runtime.sendMessage({ type: 'GET_PIPELINE_STATUS' }, (res) => {
+          if (res) renderPipelineHUD(res);
+        });
       });
       sendResponse({ status: 'started', platform: 'BOSS直聘' });
       return true;
     } else if (request.type === 'STOP_CRUISE_PIPELINE') {
       stopAutopilot();
+      renderPipelineHUD({ isActive: false });
       sendResponse({ status: 'stopped' });
+      return true;
+    } else if (request.type === 'PIPELINE_BROADCAST_STATUS') {
+      renderPipelineHUD(request.status);
+      sendResponse({ status: 'ok' });
       return true;
     } else if (request.type === 'PING') {
       sendResponse({ status: 'pong', platform: 'BOSS直聘' });

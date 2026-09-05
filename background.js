@@ -190,8 +190,83 @@ let cruisePipeline = {
   currentIndex: 0,
   currentSiteCount: 0,
   activeTabId: null,
-  siteStats: {}
+  siteStats: {},
+  siteSkipped: {}
 };
+
+// 获取详尽的全网流水线协同状态
+function getDetailedPipelineStatus() {
+  const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex] || null;
+  const totalSites = PIPELINE_SITES.length;
+  const targetPerSite = cruisePipeline.perSiteTarget || 30;
+  const overallTarget = totalSites * targetPerSite;
+
+  let totalDone = 0;
+  const sitesStatus = PIPELINE_SITES.map((s, idx) => {
+    let done = 0;
+    if (idx === cruisePipeline.currentIndex) {
+      done = cruisePipeline.currentSiteCount || 0;
+    } else {
+      done = cruisePipeline.siteStats[s.id] || 0;
+    }
+    totalDone += done;
+    return {
+      id: s.id,
+      name: s.name,
+      done,
+      target: targetPerSite,
+      isCurrent: idx === cruisePipeline.currentIndex,
+      isPassed: idx < cruisePipeline.currentIndex,
+      isFuture: idx > cruisePipeline.currentIndex,
+      skipped: (cruisePipeline.siteSkipped && cruisePipeline.siteSkipped[s.id]) || null
+    };
+  });
+
+  const overallPercent = overallTarget > 0 ? Math.min(Math.round((totalDone / overallTarget) * 100), 100) : 0;
+
+  return {
+    isActive: cruisePipeline.isActive,
+    perSiteTarget: targetPerSite,
+    currentIndex: cruisePipeline.currentIndex,
+    currentSiteCount: cruisePipeline.currentSiteCount,
+    currentSite,
+    totalDone,
+    overallTarget,
+    overallPercent,
+    sites: PIPELINE_SITES,
+    siteStats: cruisePipeline.siteStats,
+    siteSkipped: cruisePipeline.siteSkipped,
+    sitesStatus
+  };
+}
+
+// 扩展图标 Badge 徽章实时进度同步
+function updateExtensionBadge() {
+  if (!chrome.action) return;
+  if (!cruisePipeline.isActive) {
+    chrome.action.setBadgeText({ text: '' });
+    return;
+  }
+  const status = getDetailedPipelineStatus();
+  chrome.action.setBadgeBackgroundColor({ color: '#8b5cf6' }); // 优雅炫彩紫
+  chrome.action.setBadgeText({ text: `${status.overallPercent}%` });
+}
+
+// 广播全网流水线状态至所有标签页 (驱动各网页右下角 HUD 实时更新)
+function broadcastPipelineStatus() {
+  const payload = getDetailedPipelineStatus();
+  chrome.tabs.query({}, (tabs) => {
+    if (!tabs) return;
+    tabs.forEach(t => {
+      chrome.tabs.sendMessage(t.id, {
+        type: 'PIPELINE_BROADCAST_STATUS',
+        status: payload
+      }, () => {
+        if (chrome.runtime.lastError) { /* 忽略离线页面 */ }
+      });
+    });
+  });
+}
 
 function startCruisePipeline(perSiteTarget = 'follow_limit') {
   chrome.storage.local.get(['config'], (res) => {
@@ -207,11 +282,14 @@ function startCruisePipeline(perSiteTarget = 'follow_limit') {
     cruisePipeline.siteStats = {};
     cruisePipeline.siteSkipped = {};
 
+    updateExtensionBadge();
+    broadcastPipelineStatus();
+
     chrome.notifications.create('pipeline_start_' + Date.now(), {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
       title: '🚀 全网流水线巡航已开启！',
-      message: `目标: 每个平台各投递 ${effectiveTarget} 个符合高亮词条与薪资门槛的岗位 (跟随安全上限)。第一站：【${PIPELINE_SITES[0].name}】`,
+      message: `目标: 每个平台各投递 ${effectiveTarget} 个符合高亮词条与薪资门槛的岗位。第一站：【${PIPELINE_SITES[0].name}】`,
       priority: 2
     });
 
@@ -221,6 +299,8 @@ function startCruisePipeline(perSiteTarget = 'follow_limit') {
 
 function stopCruisePipeline() {
   cruisePipeline.isActive = false;
+  updateExtensionBadge();
+  broadcastPipelineStatus();
 
   // 广播停止指令至所有页面
   chrome.tabs.query({}, (tabs) => {
@@ -251,22 +331,45 @@ function launchCurrentPipelineSite() {
   const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex];
   cruisePipeline.currentSiteCount = 0;
 
-  chrome.notifications.create('site_switch_' + Date.now(), {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-    title: `🌐 巡航切换：第 ${cruisePipeline.currentIndex + 1}/${PIPELINE_SITES.length} 站【${currentSite.name}】`,
-    message: `正在自动打开或聚焦 ${currentSite.name}，并启动定向高亮匹配巡航...`,
-    priority: 2
-  });
+  chrome.storage.local.get(['jobTags'], (res) => {
+    const rawTags = (res && res.jobTags) || DEFAULT_JOB_TAGS;
+    const activeTags = rawTags.filter(t => t.active).map(t => (t.name || '').trim()).filter(Boolean);
+    const firstTag = activeTags.length > 0 ? activeTags[0] : '';
 
-  openOrSwitchToSite(currentSite.url, currentSite.matchUrl, (tabId) => {
-    cruisePipeline.activeTabId = tabId;
-    // 页面完全就绪后下发启动巡航指令
-    sendPipelineMessageWithRetry(tabId, {
-      type: 'START_PIPELINE_RUN',
-      target: cruisePipeline.perSiteTarget,
-      siteId: currentSite.id
-    }, 4);
+    let siteUrl = currentSite.url;
+    if (currentSite.id === 'liepin') {
+      // 猎聘必须使用定向高亮词条检索，杜绝无关键词的泛滥流
+      if (firstTag) {
+        siteUrl = `https://www.liepin.com/zhaopin/?city=050090&key=${encodeURIComponent(firstTag)}`;
+      }
+    } else if (currentSite.id === 'lagou') {
+      if (firstTag) {
+        siteUrl = `https://www.lagou.com/wn/jobs?kd=${encodeURIComponent(firstTag)}&city=%E6%B7%B1%E5%9C%B3`;
+      }
+    }
+
+    updateExtensionBadge();
+    broadcastPipelineStatus();
+
+    chrome.notifications.create('site_switch_' + Date.now(), {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+      title: `🌐 巡航切换：第 ${cruisePipeline.currentIndex + 1}/${PIPELINE_SITES.length} 站【${currentSite.name}】`,
+      message: `正在自动打开或聚焦 ${currentSite.name}${firstTag ? ` (首选检索词: ${firstTag})` : ''}，并启动定向高亮匹配巡航...`,
+      priority: 2
+    });
+
+    openOrSwitchToSite(siteUrl, currentSite.matchUrl, (tabId) => {
+      cruisePipeline.activeTabId = tabId;
+      // 页面完全就绪后下发启动巡航指令
+      sendPipelineMessageWithRetry(tabId, {
+        type: 'START_PIPELINE_RUN',
+        target: cruisePipeline.perSiteTarget,
+        siteId: currentSite.id,
+        activeTags: activeTags,
+        currentTagIndex: 0
+      }, 4);
+    });
   });
 }
 
@@ -310,7 +413,11 @@ function openOrSwitchToSite(url, matchUrl, callback) {
               targetTab.url.includes('/wn/jobs')
             );
 
-            if (isJobPage) {
+            // 若已有标签页但未带精准搜索词(如猎聘/拉勾无key/kd)，更新至目标检索URL
+            const needsSearchKeyword = (url.includes('key=') && !targetTab.url.includes('key=')) ||
+                                       (url.includes('kd=') && !targetTab.url.includes('kd='));
+
+            if (isJobPage && !needsSearchKeyword) {
               setTimeout(() => {
                 callback(targetTab.id);
               }, 1200);
@@ -405,6 +512,17 @@ function sendPipelineMessageWithRetry(tabId, message, retries = 6) {
 function finishEntirePipeline() {
   cruisePipeline.isActive = false;
 
+  if (chrome.action) {
+    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+    chrome.action.setBadgeText({ text: '✓' });
+    setTimeout(() => {
+      if (!cruisePipeline.isActive) {
+        chrome.action.setBadgeText({ text: '' });
+      }
+    }, 20000);
+  }
+  broadcastPipelineStatus();
+
   let totalCount = 0;
   const breakdown = [];
   Object.keys(cruisePipeline.siteStats).forEach(siteId => {
@@ -440,18 +558,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'ok' });
     return true;
   } else if (request.type === 'GET_PIPELINE_STATUS') {
-    const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex] || null;
-    sendResponse({
-      ...cruisePipeline,
-      currentSite,
-      sites: PIPELINE_SITES
-    });
+    sendResponse(getDetailedPipelineStatus());
     return true;
   } else if (request.type === 'PIPELINE_SITE_PROGRESS') {
     cruisePipeline.currentSiteCount = request.count || 0;
     if (request.site) {
       cruisePipeline.siteStats[request.site] = request.count;
     }
+    updateExtensionBadge();
+    broadcastPipelineStatus();
     sendResponse({ status: 'ok' });
     return true;
   } else if (request.type === 'PIPELINE_SITE_SKIPPED') {
@@ -460,6 +575,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     cruisePipeline.siteStats[skippedSiteId] = 0;
     cruisePipeline.siteSkipped = cruisePipeline.siteSkipped || {};
     cruisePipeline.siteSkipped[skippedSiteId] = reason;
+
+    updateExtensionBadge();
+    broadcastPipelineStatus();
 
     const finishedSiteObj = PIPELINE_SITES.find(s => s.id === skippedSiteId);
     const siteName = finishedSiteObj ? finishedSiteObj.name : skippedSiteId;
@@ -483,6 +601,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const finishedSiteId = request.site;
     const count = request.count || 0;
     cruisePipeline.siteStats[finishedSiteId] = count;
+
+    updateExtensionBadge();
+    broadcastPipelineStatus();
 
     const finishedSiteObj = PIPELINE_SITES.find(s => s.id === finishedSiteId);
     const siteName = finishedSiteObj ? finishedSiteObj.name : finishedSiteId;
