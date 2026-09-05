@@ -98,7 +98,8 @@ function initOrUpdateStorage() {
       useCustomGreeting: true,
       customGreetingTemplate: DEFAULT_GREETING,
       lastActiveDate: today,
-      todayCount: 0
+      todayCount: 0,
+      siteTodayCounts: { boss: 0, liepin: 0, lagou: 0, ats: 0 }
     };
 
     const updates = {};
@@ -108,6 +109,13 @@ function initOrUpdateStorage() {
       updates.config = initialConfig;
     } else {
       const mergedConfig = { ...initialConfig, ...res.config };
+      if (mergedConfig.lastActiveDate !== today) {
+        mergedConfig.lastActiveDate = today;
+        mergedConfig.todayCount = 0;
+        mergedConfig.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      } else if (!mergedConfig.siteTodayCounts) {
+        mergedConfig.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      }
       // 若尚未设置过话术，赋默认新风格
       if (!res.config.customGreetingTemplate) {
         mergedConfig.customGreetingTemplate = DEFAULT_GREETING;
@@ -178,29 +186,36 @@ const PIPELINE_SITES = [
 
 let cruisePipeline = {
   isActive: false,
-  perSiteTarget: 10,
+  perSiteTarget: 30,
   currentIndex: 0,
   currentSiteCount: 0,
   activeTabId: null,
   siteStats: {}
 };
 
-function startCruisePipeline(perSiteTarget = 10) {
-  cruisePipeline.isActive = true;
-  cruisePipeline.perSiteTarget = perSiteTarget;
-  cruisePipeline.currentIndex = 0;
-  cruisePipeline.currentSiteCount = 0;
-  cruisePipeline.siteStats = {};
+function startCruisePipeline(perSiteTarget = 'follow_limit') {
+  chrome.storage.local.get(['config'], (res) => {
+    const config = res.config || {};
+    const effectiveTarget = (perSiteTarget && perSiteTarget !== 'follow_limit' && Number(perSiteTarget) > 0)
+      ? Number(perSiteTarget)
+      : (config.dailyLimit || 30);
 
-  chrome.notifications.create('pipeline_start_' + Date.now(), {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-    title: '🚀 全网流水线巡航已开启！',
-    message: `目标: 每个平台各投递 ${perSiteTarget} 个符合高亮词条与薪资门槛的岗位。第一站：【${PIPELINE_SITES[0].name}】`,
-    priority: 2
+    cruisePipeline.isActive = true;
+    cruisePipeline.perSiteTarget = effectiveTarget;
+    cruisePipeline.currentIndex = 0;
+    cruisePipeline.currentSiteCount = 0;
+    cruisePipeline.siteStats = {};
+
+    chrome.notifications.create('pipeline_start_' + Date.now(), {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+      title: '🚀 全网流水线巡航已开启！',
+      message: `目标: 每个平台各投递 ${effectiveTarget} 个符合高亮词条与薪资门槛的岗位 (跟随安全上限)。第一站：【${PIPELINE_SITES[0].name}】`,
+      priority: 2
+    });
+
+    launchCurrentPipelineSite();
   });
-
-  launchCurrentPipelineSite();
 }
 
 function stopCruisePipeline() {
@@ -329,8 +344,7 @@ function finishEntirePipeline() {
 // 处理来自各页面的消息通信
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'START_CRUISE_PIPELINE') {
-    const target = request.perSiteTarget || 10;
-    startCruisePipeline(target);
+    startCruisePipeline(request.perSiteTarget);
     sendResponse({ status: 'ok', pipeline: cruisePipeline });
     return true;
   } else if (request.type === 'STOP_CRUISE_PIPELINE') {
@@ -394,8 +408,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (config.lastActiveDate !== today) {
         config.lastActiveDate = today;
         config.todayCount = 0;
+        config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
       }
-      config.todayCount = (config.todayCount || 0) + 1;
+      if (!config.siteTodayCounts) {
+        config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      }
+
+      // 区分平台进行独立今日计数
+      const rawPlatform = (request.data && request.data.platform) || '';
+      let siteKey = 'boss';
+      if (rawPlatform.includes('猎聘') || rawPlatform.toLowerCase().includes('liepin')) {
+        siteKey = 'liepin';
+      } else if (rawPlatform.includes('拉勾') || rawPlatform.toLowerCase().includes('lagou')) {
+        siteKey = 'lagou';
+      } else if (rawPlatform.includes('ATS') || rawPlatform.toLowerCase().includes('ats')) {
+        siteKey = 'ats';
+      }
+
+      config.siteTodayCounts[siteKey] = (config.siteTodayCounts[siteKey] || 0) + 1;
+      // 汇总各站总和为全网总计数
+      config.todayCount = Object.values(config.siteTodayCounts).reduce((a, b) => a + (Number(b) || 0), 0);
       
       const log = res.applyLog || [];
       const now = new Date();
@@ -417,7 +449,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (log.length > 500) log.pop();
 
       chrome.storage.local.set({ config, applyLog: log }, () => {
-        sendResponse({ success: true, count: config.todayCount });
+        sendResponse({ success: true, count: config.todayCount, siteCount: config.siteTodayCounts[siteKey], siteKey });
       });
     });
     return true;

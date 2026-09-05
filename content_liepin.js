@@ -33,7 +33,8 @@
         config = { ...config, ...res.config };
         const today = new Date().toISOString().split('T')[0];
         if (config.lastActiveDate === today) {
-          todayCount = config.todayCount || 0;
+          const counts = config.siteTodayCounts || {};
+          todayCount = counts.liepin !== undefined ? counts.liepin : 0;
         } else {
           todayCount = 0;
         }
@@ -615,7 +616,7 @@
     }
 
     pipelineMode = !!isFromPipeline;
-    pipelineTarget = target || 10;
+    pipelineTarget = target || (config.dailyLimit || 30);
     sessionCount = 0;
 
     isRunning = true;
@@ -762,11 +763,14 @@
           todayCount++;
           updateHUD();
 
-          // 持久化今日统计
+          // 持久化今日统计 (猎聘独立计数)
           if (chrome.storage && chrome.storage.local) {
             const today = new Date().toISOString().split('T')[0];
+            const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+            siteCounts.liepin = todayCount;
+            const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
             chrome.storage.local.set({
-              config: { ...config, todayCount, lastActiveDate: today }
+              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
             });
           }
 

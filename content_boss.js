@@ -39,7 +39,8 @@
         config = { ...config, ...res.config };
         const today = new Date().toISOString().split('T')[0];
         if (config.lastActiveDate === today) {
-          todayCount = config.todayCount || 0;
+          const counts = config.siteTodayCounts || {};
+          todayCount = counts.boss !== undefined ? counts.boss : (config.todayCount || 0);
         } else {
           todayCount = 0;
         }
@@ -717,7 +718,7 @@
     }
 
     pipelineMode = !!isFromPipeline;
-    pipelineTarget = target || 10;
+    pipelineTarget = target || (config.dailyLimit || 30);
 
     isRunning = true;
     isPaused = false;
@@ -758,14 +759,15 @@
     const btnToggle = shadowRoot?.getElementById('btn-toggle-run');
     const btnPause = shadowRoot?.getElementById('btn-pause-run');
     const statusTag = shadowRoot?.getElementById('compact-status-tag');
-    if (statusTag) { statusTag.textContent = '🟢 就绪'; statusTag.style.color = '#10b981'; }
+    const btnFold = shadowRoot?.getElementById('btn-fold-panel');
+    if (statusTag) { statusTag.textContent = '待命就绪'; statusTag.style.color = '#94a3b8'; }
     if (btnToggle) {
-      btnToggle.innerHTML = '<span>🚀 开启自动投递</span>';
+      btnToggle.innerHTML = '<span>🚀 开启自动巡航</span>';
       btnToggle.className = 'btn btn-primary';
     }
     if (btnPause) {
       btnPause.style.display = 'none';
-      btnPause.innerHTML = '<span>⏸ 暂停</span>';
+      btnPause.textContent = '⏸️ 暂停';
     }
     logHUD('<span>[巡航结束]</span> 巡航停止。');
   }
@@ -867,6 +869,17 @@
           todayCount++;
           sessionCount++;
           updateHUD();
+
+          // 独立持久化 BOSS 今日投递数据
+          if (chrome.storage && chrome.storage.local) {
+            const today = new Date().toISOString().split('T')[0];
+            const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+            siteCounts.boss = todayCount;
+            const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+            chrome.storage.local.set({
+              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
+            });
+          }
 
           // 发送详尽记录至后台表格
           chrome.runtime.sendMessage({

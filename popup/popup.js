@@ -74,7 +74,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       todayCountEl.textContent = 0;
     }
-    dailyLimitEl.textContent = config.dailyLimit || 30;
+    const currentLimit = config.dailyLimit || 30;
+    dailyLimitEl.textContent = currentLimit;
+
+    // 动态同步全网巡航下拉选项与安全上限联动
+    const optFollow = document.querySelector('#pipe-target-select option[value="follow_limit"]');
+    if (optFollow) {
+      optFollow.textContent = `🔄 跟随设定上限 (${currentLimit}个/站)`;
+    }
 
     const activeCount = tags.filter(t => t.active).length;
     activeTagsEl.textContent = activeCount;
@@ -141,6 +148,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 1500);
 
         dailyLimitEl.textContent = merged.dailyLimit;
+        const optFollowUpdate = document.querySelector('#pipe-target-select option[value="follow_limit"]');
+        if (optFollowUpdate) {
+          optFollowUpdate.textContent = `🔄 跟随设定上限 (${merged.dailyLimit}个/站)`;
+        }
       });
     });
   });
@@ -202,7 +213,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnStartPipeline) {
     btnStartPipeline.addEventListener('click', () => {
-      const target = parseInt(pipeTargetSelect.value, 10) || 10;
+      const selectedVal = pipeTargetSelect ? pipeTargetSelect.value : 'follow_limit';
+      const target = selectedVal === 'follow_limit' ? 'follow_limit' : (parseInt(selectedVal, 10) || 30);
       chrome.runtime.sendMessage({
         type: 'START_CRUISE_PIPELINE',
         perSiteTarget: target
