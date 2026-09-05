@@ -25,12 +25,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const topOpenBtn = document.getElementById('btn-open-full-dashboard');
   const heroOpenBtn = document.getElementById('btn-hero-dashboard');
   const heroRetroBtn = document.getElementById('btn-hero-retro');
+  const heroResumeDepotBtn = document.getElementById('btn-hero-resume-depot');
 
   if (topOpenBtn) topOpenBtn.addEventListener('click', openDashboard);
   if (heroOpenBtn) heroOpenBtn.addEventListener('click', openDashboard);
   if (heroRetroBtn) {
     heroRetroBtn.addEventListener('click', () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?view=view-retrospective') });
+      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-retrospective') });
+    });
+  }
+  if (heroResumeDepotBtn) {
+    heroResumeDepotBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-resume-depot') });
     });
   }
 

@@ -615,6 +615,9 @@
           <button class="quick-btn" id="btn-autofill">
             <span>✨ 一键自动填入表单</span>
           </button>
+          <button class="quick-btn" id="btn-toggle-quickfill-drawer" style="margin-top:6px; background:linear-gradient(135deg, rgba(0,242,254,0.18) 0%, rgba(59,130,246,0.18) 100%); border:1px solid #00f2fe; color:#00f2fe;">
+            <span>📋 展开简历速填小抽屉</span>
+          </button>
 
           <div class="section-label">针对该大厂的核心亮点文案 (点击即复制)</div>
           
@@ -691,6 +694,11 @@
     shadow.getElementById('btn-autofill').addEventListener('click', () => {
       const count = autoFillCurrentPage(portal);
       showToast(`✨ 成功探测并填入 ${count} 个字段！`);
+    });
+
+    // 展开简历速填小抽屉
+    shadow.getElementById('btn-toggle-quickfill-drawer')?.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('JOBCRUISE_TOGGLE_QUICKFILL'));
     });
 
     // 复制文案卡片

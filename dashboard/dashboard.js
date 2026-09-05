@@ -17,6 +17,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot)
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetViewName = urlParams.get('tab') || window.location.hash.replace('#', '');
+  if (targetViewName) {
+    const targetNavItem = document.querySelector(`.nav-item[data-view="${targetViewName}"]`);
+    if (targetNavItem) {
+      targetNavItem.click();
+    }
+  }
+
   // 2. 状态变量
   let currentTags = [];
   let currentLogs = [];
@@ -879,25 +889,727 @@ document.addEventListener('DOMContentLoaded', () => {
     btnExportRetro.addEventListener('click', exportRetrospectiveMarkdown);
   }
 
-  // 监听 URL 参数自动定位到指定 Tab (如 ?view=view-retrospective)
-  const urlParams = new URLSearchParams(window.location.search);
-  const targetViewParam = urlParams.get('view');
-  if (targetViewParam) {
-    navItems.forEach(n => {
-      if (n.getAttribute('data-view') === targetViewParam) {
-        n.classList.add('active');
-      } else {
-        n.classList.remove('active');
+  // ================= 10. 智能简历解析与网申速填武器库 =================
+  let currentResumeDepot = null;
+
+  const DEFAULT_SAMPLE_RESUME = `【个人优势】
+1. 具备5年电商大促运营与达人内容矩阵操盘实战经验，深度熟悉全域兴趣电商与达人分层BD拓展SOP。
+2. 操盘过多场千万级GMV大型战役节点，擅长数据归因分析（GMV/ROI/转化漏斗）与A/B测试。
+3. 具备商业摄影与布光分镜实战背景，能从视觉审美与硬件特性双向赋能内容爆款打造。
+4. 敏捷开发与工具编写能力，注重流程自动化与团队工作流提效，抗压能力强、注重业务闭环。
+
+【工作经历】
+2023.03 - 至今 | 某头部互联网科技公司 | 电商大促与达人运营专家
+- 工作内容：负责抖音电商大促全周期排期统筹、头部与中腰部达人分层建联及千川投放协同。
+- 核心业绩：主导大促节点达人矩阵撮合，累计拓展高产出达人超500位，推动活动期GMV突破8500万元，ROI环比提升38%。
+- 核心业绩：搭建自动化达人履约跟进表与分镜脚本审核SOP，缩短内容交付周期40%，沉淀多套高转化标杆案例。
+
+2021.07 - 2023.02 | 某新消费数码品牌 | 视觉内容与社区运营负责人
+- 工作内容：主导品牌全球影像创作者生态与数码摄影KOL社群运营，负责样片策划与商业摄影布光出片。
+- 核心业绩：统筹海外与国内数码极客创作者拓展，搭建万人活跃玩家创作者社群，月均二创爆款播放量超2000万。
+- 核心业绩：独立输出3套标杆商业产品图与分镜样片，赋能众筹发布会斩获超额认购300%。
+
+【项目经历】
+2024.04 - 2024.06 | 千万级全域兴趣电商大促战役全链路操盘 | 项目总控
+- 项目描述：联动供应链、运营、千川投放与头部主播专场，以数据看板驱动货盘排期与内容矩阵爆发。
+- 项目业绩：整体GMV达成率132%，打造3个单场破千万直播间，新客获客成本下降24%，实现人群资产深度沉淀。
+
+2023.08 - 2023.11 | 影像创作者全球生态冷启动与爆款孵化计划 | 核心主导
+- 项目描述：针对户外运动与街拍全景相机新品上市，制定全球摄影师定向邀请、样机测试及样片宣发闭环。
+- 项目业绩：达成100+海外顶级视觉KOL零佣金深度测评，全网曝光超5000万，直接拉动新品首发预售售罄。
+
+【专业技能】
+达人BD拓展, 千川投放, 电商大促操盘, 商业摄影, 灯光布光, 分镜脚本, 数据分析(SQL/Excel), 飞书多维表格, 项目SOP搭建, 创作者生态
+
+【兴趣爱好】
+商业摄影与布光, 户外骑行, 二次元与主机游戏, 数码极客测评, 咖啡调饮, 探索提效新工具
+
+【自我评价】
+精简版：执行力强，看重数据和业务实际落地成果，具备多业务跨领域实战经验，沟通协同敏捷高效、抗压即战力强。
+完整版：具备良好的商业敏锐度与数据分析归因习惯，对工作充满敬业与自驱热情。在以往经历中注重以终为始建立规范化SOP，既有大促节点的冲刺爆发力，又有日常精细化运营与社群维护耐心。为人真诚好沟通，能迅速融入团队打赢硬仗。
+
+【教育经历】
+重点本科大学 | 数字媒体 / 运营策划 | 本科 | 2020.09 - 2024.06
+- 成绩与荣誉：多次获得校级优秀综合奖学金，校融媒体中心核心骨干。
+`;
+
+  // 复制反馈气泡 Toast
+  function showCopyToast(msg = '已复制到剪贴板！') {
+    let toast = document.getElementById('copy-feedback-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'copy-feedback-toast';
+      toast.style.cssText = 'position:fixed; top:24px; right:24px; z-index:99999; background:linear-gradient(135deg, #10b981 0%, #00f2fe 100%); color:#0b0f19; font-weight:700; padding:10px 18px; border-radius:8px; box-shadow:0 8px 24px rgba(0,242,254,0.4); font-size:13px; display:flex; align-items:center; gap:8px; pointer-events:none; transition:opacity 0.3s; opacity:0;';
+      document.body.appendChild(toast);
+    }
+    toast.innerHTML = `<span>✓</span> <span>${msg}</span>`;
+    toast.style.opacity = '1';
+    clearTimeout(toast.__timer);
+    toast.__timer = setTimeout(() => {
+      toast.style.opacity = '0';
+    }, 1600);
+  }
+
+  // 复制到剪贴板工具函数
+  function copyText(text, btn) {
+    if (!text) return;
+    const clean = String(text).trim();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(clean).then(() => {
+        showCopyToast('已复制到剪贴板，可直接在输入框 Ctrl+V 粘贴！');
+        if (btn) {
+          const orig = btn.innerHTML;
+          btn.classList.add('copied');
+          btn.innerHTML = '✓ 已复制';
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.innerHTML = orig;
+          }, 1200);
+        }
+      }).catch(() => {
+        fallbackCopy(clean, btn);
+      });
+    } else {
+      fallbackCopy(clean, btn);
+    }
+  }
+
+  function fallbackCopy(text, btn) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showCopyToast('已复制到剪贴板！');
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.classList.add('copied');
+      btn.innerHTML = '✓ 已复制';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.innerHTML = orig;
+      }, 1200);
+    }
+  }
+
+  // 纯本地智能简历解析引擎
+  function parseResumeText(rawText) {
+    if (!rawText || !rawText.trim()) return null;
+
+    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const depot = {
+      parsedAt: new Date().toLocaleString(),
+      advantages: [],
+      workExperiences: [],
+      projects: [],
+      skills: [],
+      hobbies: [],
+      selfIntro: { short: '', full: '' },
+      education: []
+    };
+
+    let currentSection = 'adv';
+    let currentWork = null;
+    let currentProj = null;
+    let currentEdu = null;
+
+    const isSectionHeader = (line) => {
+      if (/(?:个人优势|核心优势|个人亮点|优势亮点|优势与能力|核心亮点|优势)/i.test(line)) return 'adv';
+      if (/(?:工作经历|工作经验|职业经历|从业经历|实习经历)/i.test(line)) return 'work';
+      if (/(?:项目经历|项目经验|核心项目|主要项目|实战项目)/i.test(line)) return 'proj';
+      if (/(?:专业技能|技能特长|职业技能|掌握技能|技能清单|IT技能|专业能力)/i.test(line)) return 'skills';
+      if (/(?:兴趣爱好|个人爱好|业余爱好|特长爱好|爱好|兴趣|个人特长)/i.test(line)) return 'hobbies';
+      if (/(?:自我评价|自我介绍|关于我|个人简介|总结与评价)/i.test(line)) return 'intro';
+      if (/(?:教育背景|教育经历|学习经历|学历情况)/i.test(line)) return 'edu';
+      return null;
+    };
+
+    lines.forEach(line => {
+      const detected = isSectionHeader(line);
+      if (detected) {
+        currentSection = detected;
+        return;
+      }
+
+      if (currentSection === 'adv') {
+        const cleanAdv = line.replace(/^[\d+•\-\*、. ]+/, '').trim();
+        if (cleanAdv.length >= 5) {
+          depot.advantages.push(cleanAdv);
+        }
+      } else if (currentSection === 'work') {
+        const hasDate = /(20\d{2}[.\-\/年]\d{1,2}|至今|现在)/.test(line);
+        const hasSplit = /[|｜]/.test(line);
+
+        if (hasDate && (hasSplit || line.includes('公司') || line.includes('店') || line.includes('厂') || line.includes('部') || line.length < 50)) {
+          if (currentWork) depot.workExperiences.push(currentWork);
+          const parts = line.split(/[|｜]/).map(p => p.trim());
+          let period = '';
+          let company = '';
+          let role = '';
+
+          parts.forEach(p => {
+            if (/(20\d{2}|至今)/.test(p)) period = p;
+            else if (/(公司|科技|企业|集团|店|社|工作室|品牌|平台)/.test(p) || !company) company = p;
+            else role = p;
+          });
+
+          currentWork = {
+            id: 'w_' + Math.random().toString(36).substr(2, 6),
+            company: company || '重点实战企业',
+            role: role || '运营/核心业务专家',
+            period: period || '在职期间',
+            desc: '',
+            achievements: []
+          };
+        } else if (currentWork) {
+          if (/^(?:业绩|成果|量化|产出|核心业绩|指标|【业绩】)/.test(line) || /[\d+%万GMR]/.test(line) && line.length > 15) {
+            currentWork.achievements.push(line.replace(/^[\d+•\-\*、. 核心业绩成果量化:：]+/, '').trim());
+          } else {
+            currentWork.desc = (currentWork.desc ? currentWork.desc + '\n' : '') + line.replace(/^[•\-\* ]+/, '');
+          }
+        }
+      } else if (currentSection === 'proj') {
+        const hasDate = /(20\d{2}[.\-\/年]\d{1,2}|至今)/.test(line);
+        const hasSplit = /[|｜]/.test(line);
+
+        if ((hasDate || hasSplit) && line.length < 60 && (line.includes('项目') || line.includes('大促') || line.includes('战役') || line.includes('计划') || hasDate)) {
+          if (currentProj) depot.projects.push(currentProj);
+          const parts = line.split(/[|｜]/).map(p => p.trim());
+          let name = '';
+          let role = '';
+          let period = '';
+          parts.forEach(p => {
+            if (/(20\d{2}|至今)/.test(p)) period = p;
+            else if (!name) name = p;
+            else role = p;
+          });
+          currentProj = {
+            id: 'p_' + Math.random().toString(36).substr(2, 6),
+            name: name || '重要项目',
+            role: role || '主导/核心成员',
+            period: period || '项目周期',
+            desc: '',
+            results: ''
+          };
+        } else if (currentProj) {
+          if (/^(?:业绩|成果|产出|结果|指标|项目业绩)/.test(line)) {
+            currentProj.results = (currentProj.results ? currentProj.results + '；' : '') + line.replace(/^[\d+•\-\*、. 项目业绩成果产出:：]+/, '').trim();
+          } else {
+            currentProj.desc = (currentProj.desc ? currentProj.desc + ' ' : '') + line.replace(/^[•\-\* ]+/, '');
+          }
+        }
+      } else if (currentSection === 'skills') {
+        const rawTokens = line.split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
+        rawTokens.forEach(token => {
+          const cleanToken = token.replace(/^[•\-\* ]+/, '').trim();
+          if (cleanToken && cleanToken.length <= 25 && !depot.skills.includes(cleanToken)) {
+            depot.skills.push(cleanToken);
+          }
+        });
+      } else if (currentSection === 'hobbies') {
+        const rawTokens = line.split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
+        rawTokens.forEach(token => {
+          const cleanToken = token.replace(/^[•\-\* ]+/, '').trim();
+          if (cleanToken && cleanToken.length <= 25 && !depot.hobbies.includes(cleanToken)) {
+            depot.hobbies.push(cleanToken);
+          }
+        });
+      } else if (currentSection === 'intro') {
+        if (!depot.selfIntro.full) depot.selfIntro.full = line;
+        else depot.selfIntro.full += '\n' + line;
+      } else if (currentSection === 'edu') {
+        if (!currentEdu) {
+          const parts = line.split(/[|｜\t ]+/).filter(Boolean);
+          currentEdu = {
+            school: parts[0] || '高等院校',
+            major: parts[1] || '专业方向',
+            degree: parts[2] || '本科',
+            period: parts[3] || '就读期间',
+            highlights: ''
+          };
+          depot.education.push(currentEdu);
+        } else {
+          currentEdu.highlights += (currentEdu.highlights ? ' ' : '') + line;
+        }
       }
     });
-    viewPanels.forEach(p => {
-      if (p.id === targetViewParam) {
-        p.classList.add('active');
+
+    if (currentWork) depot.workExperiences.push(currentWork);
+    if (currentProj) depot.projects.push(currentProj);
+
+    if (depot.selfIntro.full) {
+      depot.selfIntro.short = depot.selfIntro.full.slice(0, 85) + '...';
+    } else {
+      depot.selfIntro.short = '执行力强，注重数据与实际成果落地，具备多业务跨领域实战经验，沟通协作敏捷高效、抗压即战力强。';
+      depot.selfIntro.full = '具备敏锐的商业与数据归因习惯，对工作充满敬业与自驱热情。在以往经历中注重以终为始建立规范化SOP，既有大促节点的冲刺爆发力，又有日常精细化运营与社群维护耐心。为人真诚好沟通，能迅速融入团队打赢硬仗。';
+    }
+
+    // 若优势为空，提供智能默认
+    if (depot.advantages.length === 0) {
+      depot.advantages = [
+        '具备扎实业务实操经验与全链路闭环思维，深度理解业务痛点与用户需求。',
+        '具备优秀的数据敏感度与复盘归因能力，擅长用量化指标驱动业务增长。',
+        '自驱力与抗压执行力强，沟通协调顺畅，能快速在复杂业务中建立 SOP。'
+      ];
+    }
+
+    // 若兴趣爱好为空，提供兼具审美的默认
+    if (!depot.hobbies || depot.hobbies.length === 0) {
+      depot.hobbies = ['数码摄影与布光', '户外骑行', '主机与二次元游戏', '视觉审美与排版', '终身学习与新工具探索'];
+    }
+
+    return depot;
+  }
+
+  // 渲染武器库结构化界面
+  function renderResumeDepot(depot) {
+    if (!depot) return;
+    currentResumeDepot = depot;
+
+    // 1. 优势渲染
+    const advListEl = document.getElementById('depot-adv-list');
+    if (advListEl) {
+      advListEl.innerHTML = '';
+      (depot.advantages || []).forEach((adv, idx) => {
+        const item = document.createElement('div');
+        item.className = 'depot-adv-item';
+        item.innerHTML = `
+          <div class="depot-adv-text"><b>${idx + 1}.</b> ${adv}</div>
+          <button class="mini-copy-btn" data-copy="${encodeURIComponent(adv)}">📋 复制</button>
+        `;
+        advListEl.appendChild(item);
+      });
+    }
+
+    // 2. 工作经历渲染
+    const workListEl = document.getElementById('depot-work-list');
+    if (workListEl) {
+      workListEl.innerHTML = '';
+      (depot.workExperiences || []).forEach(work => {
+        const card = document.createElement('div');
+        card.className = 'depot-work-card';
+        const fullWorkText = `${work.company} | ${work.role} (${work.period})\n工作职责：\n${work.desc}\n核心业绩：\n${(work.achievements || []).join('\n')}`;
+
+        card.innerHTML = `
+          <div class="work-card-top">
+            <div class="work-org-info">
+              <span class="work-company">${work.company}</span>
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(work.company)}" title="复制公司名">📋 公司</button>
+              <span class="work-role">${work.role}</span>
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(work.role)}" title="复制岗位">📋 岗位</button>
+              <span class="work-period">📅 ${work.period}</span>
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(work.period)}" title="复制时间">📋 时间</button>
+            </div>
+            <div class="work-actions">
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(fullWorkText)}" style="background:rgba(59,130,246,0.15); border-color:#3b82f6; color:#93c5fd;">📋 复制整段经历</button>
+            </div>
+          </div>
+          ${work.desc ? `<div class="work-desc"><b>【职责内容】</b>：${work.desc} <button class="mini-copy-btn" data-copy="${encodeURIComponent(work.desc)}" style="font-size:10px; padding:1px 6px;">复制职责</button></div>` : ''}
+          ${work.achievements && work.achievements.length > 0 ? `
+            <div style="margin-top:6px;">
+              <b style="font-size:12.5px; color:#34d399;">【核心业绩产出】</b>:
+              <ul class="work-achieve-list">
+                ${work.achievements.map(a => `<li>${a} <button class="mini-copy-btn" data-copy="${encodeURIComponent(a)}" style="font-size:10px; padding:1px 6px; margin-left:4px;">复制此条</button></li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+        `;
+        workListEl.appendChild(card);
+      });
+    }
+
+    // 3. 项目经历渲染
+    const projListEl = document.getElementById('depot-proj-list');
+    if (projListEl) {
+      projListEl.innerHTML = '';
+      (depot.projects || []).forEach(proj => {
+        const card = document.createElement('div');
+        card.className = 'depot-proj-card';
+        const fullProjText = `${proj.name} | ${proj.role} (${proj.period})\n项目描述：${proj.desc}\n项目业绩：${proj.results}`;
+
+        card.innerHTML = `
+          <div class="proj-card-top">
+            <div class="work-org-info">
+              <span class="proj-name">${proj.name}</span>
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.name)}">📋 项目名</button>
+              <span class="proj-role">${proj.role}</span>
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.role)}">📋 角色</button>
+              <span class="work-period">📅 ${proj.period}</span>
+            </div>
+            <div class="work-actions">
+              <button class="mini-copy-btn" data-copy="${encodeURIComponent(fullProjText)}" style="background:rgba(168,85,247,0.15); border-color:#a855f7; color:#d8b4fe;">📋 复制整段项目</button>
+            </div>
+          </div>
+          ${proj.desc ? `<div class="work-desc"><b>【项目详情】</b>：${proj.desc} <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.desc)}" style="font-size:10px; padding:1px 6px;">复制描述</button></div>` : ''}
+          ${proj.results ? `<div class="work-desc" style="color:#a7f3d0;"><b>【量化产出】</b>：${proj.results} <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.results)}" style="font-size:10px; padding:1px 6px;">复制成果</button></div>` : ''}
+        `;
+        projListEl.appendChild(card);
+      });
+    }
+
+    // 4. 技能清单渲染
+    const skillsBoxEl = document.getElementById('depot-skills-box');
+    if (skillsBoxEl) {
+      skillsBoxEl.innerHTML = '';
+      (depot.skills || []).forEach(skill => {
+        const chip = document.createElement('div');
+        chip.className = 'skill-chip';
+        chip.setAttribute('data-copy', encodeURIComponent(skill));
+        chip.innerHTML = `<span>${skill}</span> <span style="font-size:10px; opacity:0.7;">📋</span>`;
+        skillsBoxEl.appendChild(chip);
+      });
+    }
+
+    // 5. 兴趣爱好渲染
+    const hobbiesBoxEl = document.getElementById('depot-hobbies-box');
+    if (hobbiesBoxEl) {
+      hobbiesBoxEl.innerHTML = '';
+      (depot.hobbies || []).forEach(hobby => {
+        const chip = document.createElement('div');
+        chip.className = 'skill-chip';
+        chip.style.borderColor = 'rgba(244,63,94,0.35)';
+        chip.style.color = '#fecdd3';
+        chip.setAttribute('data-copy', encodeURIComponent(hobby));
+        chip.innerHTML = `<span>${hobby}</span> <span style="font-size:10px; opacity:0.7;">📋</span>`;
+        hobbiesBoxEl.appendChild(chip);
+      });
+    }
+
+    // 6. 自我评价
+    if (depot.selfIntro) {
+      const shortEl = document.getElementById('intro-short-text');
+      const fullEl = document.getElementById('intro-full-text');
+      if (shortEl && depot.selfIntro.short) shortEl.textContent = depot.selfIntro.short;
+      if (fullEl && depot.selfIntro.full) fullEl.textContent = depot.selfIntro.full;
+    }
+
+    // 7. 教育背景
+    const eduBoxEl = document.getElementById('depot-edu-box');
+    if (eduBoxEl) {
+      eduBoxEl.innerHTML = '';
+      (depot.education || []).forEach(edu => {
+        const item = document.createElement('div');
+        item.className = 'depot-edu-item';
+        const fullEdu = `${edu.school} | ${edu.major} | ${edu.degree} (${edu.period}) ${edu.highlights || ''}`;
+        item.innerHTML = `
+          <div>
+            <span class="edu-school">${edu.school}</span>
+            <span class="edu-major"> · ${edu.major} (${edu.degree})</span>
+            <div class="edu-period">📅 ${edu.period} ${edu.highlights ? `| ${edu.highlights}` : ''}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="mini-copy-btn" data-copy="${encodeURIComponent(edu.school)}">📋 学校</button>
+            <button class="mini-copy-btn" data-copy="${encodeURIComponent(edu.major)}">📋 专业</button>
+            <button class="mini-copy-btn" data-copy="${encodeURIComponent(fullEdu)}">📋 复制全部</button>
+          </div>
+        `;
+        eduBoxEl.appendChild(item);
+      });
+    }
+
+    // 绑定所有的 data-copy 点击复制事件
+    bindDepotCopyEvents();
+
+    // 更新状态提示
+    const statusText = document.getElementById('parse-status-text');
+    if (statusText) {
+      const workCount = depot.workExperiences?.length || 0;
+      const projCount = depot.projects?.length || 0;
+      const advCount = depot.advantages?.length || 0;
+      const skillCount = depot.skills?.length || 0;
+      const hobbyCount = depot.hobbies?.length || 0;
+      statusText.textContent = `解析完毕：已分类归纳 ${workCount} 段工作经历、${projCount} 个项目、${advCount} 项核心亮点、${skillCount} 个专业技能、${hobbyCount} 项兴趣爱好！`;
+    }
+  }
+
+  // 绑定动态复制按钮事件
+  function bindDepotCopyEvents() {
+    document.querySelectorAll('#resume-depot-result [data-copy]').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        const text = decodeURIComponent(el.getAttribute('data-copy'));
+        copyText(text, el);
+      };
+    });
+  }
+
+  // 初始化武器库交互监听
+  function initResumeDepotEvents() {
+    // 1. 开始解析按钮
+    const btnParse = document.getElementById('btn-start-parse-resume');
+    const rawTextEl = document.getElementById('raw-resume-text');
+    if (btnParse && rawTextEl) {
+      btnParse.addEventListener('click', () => {
+        const text = rawTextEl.value.trim();
+        if (!text) {
+          alert('请先输入或粘贴简历内容！');
+          rawTextEl.focus();
+          return;
+        }
+        const parsed = parseResumeText(text);
+        if (parsed) {
+          renderResumeDepot(parsed);
+          // 自动保存至 storage
+          chrome.storage.local.set({ resumeDepot: parsed }, () => {
+            showCopyToast('简历已分类解析并自动保存至本地网申库！');
+          });
+        }
+      });
+    }
+
+    // 2. 粘贴剪贴板
+    const btnPaste = document.getElementById('btn-paste-from-clipboard');
+    if (btnPaste && rawTextEl) {
+      btnPaste.addEventListener('click', () => {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          navigator.clipboard.readText().then(t => {
+            if (t) {
+              rawTextEl.value = t;
+              showCopyToast('已从剪贴板读取简历文本！');
+            } else {
+              alert('剪贴板中无文本，请先在简历中按 Ctrl+C 复制！');
+            }
+          }).catch(() => {
+            alert('浏览器未授予剪贴板读取权限，请直接在输入框按 Ctrl+V 粘贴！');
+            rawTextEl.focus();
+          });
+        } else {
+          rawTextEl.focus();
+        }
+      });
+    }
+
+    // 3. 填入范例简历
+    const btnDemo = document.getElementById('btn-load-demo-resume');
+    if (btnDemo && rawTextEl) {
+      btnDemo.addEventListener('click', () => {
+        rawTextEl.value = DEFAULT_SAMPLE_RESUME;
+        const parsed = parseResumeText(DEFAULT_SAMPLE_RESUME);
+        renderResumeDepot(parsed);
+        showCopyToast('已载入标准求职范例简历并完成智能解析！');
+      });
+    }
+
+    // 4. 文件上传与拖拽
+    const fileInput = document.getElementById('resume-file-input');
+    const triggerUploadBtn = document.getElementById('btn-trigger-upload-file');
+    const dropzone = document.getElementById('resume-dropzone');
+
+    if (triggerUploadBtn && fileInput) {
+      triggerUploadBtn.addEventListener('click', () => fileInput.click());
+    }
+    if (dropzone && fileInput) {
+      dropzone.addEventListener('click', () => fileInput.click());
+
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('drag-over');
+      });
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('drag-over');
+      });
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('drag-over');
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          handleResumeFile(e.dataTransfer.files[0]);
+        }
+      });
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+          handleResumeFile(e.target.files[0]);
+        }
+      });
+    }
+
+    function handleResumeFile(file) {
+      const reader = new FileReader();
+      const filename = file.name.toLowerCase();
+
+      if (filename.endsWith('.json')) {
+        reader.onload = (ev) => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            renderResumeDepot(data);
+            chrome.storage.local.set({ resumeDepot: data }, () => {
+              showCopyToast(`成功导入 JSON 武器库数据 (${file.name})！`);
+            });
+          } catch (err) {
+            alert('JSON 文件格式解析失败，请检查文件内容！');
+          }
+        };
+        reader.readAsText(file, 'utf-8');
       } else {
-        p.classList.remove('active');
+        // 读取纯文本或尝试提取
+        reader.onload = (ev) => {
+          let text = ev.target.result;
+          // 若为PDF等二进制内容，简易清洗提取可见文本
+          if (filename.endsWith('.pdf')) {
+            text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ')
+                       .replace(/stream[\s\S]*?endstream/g, ' ')
+                       .replace(/obj[\s\S]*?endobj/g, ' ');
+          }
+          if (rawTextEl) rawTextEl.value = text;
+          const parsed = parseResumeText(text);
+          if (parsed) {
+            renderResumeDepot(parsed);
+            chrome.storage.local.set({ resumeDepot: parsed });
+            showCopyToast(`已成功读取并分类解析简历文件 (${file.name})！`);
+          }
+        };
+        reader.readAsText(file, 'utf-8');
+      }
+    }
+
+    // 5. 全部复制按钮
+    const btnCopyAllAdv = document.getElementById('btn-copy-all-adv');
+    if (btnCopyAllAdv) {
+      btnCopyAllAdv.addEventListener('click', () => {
+        if (!currentResumeDepot?.advantages?.length) return;
+        const allText = currentResumeDepot.advantages.map((a, i) => `${i + 1}. ${a}`).join('\n');
+        copyText(allText, btnCopyAllAdv);
+      });
+    }
+
+    const btnCopyAllWork = document.getElementById('btn-copy-all-work');
+    if (btnCopyAllWork) {
+      btnCopyAllWork.addEventListener('click', () => {
+        if (!currentResumeDepot?.workExperiences?.length) return;
+        const allText = currentResumeDepot.workExperiences.map(w => {
+          return `【${w.company}】${w.role} (${w.period})\n职责：${w.desc}\n业绩：\n${(w.achievements || []).map(a => '• ' + a).join('\n')}`;
+        }).join('\n\n');
+        copyText(allText, btnCopyAllWork);
+      });
+    }
+
+    const btnCopyAllProj = document.getElementById('btn-copy-all-proj');
+    if (btnCopyAllProj) {
+      btnCopyAllProj.addEventListener('click', () => {
+        if (!currentResumeDepot?.projects?.length) return;
+        const allText = currentResumeDepot.projects.map(p => {
+          return `【项目：${p.name}】(${p.role} / ${p.period})\n详情：${p.desc}\n量化产出：${p.results}`;
+        }).join('\n\n');
+        copyText(allText, btnCopyAllProj);
+      });
+    }
+
+    const btnCopyAllSkills = document.getElementById('btn-copy-all-skills');
+    if (btnCopyAllSkills) {
+      btnCopyAllSkills.addEventListener('click', () => {
+        if (!currentResumeDepot?.skills?.length) return;
+        copyText(currentResumeDepot.skills.join(', '), btnCopyAllSkills);
+      });
+    }
+
+    const btnCopyAllHobbies = document.getElementById('btn-copy-all-hobbies');
+    if (btnCopyAllHobbies) {
+      btnCopyAllHobbies.addEventListener('click', () => {
+        if (!currentResumeDepot?.hobbies?.length) return;
+        copyText(currentResumeDepot.hobbies.join(', '), btnCopyAllHobbies);
+      });
+    }
+
+    const btnCopyIntroShort = document.getElementById('btn-copy-intro-short');
+    if (btnCopyIntroShort) {
+      btnCopyIntroShort.addEventListener('click', () => {
+        const text = document.getElementById('intro-short-text')?.textContent || '';
+        copyText(text, btnCopyIntroShort);
+      });
+    }
+
+    const btnCopyIntroFull = document.getElementById('btn-copy-intro-full');
+    if (btnCopyIntroFull) {
+      btnCopyIntroFull.addEventListener('click', () => {
+        const text = document.getElementById('intro-full-text')?.textContent || '';
+        copyText(text, btnCopyIntroFull);
+      });
+    }
+
+    const btnCopyAllEdu = document.getElementById('btn-copy-all-edu');
+    if (btnCopyAllEdu) {
+      btnCopyAllEdu.addEventListener('click', () => {
+        if (!currentResumeDepot?.education?.length) return;
+        const allEdu = currentResumeDepot.education.map(e => `${e.school} | ${e.major} | ${e.degree} (${e.period}) ${e.highlights || ''}`).join('\n');
+        copyText(allEdu, btnCopyAllEdu);
+      });
+    }
+
+    // 6. 保存武器库
+    const btnSaveDepot = document.getElementById('btn-save-resume-depot');
+    if (btnSaveDepot) {
+      btnSaveDepot.addEventListener('click', () => {
+        if (!currentResumeDepot) {
+          alert('当前暂无解析内容，请先上传或解析简历！');
+          return;
+        }
+        chrome.storage.local.set({ resumeDepot: currentResumeDepot }, () => {
+          showCopyToast('✓ 简历速填武器库已永久保存到本地存储！');
+        });
+      });
+    }
+
+    // 7. 导出武器库 JSON
+    const btnExportJson = document.getElementById('btn-export-resume-depot');
+    if (btnExportJson) {
+      btnExportJson.addEventListener('click', () => {
+        if (!currentResumeDepot) {
+          alert('暂无简历数据可导出！');
+          return;
+        }
+        const jsonStr = JSON.stringify(currentResumeDepot, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `JobCruise_网申简历武器库_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showCopyToast('简历武器库 JSON 备份已导出！');
+      });
+    }
+
+    // 8. 清空重置
+    const btnClearDepot = document.getElementById('btn-clear-resume-depot');
+    if (btnClearDepot) {
+      btnClearDepot.addEventListener('click', () => {
+        if (confirm('确定要清空当前的简历武器库数据吗？')) {
+          chrome.storage.local.remove(['resumeDepot'], () => {
+            currentResumeDepot = null;
+            if (rawTextEl) rawTextEl.value = '';
+            document.getElementById('depot-adv-list').innerHTML = '';
+            document.getElementById('depot-work-list').innerHTML = '';
+            document.getElementById('depot-proj-list').innerHTML = '';
+            document.getElementById('depot-skills-box').innerHTML = '';
+            const hb = document.getElementById('depot-hobbies-box');
+            if (hb) hb.innerHTML = '';
+            document.getElementById('depot-edu-box').innerHTML = '';
+            document.getElementById('parse-status-text').textContent = '已清空：请上传或粘贴新的简历开始解析';
+            showCopyToast('简历武器库已清空');
+          });
+        }
+      });
+    }
+
+    // 9. 页面初次加载时回显已有武器库
+    chrome.storage.local.get(['resumeDepot'], (res) => {
+      if (res && res.resumeDepot) {
+        renderResumeDepot(res.resumeDepot);
+      } else {
+        // 初次加载载入范例便于直接体验
+        const parsed = parseResumeText(DEFAULT_SAMPLE_RESUME);
+        renderResumeDepot(parsed);
       }
     });
   }
+
+  // 初始化简历武器库事件
+  initResumeDepotEvents();
 
   // 初始化加载
   loadAllData();

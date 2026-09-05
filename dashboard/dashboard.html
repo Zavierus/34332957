@@ -37,6 +37,11 @@
           <span>每日复盘与战略顾问</span>
           <span class="active-badge" id="sidebar-retro-badge" style="background:rgba(236,72,153,0.25); color:#f472b6;">AI</span>
         </button>
+        <button class="nav-item" data-view="view-resume-depot">
+          <span class="nav-icon">📄</span>
+          <span>简历解析与网申速填库</span>
+          <span class="active-badge" id="sidebar-resume-badge" style="background:rgba(16,185,129,0.25); color:#34d399;">PRO</span>
+        </button>
         <button class="nav-item" data-view="view-settings">
           <span class="nav-icon">⚙️</span>
           <span>全局参数与安全设置</span>
@@ -648,6 +653,174 @@
           </div>
           <div class="retro-filter-advice" id="retro-filter-evolution-content">
             <!-- 动态渲染筛选建议 -->
+          </div>
+        </div>
+      </section>
+
+      <!-- 视图 6: 智能简历解析与网申速填武器库 -->
+      <section class="view-panel" id="view-resume-depot">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">📄 智能简历解析与网申速填武器库</h1>
+            <p class="panel-desc">上传简历文件或直接粘贴文本，本地离线自动智能分类提炼【个人优势】、【工作经历与业绩】、【项目详情】、【专业技能】与【自我介绍】。随时一键复制到各大招聘平台或大厂网申填写框！</p>
+          </div>
+          <div class="header-actions">
+            <input type="file" id="resume-file-input" accept=".txt,.md,.json,.pdf,.docx" style="display:none;">
+            <button class="btn btn-secondary" id="btn-trigger-upload-file">📁 上传简历文件</button>
+            <button class="btn btn-secondary" id="btn-export-resume-depot">📥 导出武器库 JSON</button>
+            <button class="btn btn-primary" id="btn-save-resume-depot">💾 保存到本地网申库</button>
+            <button class="btn btn-secondary" id="btn-clear-resume-depot" style="border-color:rgba(239,68,68,0.4); color:#fca5a5;">🗑️ 清空重置</button>
+          </div>
+        </div>
+
+        <!-- 简历输入与智能解析启动区 -->
+        <div class="resume-importer-box">
+          <div class="resume-importer-grid">
+            <!-- 拖拽上传卡片 -->
+            <div class="resume-dropzone" id="resume-dropzone">
+              <div class="dropzone-icon">📥</div>
+              <div class="dropzone-title">点击或拖拽简历文件至此</div>
+              <div class="dropzone-sub">支持 .txt / .md / .json / .pdf 文本离线读取</div>
+              <div class="dropzone-badge">🔒 100% 本地浏览器解析 · 零数据上传</div>
+            </div>
+
+            <!-- 直接粘贴文本区 -->
+            <div class="resume-paste-area">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <label for="raw-resume-text" style="font-weight:700; color:#00f2fe; font-size:12.5px;">📋 或直接在此粘贴简历全文内容：</label>
+                <div style="display:flex; gap:6px;">
+                  <button type="button" class="mini-btn" id="btn-paste-from-clipboard">📋 读取剪贴板</button>
+                  <button type="button" class="mini-btn" id="btn-load-demo-resume">📄 填入通用范例简历</button>
+                </div>
+              </div>
+              <textarea id="raw-resume-text" class="resume-textarea" rows="6" placeholder="直接复制你的简历全部文字并粘贴在此（支持包含个人信息、教育、工作、项目、技能、自我介绍等），点击下方「开始智能分类解析」按钮..."></textarea>
+            </div>
+          </div>
+
+          <div class="resume-parse-bar">
+            <button class="btn btn-primary" id="btn-start-parse-resume" style="padding:10px 24px; font-weight:700; font-size:14px; background:linear-gradient(135deg, #10b981 0%, #00f2fe 100%);">
+              <span>🚀 开始智能分类解析</span>
+            </button>
+            <div class="parse-live-status" id="parse-live-status">
+              <span class="status-dot"></span>
+              <span id="parse-status-text">就绪：请上传文件或粘贴简历文本后开始解析</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 分类解析成果速填面板 -->
+        <div class="resume-depot-result" id="resume-depot-result">
+          <!-- 1. 个人优势与亮点 -->
+          <div class="depot-section-card">
+            <div class="depot-card-header">
+              <div class="depot-header-left">
+                <span class="depot-badge" style="background:rgba(0,242,254,0.2); color:#00f2fe;">🌟 核心亮点</span>
+                <h2 class="depot-title">个人优势与核心竞争力</h2>
+              </div>
+              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-adv">📋 复制全部优势</button>
+            </div>
+            <div class="depot-items-list" id="depot-adv-list">
+              <!-- 动态渲染优势项 -->
+            </div>
+          </div>
+
+          <!-- 2. 工作经历列表 -->
+          <div class="depot-section-card">
+            <div class="depot-card-header">
+              <div class="depot-header-left">
+                <span class="depot-badge" style="background:rgba(59,130,246,0.2); color:#60a5fa;">💼 工作实战</span>
+                <h2 class="depot-title">历任工作经历 (支持分段分项独立复制)</h2>
+              </div>
+              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-work">📋 复制全部工作经历</button>
+            </div>
+            <div class="depot-work-list" id="depot-work-list">
+              <!-- 动态渲染工作经历卡片 -->
+            </div>
+          </div>
+
+          <!-- 3. 项目经历列表 -->
+          <div class="depot-section-card">
+            <div class="depot-card-header">
+              <div class="depot-header-left">
+                <span class="depot-badge" style="background:rgba(168,85,247,0.2); color:#c084fc;">🚀 重点项目</span>
+                <h2 class="depot-title">精选核心项目经历 (量化指标与成果)</h2>
+              </div>
+              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-proj">📋 复制全部项目</button>
+            </div>
+            <div class="depot-proj-list" id="depot-proj-list">
+              <!-- 动态渲染项目经历卡片 -->
+            </div>
+          </div>
+
+          <!-- 4. 专业技能与工具 -->
+          <div class="depot-section-card">
+            <div class="depot-card-header">
+              <div class="depot-header-left">
+                <span class="depot-badge" style="background:rgba(251,191,36,0.2); color:#fbbf24;">🛠️ 专业技能</span>
+                <h2 class="depot-title">专业技能、工具熟练度与行业标签</h2>
+              </div>
+              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-skills">📋 复制技能清单</button>
+            </div>
+            <div class="depot-skills-box" id="depot-skills-box">
+              <!-- 动态渲染技能标签与文本 -->
+            </div>
+          </div>
+
+          <!-- 5. 兴趣爱好与个人特长 -->
+          <div class="depot-section-card">
+            <div class="depot-card-header">
+              <div class="depot-header-left">
+                <span class="depot-badge" style="background:rgba(244,63,94,0.2); color:#fb7185;">🎨 兴趣爱好</span>
+                <h2 class="depot-title">兴趣爱好、个人特长与生活标签</h2>
+              </div>
+              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-hobbies">📋 复制全部爱好</button>
+            </div>
+            <div class="depot-skills-box" id="depot-hobbies-box">
+              <!-- 动态渲染兴趣爱好标签与文本 -->
+            </div>
+          </div>
+
+          <!-- 6. 自我介绍与教育背景两栏布局 -->
+          <div class="depot-two-col-layout">
+            <!-- 自我评价与介绍 -->
+            <div class="depot-section-card" style="flex:1;">
+              <div class="depot-card-header">
+                <div class="depot-header-left">
+                  <span class="depot-badge" style="background:rgba(236,72,153,0.2); color:#f472b6;">💬 自我评价</span>
+                  <h2 class="depot-title">自我介绍 / 评价</h2>
+                </div>
+              </div>
+              <div class="depot-intro-box">
+                <div class="intro-variant">
+                  <div class="intro-variant-header">
+                    <span class="intro-tag">精简干练版 (适合 100 字内输入框)</span>
+                    <button class="mini-copy-btn" id="btn-copy-intro-short">📋 复制精简版</button>
+                  </div>
+                  <div class="intro-text" id="intro-short-text">执行力强，注重数据与实际成果落地，具备多业务跨领域实战经验，沟通协作高效、抗压即战力强。</div>
+                </div>
+                <div class="intro-variant" style="margin-top:12px;">
+                  <div class="intro-variant-header">
+                    <span class="intro-tag">完整详述版 (适合 300-500 字网申问卷)</span>
+                    <button class="mini-copy-btn" id="btn-copy-intro-full">📋 复制完整版</button>
+                  </div>
+                  <div class="intro-text" id="intro-full-text">具备良好的业务敏锐度与数据分析归因习惯，对工作充满敬业与自驱热情。在以往经历中注重以终为始建立规范化 SOP，既有大促节点的冲刺爆发力，又有日常精细化运营与社群维护耐心。抗压能力强，为人真诚好沟通，能迅速融入团队打赢硬仗。</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 教育背景与基本信息 -->
+            <div class="depot-section-card" style="flex:1;">
+              <div class="depot-card-header">
+                <div class="depot-header-left">
+                  <span class="depot-badge" style="background:rgba(16,185,129,0.2); color:#34d399;">🎓 教育背景</span>
+                  <h2 class="depot-title">教育履历与档案信息</h2>
+                </div>
+                <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-edu">📋 复制教育背景</button>
+              </div>
+              <div class="depot-edu-box" id="depot-edu-box">
+                <!-- 动态渲染教育履历 -->
+              </div>
+            </div>
           </div>
         </div>
       </section>

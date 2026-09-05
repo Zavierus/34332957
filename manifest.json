@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JobCruise - 求职自动化巡航助手 (Job Autopilot)",
-  "version": "2.3.0",
-  "description": "现代化智能求职巡航框架。支持多招聘平台全自动流水线协同巡航、职业词条高亮匹配、投递复盘归因诊断与大厂网申辅助。",
+  "version": "2.4.0",
+  "description": "现代化智能求职巡航框架。支持多招聘平台全自动流水线协同巡航、简历智能解析提取与网申一键速填、职业词条高亮匹配与投递复盘诊断。",
   "icons": {
     "16": "icons/icon_16.png",
     "48": "icons/icon_48.png",
@@ -18,6 +18,9 @@
     "*://*.zhipin.com/*",
     "*://*.liepin.com/*",
     "*://*.lagou.com/*",
+    "*://*.51job.com/*",
+    "*://*.zhaopin.com/*",
+    "*://*.nowcoder.com/*",
     "*://we.dji.com/*",
     "*://dji.zhiye.com/*",
     "*://*.insta360.com/*",
@@ -32,7 +35,10 @@
     "*://campus.163.com/*",
     "*://hr.163.com/*",
     "*://*.mihoyo.com/*",
-    "*://*.zhiye.com/*"
+    "*://*.zhiye.com/*",
+    "*://*.mokahr.com/*",
+    "*://*.dayee.com/*",
+    "*://*.hotjob.cn/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -93,6 +99,38 @@
       ],
       "js": [
         "content_ats.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.zhipin.com/*",
+        "*://*.liepin.com/*",
+        "*://*.lagou.com/*",
+        "*://*.51job.com/*",
+        "*://*.zhaopin.com/*",
+        "*://*.nowcoder.com/*",
+        "*://we.dji.com/*",
+        "*://dji.zhiye.com/*",
+        "*://*.insta360.com/*",
+        "*://arashivision.zhiye.com/*",
+        "*://careers.tencent.com/*",
+        "*://join.qq.com/*",
+        "*://tencent.zhiye.com/*",
+        "*://jobs.bytedance.com/*",
+        "*://job.bytedance.com/*",
+        "*://jobs.toutiao.com/*",
+        "*://join.163.com/*",
+        "*://campus.163.com/*",
+        "*://hr.163.com/*",
+        "*://*.mihoyo.com/*",
+        "*://*.zhiye.com/*",
+        "*://*.mokahr.com/*",
+        "*://*.dayee.com/*",
+        "*://*.hotjob.cn/*"
+      ],
+      "js": [
+        "content_quickfill.js"
       ],
       "run_at": "document_idle"
     }

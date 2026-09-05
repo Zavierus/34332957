@@ -415,6 +415,12 @@
             </button>
           </div>
 
+          <div style="margin-top: 6px;">
+            <button class="btn btn-secondary" id="btn-boss-open-quickfill" style="width:100%; font-size:11.5px; padding:7px 10px; background:rgba(0,242,254,0.12); border:1px solid rgba(0,242,254,0.3); color:#00f2fe; border-radius:6px; cursor:pointer;">
+              <span>📋 展开简历速填小抽屉</span>
+            </button>
+          </div>
+
           <div class="log-box" id="hud-log-stream">
             <div>[系统就绪] 只投递包含后台高亮词条的岗位，点击启动即可巡航。</div>
           </div>
@@ -473,6 +479,11 @@
         type: 'OPEN_PAGE',
         url: chrome.runtime.getURL('dashboard/dashboard.html')
       });
+    });
+
+    // 展开/收起简历速填小抽屉
+    shadowRoot.getElementById('btn-boss-open-quickfill')?.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('JOBCRUISE_TOGGLE_QUICKFILL'));
     });
 
     // 跨网站切换按钮
