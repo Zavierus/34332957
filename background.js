@@ -274,13 +274,26 @@ function openOrSwitchToSite(url, matchUrl, callback) {
   chrome.tabs.query({ url: matchUrl }, (tabs) => {
     if (tabs && tabs.length > 0) {
       const tab = tabs[0];
-      chrome.windows.update(tab.windowId, { focused: true });
-      chrome.tabs.update(tab.id, { active: true, url: url }, (updatedTab) => {
-        waitForTabComplete(updatedTab.id, callback);
+      // 唤醒防休眠：若当前窗口处于最小化，自动将其恢复为 normal，防止 Chromium 冻结 DOM 与定时器
+      chrome.windows.get(tab.windowId, (win) => {
+        const updateInfo = { focused: true };
+        if (win && win.state === 'minimized') {
+          updateInfo.state = 'normal';
+        }
+        chrome.windows.update(tab.windowId, updateInfo, () => {
+          chrome.tabs.update(tab.id, { active: true, url: url }, (updatedTab) => {
+            waitForTabComplete(updatedTab.id, callback);
+          });
+        });
       });
     } else {
-      chrome.tabs.create({ url, active: true }, (newTab) => {
-        waitForTabComplete(newTab.id, callback);
+      chrome.windows.getCurrent((win) => {
+        if (win && win.state === 'minimized') {
+          chrome.windows.update(win.id, { state: 'normal', focused: true });
+        }
+        chrome.tabs.create({ url, active: true }, (newTab) => {
+          waitForTabComplete(newTab.id, callback);
+        });
       });
     }
   });

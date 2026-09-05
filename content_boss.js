@@ -779,6 +779,9 @@
     btnPause.style.display = 'flex';
 
     logHUD(`<span class="highlight">[巡航启动]</span> ${pipelineMode ? `全网流水线模式 (本站目标 ${pipelineTarget} 个)！` : '开始扫描！'}当前高亮生效词条: ${activeTags.slice(0, 4).join(', ')}等 ${activeTags.length} 个`);
+    if (document.hidden) {
+      logHUD('<span class="skip" style="color:#fbbf24;">[提示] 建议保持窗口展开（或放至 Win+Tab 虚拟桌面），避免最小化被系统节能休眠限速。</span>');
+    }
 
     try {
       await runJobLoop();
