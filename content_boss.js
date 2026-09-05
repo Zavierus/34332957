@@ -234,6 +234,26 @@
         color: #00f2fe;
         font-weight: 600;
       }
+      .hud-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .hud-mode-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #cbd5e1;
+        cursor: pointer;
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        transition: all 0.15s;
+      }
+      .hud-mode-btn:hover {
+        background: rgba(0, 242, 254, 0.2);
+        color: #00f2fe;
+        border-color: #00f2fe;
+      }
       .hud-minimize-btn {
         background: transparent;
         border: none;
@@ -241,6 +261,35 @@
         cursor: pointer;
         font-size: 16px;
         padding: 4px;
+      }
+      .hud-minimize-btn:hover {
+        color: #fff;
+      }
+      /* 精简模式 (Compact Mode) */
+      .hud-panel.compact {
+        width: 275px;
+      }
+      .hud-panel.compact .stats-grid,
+      .hud-panel.compact .tag-indicator,
+      .hud-panel.compact .cross-site-bar,
+      .hud-panel.compact .log-box {
+        display: none !important;
+      }
+      .hud-panel.compact .hud-body {
+        padding: 8px 12px;
+        gap: 6px;
+      }
+      .compact-stat-row {
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #94a3b8;
+        padding-bottom: 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .hud-panel.compact .compact-stat-row {
+        display: flex;
       }
       .hud-body {
         padding: 14px 16px;
@@ -387,9 +436,17 @@
             <span class="hud-title">⚡ ZIAVER 求职巡航</span>
             <span class="hud-tag">BOSS直聘</span>
           </div>
-          <button class="hud-minimize-btn" id="hud-min-btn" title="收起面板">—</button>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <button class="hud-mode-btn" id="hud-mode-btn" title="切换 精简/完整 模式">⊡ 精简</button>
+            <button class="hud-minimize-btn" id="hud-min-btn" title="收起为胶囊">—</button>
+          </div>
         </div>
         <div class="hud-body" id="hud-body">
+          <div class="compact-stat-row" id="compact-stat-row">
+            <span>今日: <b id="compact-val-today" style="color:#00f2fe;">0/30</b> | 本次: <b id="compact-val-sess" style="color:#00f2fe;">0</b></span>
+            <span id="compact-status-tag" style="color:#10b981; font-size:10px;">🟢 就绪</span>
+          </div>
+
           <div class="stats-grid">
             <div class="stat-card">
               <div class="stat-label">今日已投 / 上限</div>
@@ -445,7 +502,7 @@
         </div>
       </div>
       <div class="pill-badge" id="hud-pill-badge">
-        ⚡ 巡航面板 (已投 <span id="pill-count">0</span>)
+        ⚡ BOSS巡航 (<span id="pill-count">0</span>/<span id="pill-limit">30</span>)
       </div>
     `;
 
@@ -458,19 +515,56 @@
 
   function setupHUDEvents() {
     const minBtn = shadowRoot.getElementById('hud-min-btn');
+    const modeBtn = shadowRoot.getElementById('hud-mode-btn');
     const hudMain = shadowRoot.getElementById('hud-main');
     const pillBadge = shadowRoot.getElementById('hud-pill-badge');
     const btnToggle = shadowRoot.getElementById('btn-toggle-run');
     const btnPause = shadowRoot.getElementById('btn-pause-run');
 
-    minBtn.addEventListener('click', () => {
-      hudMain.classList.add('collapsed');
-      pillBadge.style.display = 'block';
+    function applyHUDMode(mode) {
+      if (mode === 'mini') {
+        hudMain.classList.add('collapsed');
+        pillBadge.style.display = 'block';
+      } else if (mode === 'compact') {
+        hudMain.classList.remove('collapsed');
+        pillBadge.style.display = 'none';
+        hudMain.classList.add('compact');
+        if (modeBtn) {
+          modeBtn.textContent = '⊞ 完整';
+          modeBtn.title = '切换回完整面板';
+        }
+        localStorage.setItem('jobcruise_hud_mode', 'compact');
+      } else {
+        hudMain.classList.remove('collapsed');
+        pillBadge.style.display = 'none';
+        hudMain.classList.remove('compact');
+        if (modeBtn) {
+          modeBtn.textContent = '⊡ 精简';
+          modeBtn.title = '切换为精简小窗';
+        }
+        localStorage.setItem('jobcruise_hud_mode', 'full');
+      }
+    }
+
+    const savedMode = localStorage.getItem('jobcruise_hud_mode') || 'full';
+    applyHUDMode(savedMode);
+
+    if (modeBtn) {
+      modeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCompact = hudMain.classList.contains('compact');
+        applyHUDMode(isCompact ? 'full' : 'compact');
+      });
+    }
+
+    minBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyHUDMode('mini');
     });
 
     pillBadge.addEventListener('click', () => {
-      hudMain.classList.remove('collapsed');
-      pillBadge.style.display = 'none';
+      const restoreMode = localStorage.getItem('jobcruise_hud_mode') || 'full';
+      applyHUDMode(restoreMode);
     });
 
     // 打开全功能后台管理页
@@ -506,11 +600,14 @@
 
     btnPause.addEventListener('click', () => {
       isPaused = !isPaused;
+      const statusTag = shadowRoot.getElementById('compact-status-tag');
       if (isPaused) {
         btnPause.innerHTML = '<span>▶ 继续</span>';
+        if (statusTag) { statusTag.textContent = '⏸ 暂停中'; statusTag.style.color = '#f59e0b'; }
         logHUD('<span class="highlight">[已暂停]</span> 巡航挂起中...');
       } else {
         btnPause.innerHTML = '<span>⏸ 暂停</span>';
+        if (statusTag) { statusTag.textContent = '🚀 巡航中'; statusTag.style.color = '#00f2fe'; }
         logHUD('<span class="success">[已继续]</span> 恢复投递');
       }
     });
@@ -559,14 +656,21 @@
     const todayEl = shadowRoot.getElementById('val-today-count');
     const sessEl = shadowRoot.getElementById('val-session-count');
     const pillCount = shadowRoot.getElementById('pill-count');
+    const pillLimit = shadowRoot.getElementById('pill-limit');
     const tagCountEl = shadowRoot.getElementById('active-tag-count');
+    const compactToday = shadowRoot.getElementById('compact-val-today');
+    const compactSess = shadowRoot.getElementById('compact-val-sess');
 
+    const limit = config.dailyLimit || 30;
     if (todayEl) {
-      todayEl.innerHTML = `${todayCount} <span class="stat-sub">/ ${config.dailyLimit || 30}</span>`;
+      todayEl.innerHTML = `${todayCount} <span class="stat-sub">/ ${limit}</span>`;
     }
     if (sessEl) sessEl.textContent = sessionCount;
     if (pillCount) pillCount.textContent = todayCount;
+    if (pillLimit) pillLimit.textContent = limit;
     if (tagCountEl) tagCountEl.textContent = activeTags.length;
+    if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
+    if (compactSess) compactSess.textContent = sessionCount;
   }
 
   // ================= HR 回复未读监听 =================
@@ -620,6 +724,8 @@
     sessionCount = 0;
     const btnToggle = shadowRoot.getElementById('btn-toggle-run');
     const btnPause = shadowRoot.getElementById('btn-pause-run');
+    const statusTag = shadowRoot.getElementById('compact-status-tag');
+    if (statusTag) { statusTag.textContent = '🚀 巡航中'; statusTag.style.color = '#00f2fe'; }
     btnToggle.innerHTML = '<span>🛑 停止巡航</span>';
     btnToggle.className = 'btn btn-stop';
     btnPause.style.display = 'flex';
@@ -651,6 +757,8 @@
     isPaused = false;
     const btnToggle = shadowRoot?.getElementById('btn-toggle-run');
     const btnPause = shadowRoot?.getElementById('btn-pause-run');
+    const statusTag = shadowRoot?.getElementById('compact-status-tag');
+    if (statusTag) { statusTag.textContent = '🟢 就绪'; statusTag.style.color = '#10b981'; }
     if (btnToggle) {
       btnToggle.innerHTML = '<span>🚀 开启自动投递</span>';
       btnToggle.className = 'btn btn-primary';

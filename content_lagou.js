@@ -11,6 +11,7 @@
 
   let isRunning = false;
   let isPaused = false;
+  let todayCount = 0;
   let sessionCount = 0;
   let pipelineMode = false;
   let pipelineTarget = 10;
@@ -35,6 +36,12 @@
     chrome.storage.local.get(['config', 'jobTags'], (res) => {
       if (res && res.config) {
         config = { ...config, ...res.config };
+        const today = new Date().toISOString().split('T')[0];
+        if (config.lastActiveDate === today) {
+          todayCount = config.todayCount || 0;
+        } else {
+          todayCount = 0;
+        }
       }
       if (res && res.jobTags && Array.isArray(res.jobTags)) {
         activeTags = res.jobTags.filter(t => t.active).map(t => t.name.trim());
@@ -182,9 +189,9 @@
         background: rgba(10, 25, 20, 0.96);
         backdrop-filter: blur(18px);
         -webkit-backdrop-filter: blur(18px);
-        border: 1px solid rgba(16, 185, 129, 0.4);
+        border: 1px solid rgba(16, 185, 129, 0.45);
         border-radius: 14px;
-        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), 0 0 24px rgba(16, 185, 129, 0.18);
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), 0 0 24px rgba(16, 185, 129, 0.2);
         color: #e2e8f0;
         overflow: hidden;
       }
@@ -216,6 +223,61 @@
         color: #34d399;
         font-weight: 600;
       }
+      .hud-mode-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #e2e8f0;
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .hud-mode-btn:hover {
+        background: rgba(16, 185, 129, 0.25);
+        color: #34d399;
+        border-color: #34d399;
+      }
+      .hud-minimize-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 4px;
+      }
+      .hud-minimize-btn:hover {
+        color: #fff;
+      }
+
+      /* 精简模式 (Compact Mode) */
+      .hud-panel.compact {
+        width: 275px;
+      }
+      .hud-panel.compact .stats-grid,
+      .hud-panel.compact .pipeline-badge,
+      .hud-panel.compact .tag-indicator,
+      .hud-panel.compact .cross-site-bar,
+      .hud-panel.compact .hud-log-box {
+        display: none !important;
+      }
+      .hud-panel.compact .hud-body {
+        padding: 8px 12px;
+        gap: 6px;
+      }
+      .compact-stat-row {
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #94a3b8;
+        padding-bottom: 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .hud-panel.compact .compact-stat-row {
+        display: flex;
+      }
+
       .hud-body {
         padding: 14px 16px;
         display: flex;
@@ -255,6 +317,22 @@
         align-items: center;
         justify-content: space-between;
       }
+      .tag-indicator {
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px dashed rgba(16, 185, 129, 0.35);
+        border-radius: 6px;
+        padding: 6px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+      }
+      .tag-link {
+        color: #34d399;
+        text-decoration: underline;
+        cursor: pointer;
+        font-weight: 600;
+      }
       .action-btns {
         display: flex;
         gap: 8px;
@@ -278,9 +356,10 @@
         color: #fff;
         box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
       }
-      .btn-primary:hover {
-        opacity: 0.92;
-        transform: translateY(-1px);
+      .btn-pause {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
       }
       .btn-stop {
         background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
@@ -298,76 +377,224 @@
         padding: 8px 10px;
         font-size: 11px;
         line-height: 1.5;
-        height: 110px;
+        height: 95px;
         overflow-y: auto;
         color: #cbd5e1;
         font-family: monospace;
       }
-      .hud-log-box span.highlight {
+      .hud-log-box span.highlight { color: #34d399; font-weight: bold; }
+      .hud-log-box span.skip { color: #64748b; }
+      .hud-log-box span.success { color: #10b981; font-weight: bold; }
+      .cross-site-bar {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .cross-title {
+        font-size: 10.5px;
+        color: #94a3b8;
+        display: flex;
+        justify-content: space-between;
+      }
+      .site-chips {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .site-chip-btn {
+        font-size: 10px;
+        padding: 3px 8px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        color: #cbd5e1;
+        cursor: pointer;
+      }
+      .site-chip-btn:hover {
+        background: #10b981;
+        color: #0b0f19;
+      }
+      .collapsed { display: none; }
+      .pill-badge {
+        display: none;
+        padding: 8px 14px;
+        background: rgba(10, 25, 20, 0.95);
+        border: 1px solid #10b981;
+        border-radius: 30px;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
         color: #34d399;
-        font-weight: bold;
-      }
-      .hud-log-box span.skip {
-        color: #64748b;
-      }
-      .hud-log-box span.success {
-        color: #10b981;
-        font-weight: bold;
+        font-size: 12px;
+        font-weight: 700;
       }
     `;
 
-    const panel = document.createElement('div');
-    panel.className = 'hud-panel';
-    panel.innerHTML = `
-      <div class="hud-header">
-        <div class="hud-title-wrap">
-          <span style="font-size:14px;">⚡</span>
-          <span class="hud-title">ZIAVER 拉勾巡航</span>
-          <span class="hud-tag">v2.3</span>
+    const hudHtml = document.createElement('div');
+    hudHtml.innerHTML = `
+      <div class="hud-panel" id="hud-main">
+        <div class="hud-header" id="hud-drag-handle">
+          <div class="hud-title-wrap">
+            <span style="font-size:14px;">⚡</span>
+            <span class="hud-title">ZIAVER 求职巡航</span>
+            <span class="hud-tag">拉勾招聘</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <button class="hud-mode-btn" id="hud-mode-btn" title="切换 精简/完整 模式">⊡ 精简</button>
+            <button class="hud-minimize-btn" id="btn-minimize-hud" title="收起为胶囊">—</button>
+          </div>
         </div>
-        <button id="btn-minimize-hud" style="background:transparent; border:none; color:#94a3b8; cursor:pointer; font-size:14px;">一</button>
+        <div class="hud-body" id="hud-body-content">
+          <div class="compact-stat-row" id="compact-stat-row">
+            <span>今日: <b id="compact-val-today" style="color:#34d399;">0/30</b> | 本次: <b id="compact-val-sess" style="color:#34d399;">0</b></span>
+            <span id="compact-status-tag" style="color:#10b981; font-size:10px;">🟢 就绪</span>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">今日已投 / 上限</div>
+              <div class="stat-val" id="val-today-count">0 <span style="font-size:11px; color:#94a3b8;">/ 30</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">本次巡航已投</div>
+              <div class="stat-val" id="hud-session-count">0</div>
+            </div>
+          </div>
+
+          <div class="tag-indicator">
+            <span>🎯 当前生效词条: <b id="hud-active-tags" style="color:#34d399;">0</b> 个</span>
+            <span class="tag-link" id="btn-open-dashboard">打开完整后台管理 ↗</span>
+          </div>
+
+          <div class="pipeline-badge" id="hud-pipeline-indicator" style="display:none;">
+            <span>🌐 全网流水线协同模式</span>
+            <span id="hud-pipeline-target-info">目标: 10</span>
+          </div>
+
+          <div class="action-btns">
+            <button class="btn btn-primary" id="btn-toggle-run">
+              <span>🚀 开启拉勾投递</span>
+            </button>
+            <button class="btn btn-pause" id="btn-pause-run" style="display:none; max-width:80px;">
+              <span>⏸ 暂停</span>
+            </button>
+          </div>
+
+          <div style="margin-top: 4px;">
+            <button class="btn btn-secondary" id="btn-lagou-open-quickfill" style="width:100%; font-size:11.5px; padding:7px 10px; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); color:#34d399; border-radius:6px; cursor:pointer;">
+              <span>📋 展开简历速填小抽屉</span>
+            </button>
+          </div>
+
+          <div class="hud-log-box" id="hud-log-scroll">
+            <div style="color:#94a3b8;">[就绪] 严格匹配高亮词条与9K起薪，点击开启或由全网流水线调用。</div>
+          </div>
+
+          <div class="cross-site-bar">
+            <div class="cross-title">
+              <span>🌐 切换目标网站</span>
+              <span style="color:#10b981; font-size:10px;">🟢 巡航互联就绪</span>
+            </div>
+            <div class="site-chips">
+              <button class="site-chip-btn" data-url="https://www.zhipin.com/web/geek/job" style="border-color:#00f2fe; color:#00f2fe;">BOSS直聘</button>
+              <button class="site-chip-btn" data-url="https://www.liepin.com/zhaopin/?city=050090" style="border-color:#a855f7; color:#c084fc;">猎聘网</button>
+              <button class="site-chip-btn" data-url="https://careers.tencent.com/search.html">腾讯社招</button>
+              <button class="site-chip-btn" data-url="https://jobs.bytedance.com/">字节社招</button>
+              <button class="site-chip-btn" data-url="https://we.dji.com/zh-CN/social">大疆社招</button>
+              <button class="site-chip-btn" data-url="https://join.qq.com/post.html" style="border-color:#38bdf8; color:#38bdf8;">🎓腾讯校招</button>
+              <button class="site-chip-btn" data-url="https://jobs.bytedance.com/campus/position" style="border-color:#60a5fa; color:#60a5fa;">🎓字节校招</button>
+              <button class="site-chip-btn" data-url="https://we.dji.com/zh-CN/campus" style="border-color:#00f2fe; color:#00f2fe;">🎓大疆校招</button>
+              <button class="site-chip-btn" data-url="https://campus.163.com/" style="border-color:#fb7185; color:#fb7185;">🎓网易校招</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="hud-body" id="hud-body-content">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-label">本次巡航已投</div>
-            <div class="stat-val" id="hud-session-count">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">高亮生效词条</div>
-            <div class="stat-val" id="hud-active-tags" style="color:#00f2fe;">0</div>
-          </div>
-        </div>
-
-        <div class="pipeline-badge" id="hud-pipeline-indicator" style="display:none;">
-          <span>🌐 全网流水线协同模式</span>
-          <span id="hud-pipeline-target-info">目标: 10</span>
-        </div>
-
-        <div class="action-btns">
-          <button class="btn btn-primary" id="btn-toggle-run">
-            <span>🚀 开启拉勾投递</span>
-          </button>
-          <button class="btn btn-secondary" id="btn-pause-run" style="display:none; max-width:80px;">
-            <span>⏸ 暂停</span>
-          </button>
-        </div>
-
-        <div class="hud-log-box" id="hud-log-scroll">
-          <div style="color:#94a3b8;">[就绪] 严格匹配高亮词条与9K起薪，点击开启或由全网流水线调用。</div>
-        </div>
+      <div class="pill-badge" id="hud-pill-badge">
+        ⚡ 拉勾巡航 (<span id="pill-count">0</span>/<span id="pill-limit">30</span>)
       </div>
     `;
 
     shadowRoot.appendChild(style);
-    shadowRoot.appendChild(panel);
+    shadowRoot.appendChild(hudHtml);
     document.body.appendChild(hudContainer);
 
     // 绑定事件
     const btnToggle = shadowRoot.getElementById('btn-toggle-run');
     const btnPause = shadowRoot.getElementById('btn-pause-run');
     const btnMin = shadowRoot.getElementById('btn-minimize-hud');
-    const bodyContent = shadowRoot.getElementById('hud-body-content');
+    const modeBtn = shadowRoot.getElementById('hud-mode-btn');
+    const hudMain = shadowRoot.getElementById('hud-main');
+    const pillBadge = shadowRoot.getElementById('hud-pill-badge');
+
+    function applyHUDMode(mode) {
+      if (mode === 'mini') {
+        hudMain.classList.add('collapsed');
+        pillBadge.style.display = 'block';
+      } else if (mode === 'compact') {
+        hudMain.classList.remove('collapsed');
+        pillBadge.style.display = 'none';
+        hudMain.classList.add('compact');
+        if (modeBtn) {
+          modeBtn.textContent = '⊞ 完整';
+          modeBtn.title = '切换回完整面板';
+        }
+        localStorage.setItem('jobcruise_hud_mode', 'compact');
+      } else {
+        hudMain.classList.remove('collapsed');
+        pillBadge.style.display = 'none';
+        hudMain.classList.remove('compact');
+        if (modeBtn) {
+          modeBtn.textContent = '⊡ 精简';
+          modeBtn.title = '切换为精简小窗';
+        }
+        localStorage.setItem('jobcruise_hud_mode', 'full');
+      }
+    }
+
+    const savedMode = localStorage.getItem('jobcruise_hud_mode') || 'full';
+    applyHUDMode(savedMode);
+
+    if (modeBtn) {
+      modeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCompact = hudMain.classList.contains('compact');
+        applyHUDMode(isCompact ? 'full' : 'compact');
+      });
+    }
+
+    btnMin.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyHUDMode('mini');
+    });
+
+    pillBadge.addEventListener('click', () => {
+      const restoreMode = localStorage.getItem('jobcruise_hud_mode') || 'full';
+      applyHUDMode(restoreMode);
+    });
+
+    // 打开全功能后台管理页
+    shadowRoot.getElementById('btn-open-dashboard')?.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'OPEN_PAGE',
+        url: chrome.runtime.getURL('dashboard/dashboard.html')
+      });
+    });
+
+    // 展开简历速填小抽屉
+    shadowRoot.getElementById('btn-lagou-open-quickfill')?.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('JOBCRUISE_TOGGLE_QUICKFILL'));
+    });
+
+    // 跨网站切换按钮
+    shadowRoot.querySelectorAll('.site-chip-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const url = btn.getAttribute('data-url');
+        if (url) {
+          chrome.runtime.sendMessage({ type: 'OPEN_PAGE', url });
+        }
+      });
+    });
 
     btnToggle.addEventListener('click', () => {
       if (isRunning) {
@@ -379,18 +606,41 @@
 
     btnPause.addEventListener('click', () => {
       isPaused = !isPaused;
+      const statusTag = shadowRoot.getElementById('compact-status-tag');
       btnPause.innerHTML = isPaused ? '<span>▶ 继续</span>' : '<span>⏸ 暂停</span>';
+      if (isPaused) {
+        if (statusTag) { statusTag.textContent = '⏸ 暂停中'; statusTag.style.color = '#f59e0b'; }
+      } else {
+        if (statusTag) { statusTag.textContent = '🚀 巡航中'; statusTag.style.color = '#34d399'; }
+      }
       logHUD(isPaused ? '<span class="skip">[已暂停] 等待指令继续...</span>' : '<span>[恢复] 继续巡航扫描...</span>');
     });
 
-    btnMin.addEventListener('click', () => {
-      if (bodyContent.style.display === 'none') {
-        bodyContent.style.display = 'flex';
-        btnMin.textContent = '一';
-      } else {
-        bodyContent.style.display = 'none';
-        btnMin.textContent = '□';
-      }
+    // 拖拽支持
+    const handle = shadowRoot.getElementById('hud-drag-handle');
+    let isDragging = false;
+    let startX, startY, initialRight, initialBottom;
+
+    handle.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = hudContainer.getBoundingClientRect();
+      initialRight = window.innerWidth - rect.right;
+      initialBottom = window.innerHeight - rect.bottom;
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = startX - e.clientX;
+      const dy = startY - e.clientY;
+      hudContainer.style.right = `${Math.max(10, initialRight + dx)}px`;
+      hudContainer.style.bottom = `${Math.max(10, initialBottom + dy)}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
     });
 
     updateHUD();
@@ -400,8 +650,20 @@
     if (!shadowRoot) return;
     const sessionEl = shadowRoot.getElementById('hud-session-count');
     const tagsEl = shadowRoot.getElementById('hud-active-tags');
+    const todayEl = shadowRoot.getElementById('val-today-count');
+    const pillCount = shadowRoot.getElementById('pill-count');
+    const pillLimit = shadowRoot.getElementById('pill-limit');
+    const compactToday = shadowRoot.getElementById('compact-val-today');
+    const compactSess = shadowRoot.getElementById('compact-val-sess');
+
+    const limit = config.dailyLimit || 30;
     if (sessionEl) sessionEl.textContent = sessionCount;
     if (tagsEl) tagsEl.textContent = activeTags.length;
+    if (todayEl) todayEl.innerHTML = `${todayCount} <span style="font-size:11px; color:#94a3b8;">/ ${limit}</span>`;
+    if (pillCount) pillCount.textContent = todayCount;
+    if (pillLimit) pillLimit.textContent = limit;
+    if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
+    if (compactSess) compactSess.textContent = sessionCount;
 
     const pipeInd = shadowRoot.getElementById('hud-pipeline-indicator');
     const pipeInfo = shadowRoot.getElementById('hud-pipeline-target-info');
@@ -429,6 +691,17 @@
   // ================= 巡航运行逻辑 =================
   async function startAutopilot(targetCount = 10, isFromPipeline = false) {
     if (isRunning) return;
+    refreshConfig();
+
+    if (todayCount >= (config.dailyLimit || 30)) {
+      alert(`⚠️ 今日已达到设定的安全投递上限 (${config.dailyLimit || 30} 次)！\n为保护账号安全，自动停止投递。可在后台调整上限。`);
+      return;
+    }
+
+    if (activeTags.length === 0) {
+      alert('⚠️ 当前没有高亮选中的生效职业词条！请打开后台管理勾选。');
+      return;
+    }
 
     pipelineMode = isFromPipeline;
     pipelineTarget = targetCount;
@@ -439,6 +712,8 @@
 
     const btnToggle = shadowRoot?.getElementById('btn-toggle-run');
     const btnPause = shadowRoot?.getElementById('btn-pause-run');
+    const statusTag = shadowRoot?.getElementById('compact-status-tag');
+    if (statusTag) { statusTag.textContent = '🚀 巡航中'; statusTag.style.color = '#34d399'; }
     if (btnToggle) {
       btnToggle.innerHTML = '<span>🛑 停止巡航</span>';
       btnToggle.className = 'btn btn-stop';
@@ -476,6 +751,8 @@
     isPaused = false;
     const btnToggle = shadowRoot?.getElementById('btn-toggle-run');
     const btnPause = shadowRoot?.getElementById('btn-pause-run');
+    const statusTag = shadowRoot?.getElementById('compact-status-tag');
+    if (statusTag) { statusTag.textContent = '🟢 就绪'; statusTag.style.color = '#10b981'; }
     if (btnToggle) {
       btnToggle.innerHTML = '<span>🚀 开启拉勾投递</span>';
       btnToggle.className = 'btn btn-primary';
@@ -583,7 +860,15 @@
           await handleLagouModal(greetingText);
 
           sessionCount++;
+          todayCount++;
           updateHUD();
+
+          if (chrome.storage && chrome.storage.local) {
+            const today = new Date().toISOString().split('T')[0];
+            chrome.storage.local.set({
+              config: { ...config, todayCount, lastActiveDate: today }
+            });
+          }
 
           // 记录至后台投递中心
           chrome.runtime.sendMessage({

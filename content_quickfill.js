@@ -12,6 +12,7 @@
   let lastTargetInput = null;
   let isDrawerOpen = false;
   let searchQuery = '';
+  let currentDrawerTab = 'structured'; // 'structured' | 'raw'
 
   // 1. 初始化读取本地存储
   function loadDepotData(callback) {
@@ -634,9 +635,15 @@
           <span style="opacity: 0.8; font-size: 10px;">点击即填</span>
         </div>
 
+        <!-- 双模视图切换 Tab -->
+        <div class="drawer-mode-tabs" style="display:flex; background:#0f172a; border-bottom:1px solid rgba(255,255,255,0.08); padding:0 12px; gap:8px;">
+          <button type="button" class="drawer-mode-tab active" id="drawer-tab-structured" style="flex:1; padding:8px 0; background:transparent; border:none; color:#00f2fe; border-bottom:2px solid #00f2fe; font-size:12px; font-weight:700; cursor:pointer;">⚡ 智能分类库</button>
+          <button type="button" class="drawer-mode-tab" id="drawer-tab-raw" style="flex:1; padding:8px 0; background:transparent; border:none; color:#94a3b8; border-bottom:2px solid transparent; font-size:12px; font-weight:600; cursor:pointer;">📝 原始分段直达</button>
+        </div>
+
         <!-- 快速搜索框 -->
         <div class="drawer-search-wrap">
-          <input type="text" class="drawer-search-input" id="quickfill-search-input" placeholder="🔍 快速搜索经历/公司/技能/业绩..." />
+          <input type="text" class="drawer-search-input" id="quickfill-search-input" placeholder="🔍 快速搜索经历/公司/技能/业绩/段落..." />
         </div>
 
         <!-- 滚动内容区 -->
@@ -660,6 +667,12 @@
 
     bindDrawerEvents();
     renderDrawerContent();
+  }
+
+  // 辅助转义函数
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // 6. 更新当前聚焦的输入框提示
@@ -720,6 +733,7 @@
     if (!containerEl) return;
 
     const depot = resumeDepot || {
+      basicInfo: {},
       advantages: [
         '具备扎实电商大促操盘与达人内容矩阵拓展经验，擅长全链路落地与ROI优化。',
         '熟悉商业摄影布光与视觉分镜，能从审美与硬件特性双向赋能爆款打造。',
@@ -751,14 +765,9 @@
       },
       education: [
         { school: '重点大学', major: '数字媒体 / 运营策划', degree: '本科', period: '2020.09 - 2024.06' }
-      ]
+      ],
+      rawSegments: []
     };
-
-    if (summaryTag) {
-      const wCount = depot.workExperiences?.length || 0;
-      const pCount = depot.projects?.length || 0;
-      summaryTag.textContent = `${wCount}工作 · ${pCount}项目`;
-    }
 
     containerEl.innerHTML = '';
     const q = (searchQuery || '').toLowerCase().trim();
@@ -769,15 +778,61 @@
       return texts.some(t => String(t || '').toLowerCase().includes(q));
     };
 
-    // 板块 1: 个人基础资料与网申信息
+    // 模式 B: 原始分段直达视图
+    if (currentDrawerTab === 'raw') {
+      const segments = depot.rawSegments || [];
+      const matched = segments.filter(s => matchesSearch(s.text));
+      if (summaryTag) summaryTag.textContent = `${matched.length}段落`;
+
+      if (matched.length === 0) {
+        containerEl.innerHTML = `
+          <div style="padding:32px 14px; text-align:center; color:#64748b; font-size:12px;">
+            ${segments.length === 0 ? '暂无原始简历段落，可在控制后台上传简历解析！' : '未搜索到匹配的简历段落'}
+          </div>
+        `;
+        return;
+      }
+
+      matched.forEach(seg => {
+        const card = document.createElement('div');
+        card.className = 'fill-item-card';
+        card.style.marginBottom = '10px';
+        card.innerHTML = `
+          <div class="item-top-row">
+            <span class="item-title">📄 段落 #${seg.index}</span>
+            <span class="item-sub">${seg.charCount} 字</span>
+          </div>
+          <div class="item-body-text" style="line-height:1.5; font-size:11.5px; max-height:140px; overflow-y:auto; margin:6px 0;">${escapeHtml(seg.text)}</div>
+          <div class="item-actions">
+            <button class="action-mini-btn primary" data-fill="${encodeURIComponent(seg.text)}">⚡ 填入光标位置</button>
+            <button class="action-mini-btn" data-copy="${encodeURIComponent(seg.text)}">📋 仅复制本段</button>
+          </div>
+        `;
+        containerEl.appendChild(card);
+      });
+      bindItemActionEvents();
+      return;
+    }
+
+    // 模式 A: 智能分类库视图
+    if (summaryTag) {
+      const wCount = depot.workExperiences?.length || 0;
+      const pCount = depot.projects?.length || 0;
+      summaryTag.textContent = `${wCount}工作 · ${pCount}项目`;
+    }
+
+    // 板块 1: 个人基础资料与网申信息 (合并 depot.basicInfo 与 applicantProfile)
+    const baseInfo = depot.basicInfo || {};
     const prof = applicantProfile || {};
     const baseFields = [
-      { label: '姓名', value: prof.name || '求职者' },
-      { label: '手机', value: prof.phone || '13800000000' },
+      { label: '姓名', value: baseInfo.name || prof.name || '' },
+      { label: '手机', value: baseInfo.phone || prof.phone || '' },
       { label: '微信', value: prof.wechat || '' },
-      { label: '邮箱', value: prof.email || '' },
-      { label: '院校', value: `${prof.school || '高等院校'} (${prof.gradYear || '2024'}届)` },
-      { label: '作品集', value: prof.portfolioUrl || '' }
+      { label: '邮箱', value: baseInfo.email || prof.email || '' },
+      { label: '毕业院校', value: baseInfo.school || prof.school || '' },
+      { label: '作品集', value: baseInfo.portfolioUrl || prof.portfolioUrl || '' },
+      { label: '目标岗位', value: baseInfo.targetRole || '' },
+      { label: '职业定位', value: baseInfo.oneLiner || '' }
     ].filter(f => f.value && matchesSearch(f.label, f.value));
 
     if (baseFields.length > 0) {
@@ -1119,6 +1174,33 @@
     if (pill) pill.addEventListener('click', toggleDrawer);
     if (btnClose) btnClose.addEventListener('click', closeDrawer);
     if (backdrop) backdrop.addEventListener('click', closeDrawer);
+
+    // 抽屉双模切换 Tab
+    const tabStructured = shadowRoot.getElementById('drawer-tab-structured');
+    const tabRaw = shadowRoot.getElementById('drawer-tab-raw');
+    if (tabStructured && tabRaw) {
+      tabStructured.addEventListener('click', () => {
+        currentDrawerTab = 'structured';
+        tabStructured.classList.add('active');
+        tabStructured.style.borderBottomColor = '#00f2fe';
+        tabStructured.style.color = '#00f2fe';
+        tabRaw.classList.remove('active');
+        tabRaw.style.borderBottomColor = 'transparent';
+        tabRaw.style.color = '#94a3b8';
+        renderDrawerContent();
+      });
+
+      tabRaw.addEventListener('click', () => {
+        currentDrawerTab = 'raw';
+        tabRaw.classList.add('active');
+        tabRaw.style.borderBottomColor = '#00f2fe';
+        tabRaw.style.color = '#00f2fe';
+        tabStructured.classList.remove('active');
+        tabStructured.style.borderBottomColor = 'transparent';
+        tabStructured.style.color = '#94a3b8';
+        renderDrawerContent();
+      });
+    }
 
     // 搜索实时过滤
     if (searchInput) {

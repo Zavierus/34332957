@@ -995,55 +995,146 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 纯本地智能简历解析引擎
+  // 纯文本分段切分器 (自然段落/空行分段，用于手动快速选中复制与算法兜底)
+  function splitRawParagraphs(rawText) {
+    if (!rawText || !rawText.trim()) return [];
+    // 按双换行或明显模块分割
+    const blocks = rawText.split(/\r?\n\s*\r?\n+/).map(b => b.trim()).filter(Boolean);
+    const segments = [];
+
+    blocks.forEach((block, idx) => {
+      const firstLine = block.split(/\r?\n/)[0].replace(/^[\d+•\-\*、. 【】\[\]]+/, '').trim();
+      const title = firstLine.length > 25 ? firstLine.slice(0, 25) + '...' : firstLine || `段落 ${idx + 1}`;
+      segments.push({
+        id: 'seg_' + (idx + 1),
+        index: idx + 1,
+        title: title,
+        charCount: block.length,
+        text: block
+      });
+    });
+
+    return segments;
+  }
+
+  // 纯本地智能简历解析引擎 (升级版：支持基本信息提取、公司项目智能区分、技能爱好隔离、自然分段)
   function parseResumeText(rawText) {
     if (!rawText || !rawText.trim()) return null;
 
-    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const rawLines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const depot = {
       parsedAt: new Date().toLocaleString(),
+      basicInfo: {
+        name: '',
+        targetRole: '',
+        school: '',
+        phone: '',
+        email: '',
+        portfolioUrl: '',
+        oneLiner: ''
+      },
       advantages: [],
       workExperiences: [],
       projects: [],
       skills: [],
       hobbies: [],
       selfIntro: { short: '', full: '' },
-      education: []
+      education: [],
+      rawSegments: splitRawParagraphs(rawText)
     };
 
-    let currentSection = 'adv';
+    // 1. 基础信息扫描抽取 (手机、邮箱、作品集网址、学校)
+    const phoneMatch = rawText.match(/(?:(?:\+|00)86)?\s*(1[3-9]\d{9})/);
+    if (phoneMatch) depot.basicInfo.phone = phoneMatch[1];
+
+    const emailMatch = rawText.match(/([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)/);
+    if (emailMatch) depot.basicInfo.email = emailMatch[1];
+
+    const urlMatch = rawText.match(/(https?:\/\/[^\s"'<>\n\r]+)/);
+    if (urlMatch) depot.basicInfo.portfolioUrl = urlMatch[1];
+
+    const schoolMatch = rawText.match(/([\u4e00-\u9fa5]{2,10}(?:大学|学院|高等专科学校))/);
+    if (schoolMatch) depot.basicInfo.school = schoolMatch[1];
+
+    // 2. 专业技能与工具词典 (优先判定，绝不让核心工具与专业技术落入兴趣爱好)
+    const KNOWN_SKILL_KEYWORDS = [
+      'SQL', 'Python', 'Premiere', 'PR', 'AE', 'After Effects', 'PS', 'Photoshop', 'Illustrator', 'AI', 'Final Cut Pro', 'FCP',
+      'DaVinci', 'DaVinci Resolve', 'Three.js', 'WebGL', 'GLSL', 'Shader', 'Web Audio API', 'Blender', 'TouchDesigner',
+      'esbuild', 'AIGC', 'Midjourney', 'LoRA', 'ChatGPT', 'Claude', 'Claude Code', 'Sora', '即梦', 'Seedance', 'Codex', 'Opencode', 'DSH Harness',
+      '飞书', '多维表', '飞书多维表', '千川', '巨量千川', '巨量云图', '巨量算数', '橙蕉', 'ROI', 'SOP', '人群定向', '抖店', 'UTM', '全链路归因',
+      '达人BD', '达人分层', '直播脚本', '选题策划', '商业摄影', '三点布光', '分镜', 'Shotlist', 'MCN', 'SLA', '数据透视', '数据清洗',
+      'Excel', 'BI', 'Tableau', 'PowerBI', '用户增长', '私域运营', '社群运营', '短视频运营', '内容策划', '矩阵运营', '投放', '复投', '试投'
+    ];
+
+    // 3. 逐行状态机解析
+    let currentSection = 'header'; // 初始为抬头区域，避免误抓优势
     let currentWork = null;
     let currentProj = null;
     let currentEdu = null;
 
     const isSectionHeader = (line) => {
-      if (/(?:个人优势|核心优势|个人亮点|优势亮点|优势与能力|核心亮点|优势)/i.test(line)) return 'adv';
-      if (/(?:工作经历|工作经验|职业经历|从业经历|实习经历)/i.test(line)) return 'work';
-      if (/(?:项目经历|项目经验|核心项目|主要项目|实战项目)/i.test(line)) return 'proj';
-      if (/(?:专业技能|技能特长|职业技能|掌握技能|技能清单|IT技能|专业能力)/i.test(line)) return 'skills';
-      if (/(?:兴趣爱好|个人爱好|业余爱好|特长爱好|爱好|兴趣|个人特长)/i.test(line)) return 'hobbies';
-      if (/(?:自我评价|自我介绍|关于我|个人简介|总结与评价)/i.test(line)) return 'intro';
-      if (/(?:教育背景|教育经历|学习经历|学历情况)/i.test(line)) return 'edu';
+      // 技能优先判断，包含核心能力、关键工具、模块、技术栈等
+      if (/(?:专业技能|技能特长|职业技能|掌握技能|技能清单|IT技能|专业能力|核心能力|关键工具|技术栈|工具熟练度|软件技能|技能工具|SKILLS)/i.test(line)) return 'skills';
+      if (/(?:工作经历|工作经验|职业经历|从业经历|实习经历|工作履历)/i.test(line)) return 'work';
+      if (/(?:项目经历|项目经验|核心项目|重点项目|主要项目|实战项目|项目成果|个人项目|主要经历|PROJECT)/i.test(line)) return 'proj';
+      if (/(?:个人优势|核心优势|个人亮点|优势亮点|优势与能力|核心亮点|核心竞争力)/i.test(line)) return 'adv';
+      // 只有在明确是生活/休闲爱好时才进入 hobbies，带有“能力”或“工具”的在上方已被 skills 捕获
+      if (/(?:兴趣爱好|个人爱好|业余爱好|生活方式|特长与爱好|HOBBIES)/i.test(line)) return 'hobbies';
+      if (/(?:自我评价|自我介绍|关于我|个人简介|总结与评价|SELF-EVALUATION)/i.test(line)) return 'intro';
+      if (/(?:教育背景|教育经历|学习经历|学历情况|EDUCATION)/i.test(line)) return 'edu';
       return null;
     };
 
-    lines.forEach(line => {
+    rawLines.forEach((line, idx) => {
       const detected = isSectionHeader(line);
       if (detected) {
         currentSection = detected;
         return;
       }
 
-      if (currentSection === 'adv') {
+      if (currentSection === 'header') {
+        if (idx <= 6) {
+          // 姓名提取
+          if (!depot.basicInfo.name && /[\u4e00-\u9fa5]{2,4}(?:\s*\/|\s*·|\s*$)/.test(line) && !line.includes('大学') && !line.includes('申请') && !line.includes('简历') && !line.includes('公司')) {
+            const m = line.match(/([\u4e00-\u9fa5]{2,4})/);
+            if (m) depot.basicInfo.name = m[1];
+          }
+          // 定位与期望方向
+          if (!depot.basicInfo.targetRole && /(?:设计|产品|技术|运营|策划|研发|工程师|总监|专家)/.test(line) && line.length < 40) {
+            depot.basicInfo.targetRole = line;
+          }
+          // 一句话简介
+          if (!depot.basicInfo.oneLiner && /(?:实践者|复合型|探索者|负责人|操盘手)/.test(line) && line.length < 60) {
+            depot.basicInfo.oneLiner = line;
+          }
+        }
+      } else if (currentSection === 'adv') {
         const cleanAdv = line.replace(/^[\d+•\-\*、. ]+/, '').trim();
-        if (cleanAdv.length >= 5) {
+        const isHeaderLike = /(?:1[3-9]\d{9}|@|https?:|深圳大学|求职|简历|APPLICATION)/i.test(cleanAdv);
+        if (cleanAdv.length >= 6 && !isHeaderLike) {
           depot.advantages.push(cleanAdv);
         }
       } else if (currentSection === 'work') {
+        // 判断是否是内嵌的项目块
+        const isInlineProj = /(?:^【?项目[一二三四五12345:：]|●\s*项目|◆\s*项目|主导项目|负责项目|核心项目)/i.test(line);
+        if (isInlineProj) {
+          if (currentProj) depot.projects.push(currentProj);
+          currentProj = {
+            id: 'p_' + Math.random().toString(36).substr(2, 6),
+            name: line.replace(/^[\d+•\-\*、. 【】\[\]●◆项目:： ]+/, '').trim() || '重点项目',
+            role: '主导/核心成员',
+            period: '项目周期',
+            desc: '',
+            results: ''
+          };
+          return;
+        }
+
         const hasDate = /(20\d{2}[.\-\/年]\d{1,2}|至今|现在)/.test(line);
+        const isCompanyEntity = /(?:公司|科技|企业|集团|店|社|工作室|品牌|平台|互娱|传媒|Studio|Club|有限公司)/i.test(line);
         const hasSplit = /[|｜]/.test(line);
 
-        if (hasDate && (hasSplit || line.includes('公司') || line.includes('店') || line.includes('厂') || line.includes('部') || line.length < 50)) {
+        if (hasDate && (hasSplit || isCompanyEntity || line.length < 50)) {
           if (currentWork) depot.workExperiences.push(currentWork);
           const parts = line.split(/[|｜]/).map(p => p.trim());
           let period = '';
@@ -1051,9 +1142,15 @@ document.addEventListener('DOMContentLoaded', () => {
           let role = '';
 
           parts.forEach(p => {
-            if (/(20\d{2}|至今)/.test(p)) period = p;
-            else if (/(公司|科技|企业|集团|店|社|工作室|品牌|平台)/.test(p) || !company) company = p;
-            else role = p;
+            if (/(20\d{2}|至今)/.test(p)) {
+              period = p;
+            } else if (!company && /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|网络|网络科技|信息科技|电子商务|文化传媒)/i.test(p)) {
+              company = p;
+            } else if (!role) {
+              role = p;
+            } else if (!company) {
+              company = p;
+            }
           });
 
           currentWork = {
@@ -1064,6 +1161,12 @@ document.addEventListener('DOMContentLoaded', () => {
             desc: '',
             achievements: []
           };
+        } else if (currentProj) {
+          if (/^(?:业绩|成果|量化|产出|结果|指标)/.test(line) || /[\d+%万GMR]/.test(line) && line.length > 15) {
+            currentProj.results = (currentProj.results ? currentProj.results + '；' : '') + line.replace(/^[\d+•\-\*、. 核心业绩成果量化:：]+/, '').trim();
+          } else {
+            currentProj.desc = (currentProj.desc ? currentProj.desc + '\n' : '') + line.replace(/^[•\-\* ]+/, '');
+          }
         } else if (currentWork) {
           if (/^(?:业绩|成果|量化|产出|核心业绩|指标|【业绩】)/.test(line) || /[\d+%万GMR]/.test(line) && line.length > 15) {
             currentWork.achievements.push(line.replace(/^[\d+•\-\*、. 核心业绩成果量化:：]+/, '').trim());
@@ -1074,8 +1177,9 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (currentSection === 'proj') {
         const hasDate = /(20\d{2}[.\-\/年]\d{1,2}|至今)/.test(line);
         const hasSplit = /[|｜]/.test(line);
+        const isProjStart = hasDate || hasSplit || /^(?:【|●|◆|项目[一二三四五12345:：]|AIGC|千万级|实战)/i.test(line);
 
-        if ((hasDate || hasSplit) && line.length < 60 && (line.includes('项目') || line.includes('大促') || line.includes('战役') || line.includes('计划') || hasDate)) {
+        if (isProjStart && line.length < 70) {
           if (currentProj) depot.projects.push(currentProj);
           const parts = line.split(/[|｜]/).map(p => p.trim());
           let name = '';
@@ -1083,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
           let period = '';
           parts.forEach(p => {
             if (/(20\d{2}|至今)/.test(p)) period = p;
-            else if (!name) name = p;
+            else if (!name) name = p.replace(/^[【●◆\d+、. ]+/, '');
             else role = p;
           });
           currentProj = {
@@ -1105,26 +1209,48 @@ document.addEventListener('DOMContentLoaded', () => {
         const rawTokens = line.split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
         rawTokens.forEach(token => {
           const cleanToken = token.replace(/^[•\-\* ]+/, '').trim();
-          if (cleanToken && cleanToken.length <= 25 && !depot.skills.includes(cleanToken)) {
+          if (cleanToken && cleanToken.length <= 30 && !depot.skills.includes(cleanToken)) {
             depot.skills.push(cleanToken);
           }
         });
       } else if (currentSection === 'hobbies') {
-        const rawTokens = line.split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
-        rawTokens.forEach(token => {
-          const cleanToken = token.replace(/^[•\-\* ]+/, '').trim();
-          if (cleanToken && cleanToken.length <= 25 && !depot.hobbies.includes(cleanToken)) {
-            depot.hobbies.push(cleanToken);
-          }
-        });
+        const hasSkills = KNOWN_SKILL_KEYWORDS.some(sk => line.toUpperCase().includes(sk.toUpperCase()));
+        if (hasSkills) {
+          const rawTokens = line.split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
+          rawTokens.forEach(token => {
+            const cleanToken = token.replace(/^[•\-\* ]+/, '').trim();
+            if (!cleanToken) return;
+            const isSkill = KNOWN_SKILL_KEYWORDS.some(sk => cleanToken.toUpperCase().includes(sk.toUpperCase()));
+            if (isSkill) {
+              if (!depot.skills.includes(cleanToken)) depot.skills.push(cleanToken);
+            } else if (cleanToken.length <= 25 && !depot.hobbies.includes(cleanToken)) {
+              depot.hobbies.push(cleanToken);
+            }
+          });
+        } else {
+          const rawTokens = line.split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
+          rawTokens.forEach(token => {
+            const cleanToken = token.replace(/^[•\-\* ]+/, '').trim();
+            if (cleanToken && cleanToken.length <= 25 && !depot.hobbies.includes(cleanToken)) {
+              depot.hobbies.push(cleanToken);
+            }
+          });
+        }
       } else if (currentSection === 'intro') {
+        if (/^(?:生活方式|爱好|兴趣|个人爱好|业余生活)[：:]/i.test(line) || /Livehouse|音乐现场|城市探索|户外扫街|鸡尾酒|单板滑雪|公路骑行/i.test(line)) {
+          const rawTokens = line.replace(/^(?:生活方式|爱好|兴趣)[：:]/i, '').split(/[,，、/|｜;；\t]/).map(t => t.trim()).filter(Boolean);
+          rawTokens.forEach(t => {
+            const clean = t.replace(/^[•\-\* ]+/, '').trim();
+            if (clean && clean.length <= 25 && !depot.hobbies.includes(clean)) depot.hobbies.push(clean);
+          });
+        }
         if (!depot.selfIntro.full) depot.selfIntro.full = line;
         else depot.selfIntro.full += '\n' + line;
       } else if (currentSection === 'edu') {
         if (!currentEdu) {
           const parts = line.split(/[|｜\t ]+/).filter(Boolean);
           currentEdu = {
-            school: parts[0] || '高等院校',
+            school: parts[0] || depot.basicInfo.school || '高等院校',
             major: parts[1] || '专业方向',
             degree: parts[2] || '本科',
             period: parts[3] || '就读期间',
@@ -1140,25 +1266,46 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentWork) depot.workExperiences.push(currentWork);
     if (currentProj) depot.projects.push(currentProj);
 
+    // 重点项目兜底提取：若 projects 为空，从工作职责中扫描项目块
+    if (depot.projects.length === 0) {
+      depot.workExperiences.forEach(w => {
+        if (w.desc && (w.desc.includes('项目') || w.desc.includes('操盘') || w.desc.includes('战役') || w.desc.includes('SOP'))) {
+          const pLines = w.desc.split('\n');
+          pLines.forEach(pl => {
+            if (pl.includes('项目') || pl.includes('战役') || pl.includes('方案') || pl.includes('工作流')) {
+              depot.projects.push({
+                id: 'p_' + Math.random().toString(36).substr(2, 6),
+                name: pl.slice(0, 35).replace(/^[•\-\* ]+/, ''),
+                role: w.role || '主导/核心成员',
+                period: w.period || '实战期间',
+                desc: pl,
+                results: (w.achievements && w.achievements[0]) || '取得显著业务突破与量化成果'
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // 技能与爱好二次安全清洗：将所有误留在 hobbies 中的已知技能移回 skills
+    if (depot.hobbies && depot.hobbies.length > 0) {
+      const remainingHobbies = [];
+      depot.hobbies.forEach(h => {
+        const isSkill = KNOWN_SKILL_KEYWORDS.some(sk => h.toUpperCase().includes(sk.toUpperCase()));
+        if (isSkill) {
+          if (!depot.skills.includes(h)) depot.skills.push(h);
+        } else {
+          remainingHobbies.push(h);
+        }
+      });
+      depot.hobbies = remainingHobbies;
+    }
+
     if (depot.selfIntro.full) {
       depot.selfIntro.short = depot.selfIntro.full.slice(0, 85) + '...';
     } else {
       depot.selfIntro.short = '执行力强，注重数据与实际成果落地，具备多业务跨领域实战经验，沟通协作敏捷高效、抗压即战力强。';
       depot.selfIntro.full = '具备敏锐的商业与数据归因习惯，对工作充满敬业与自驱热情。在以往经历中注重以终为始建立规范化SOP，既有大促节点的冲刺爆发力，又有日常精细化运营与社群维护耐心。为人真诚好沟通，能迅速融入团队打赢硬仗。';
-    }
-
-    // 若优势为空，提供智能默认
-    if (depot.advantages.length === 0) {
-      depot.advantages = [
-        '具备扎实业务实操经验与全链路闭环思维，深度理解业务痛点与用户需求。',
-        '具备优秀的数据敏感度与复盘归因能力，擅长用量化指标驱动业务增长。',
-        '自驱力与抗压执行力强，沟通协调顺畅，能快速在复杂业务中建立 SOP。'
-      ];
-    }
-
-    // 若兴趣爱好为空，提供兼具审美的默认
-    if (!depot.hobbies || depot.hobbies.length === 0) {
-      depot.hobbies = ['数码摄影与布光', '户外骑行', '主机与二次元游戏', '视觉审美与排版', '终身学习与新工具探索'];
     }
 
     return depot;
@@ -1169,20 +1316,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!depot) return;
     currentResumeDepot = depot;
 
-    // 1. 优势渲染
-    const advListEl = document.getElementById('depot-adv-list');
-    if (advListEl) {
-      advListEl.innerHTML = '';
-      (depot.advantages || []).forEach((adv, idx) => {
-        const item = document.createElement('div');
-        item.className = 'depot-adv-item';
-        item.innerHTML = `
-          <div class="depot-adv-text"><b>${idx + 1}.</b> ${adv}</div>
-          <button class="mini-copy-btn" data-copy="${encodeURIComponent(adv)}">📋 复制</button>
-        `;
-        advListEl.appendChild(item);
-      });
-    }
+    // 0. 基本信息渲染
+    renderBasicInfo(depot.basicInfo);
+
+    // 1. 优势渲染 (支持删除、编辑)
+    renderAdvantages(depot.advantages);
 
     // 2. 工作经历渲染
     const workListEl = document.getElementById('depot-work-list');
@@ -1225,29 +1363,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const projListEl = document.getElementById('depot-proj-list');
     if (projListEl) {
       projListEl.innerHTML = '';
-      (depot.projects || []).forEach(proj => {
-        const card = document.createElement('div');
-        card.className = 'depot-proj-card';
-        const fullProjText = `${proj.name} | ${proj.role} (${proj.period})\n项目描述：${proj.desc}\n项目业绩：${proj.results}`;
+      if (!depot.projects || depot.projects.length === 0) {
+        projListEl.innerHTML = '<div style="padding:16px; color:#64748b; font-size:12.5px;">暂未识别到独立项目，若项目在工作经历中，可切换至「📝 原始分段自由复制视图」快速复制对应段落！</div>';
+      } else {
+        depot.projects.forEach(proj => {
+          const card = document.createElement('div');
+          card.className = 'depot-proj-card';
+          const fullProjText = `${proj.name} | ${proj.role} (${proj.period})\n项目描述：${proj.desc}\n项目业绩：${proj.results}`;
 
-        card.innerHTML = `
-          <div class="proj-card-top">
-            <div class="work-org-info">
-              <span class="proj-name">${proj.name}</span>
-              <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.name)}">📋 项目名</button>
-              <span class="proj-role">${proj.role}</span>
-              <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.role)}">📋 角色</button>
-              <span class="work-period">📅 ${proj.period}</span>
+          card.innerHTML = `
+            <div class="proj-card-top">
+              <div class="work-org-info">
+                <span class="proj-name">${proj.name}</span>
+                <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.name)}">📋 项目名</button>
+                <span class="proj-role">${proj.role}</span>
+                <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.role)}">📋 角色</button>
+                <span class="work-period">📅 ${proj.period}</span>
+              </div>
+              <div class="work-actions">
+                <button class="mini-copy-btn" data-copy="${encodeURIComponent(fullProjText)}" style="background:rgba(168,85,247,0.15); border-color:#a855f7; color:#d8b4fe;">📋 复制整段项目</button>
+              </div>
             </div>
-            <div class="work-actions">
-              <button class="mini-copy-btn" data-copy="${encodeURIComponent(fullProjText)}" style="background:rgba(168,85,247,0.15); border-color:#a855f7; color:#d8b4fe;">📋 复制整段项目</button>
-            </div>
-          </div>
-          ${proj.desc ? `<div class="work-desc"><b>【项目详情】</b>：${proj.desc} <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.desc)}" style="font-size:10px; padding:1px 6px;">复制描述</button></div>` : ''}
-          ${proj.results ? `<div class="work-desc" style="color:#a7f3d0;"><b>【量化产出】</b>：${proj.results} <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.results)}" style="font-size:10px; padding:1px 6px;">复制成果</button></div>` : ''}
-        `;
-        projListEl.appendChild(card);
-      });
+            ${proj.desc ? `<div class="work-desc"><b>【项目详情】</b>：${proj.desc} <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.desc)}" style="font-size:10px; padding:1px 6px;">复制描述</button></div>` : ''}
+            ${proj.results ? `<div class="work-desc" style="color:#a7f3d0;"><b>【量化产出】</b>：${proj.results} <button class="mini-copy-btn" data-copy="${encodeURIComponent(proj.results)}" style="font-size:10px; padding:1px 6px;">复制成果</button></div>` : ''}
+          `;
+          projListEl.appendChild(card);
+        });
+      }
     }
 
     // 4. 技能清单渲染
@@ -1310,6 +1452,10 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
+    // 8. 原始段落自由复制渲染
+    const rawSegments = depot.rawSegments || splitRawParagraphs(document.getElementById('raw-resume-text')?.value || '');
+    renderRawSegments(rawSegments);
+
     // 绑定所有的 data-copy 点击复制事件
     bindDepotCopyEvents();
 
@@ -1321,8 +1467,142 @@ document.addEventListener('DOMContentLoaded', () => {
       const advCount = depot.advantages?.length || 0;
       const skillCount = depot.skills?.length || 0;
       const hobbyCount = depot.hobbies?.length || 0;
-      statusText.textContent = `解析完毕：已分类归纳 ${workCount} 段工作经历、${projCount} 个项目、${advCount} 项核心亮点、${skillCount} 个专业技能、${hobbyCount} 项兴趣爱好！`;
+      const segCount = rawSegments.length;
+      statusText.textContent = `解析完毕：已归纳 ${workCount}段工作、${projCount}个项目、${advCount}条优势、${skillCount}个技能、${hobbyCount}项爱好，生成 ${segCount}个自然复制段落！`;
     }
+  }
+
+  // 渲染基础档案信息卡片
+  function renderBasicInfo(info) {
+    const box = document.getElementById('depot-basic-info-grid');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!info) return;
+
+    const fields = [
+      { label: '姓名', val: info.name || '求职候选人' },
+      { label: '目标方向 / 岗位', val: info.targetRole || '综合运营/内容策划' },
+      { label: '毕业院校', val: info.school || '高等院校' },
+      { label: '联系手机', val: info.phone || '未提取到手机号' },
+      { label: '联系邮箱', val: info.email || '未提取到邮箱' },
+      { label: '在线作品集网址', val: info.portfolioUrl || '未提取到作品集URL' },
+      { label: '一句话职业定位', val: info.oneLiner || '复合型实践者' }
+    ];
+
+    fields.forEach(f => {
+      if (!f.val) return;
+      const item = document.createElement('div');
+      item.className = 'basic-info-card-item';
+      item.innerHTML = `
+        <div class="basic-info-left">
+          <span class="basic-info-label">${f.label}</span>
+          <span class="basic-info-val" title="${f.val}">${f.val}</span>
+        </div>
+        <button class="mini-copy-btn" data-copy="${encodeURIComponent(f.val)}">📋 复制</button>
+      `;
+      box.appendChild(item);
+    });
+  }
+
+  // 渲染个人优势 (支持单项编辑、单项删除)
+  function renderAdvantages(advantages = []) {
+    const advListEl = document.getElementById('depot-adv-list');
+    if (!advListEl) return;
+    advListEl.innerHTML = '';
+
+    if (!advantages || advantages.length === 0) {
+      advListEl.innerHTML = `
+        <div style="padding: 24px; text-align:center; color:#64748b; font-size:13px;">
+          暂无个人优势（已被清空或未提取）。您可以点击右上角「➕ 添加优势」，或直接切换至「📝 原始分段自由复制视图」！
+        </div>
+      `;
+      return;
+    }
+
+    advantages.forEach((adv, idx) => {
+      const item = document.createElement('div');
+      item.className = 'depot-adv-item';
+      item.innerHTML = `
+        <div class="depot-adv-text"><b>${idx + 1}.</b> ${adv}</div>
+        <div class="adv-item-actions">
+          <button class="mini-action-btn edit-adv-btn" data-idx="${idx}">✏️ 编辑</button>
+          <button class="mini-action-btn del del-adv-btn" data-idx="${idx}">🗑️ 删除</button>
+          <button class="mini-copy-btn" data-copy="${encodeURIComponent(adv)}">📋 复制</button>
+        </div>
+      `;
+
+      item.querySelector('.edit-adv-btn').onclick = () => {
+        const updated = prompt('编辑此条个人优势：', adv);
+        if (updated !== null && updated.trim()) {
+          currentResumeDepot.advantages[idx] = updated.trim();
+          renderAdvantages(currentResumeDepot.advantages);
+          chrome.storage.local.set({ resumeDepot: currentResumeDepot });
+          showCopyToast('已更新此条优势！');
+        }
+      };
+
+      item.querySelector('.del-adv-btn').onclick = () => {
+        currentResumeDepot.advantages.splice(idx, 1);
+        renderAdvantages(currentResumeDepot.advantages);
+        chrome.storage.local.set({ resumeDepot: currentResumeDepot });
+        showCopyToast('已删除此条优势！');
+      };
+
+      advListEl.appendChild(item);
+    });
+  }
+
+  // 渲染原始自然段落卡片
+  function renderRawSegments(segments = [], filterText = '') {
+    const listEl = document.getElementById('raw-segments-list');
+    const badgeEl = document.getElementById('raw-segments-count-badge');
+    const tabBadgeEl = document.getElementById('raw-tab-badge');
+    if (!listEl) return;
+
+    let filtered = segments || [];
+    if (filterText) {
+      const ft = filterText.toLowerCase();
+      filtered = filtered.filter(s => s.text.toLowerCase().includes(ft));
+    }
+
+    if (badgeEl) badgeEl.textContent = `共 ${segments.length} 个自然段落 (匹配 ${filtered.length} 段)`;
+    if (tabBadgeEl) tabBadgeEl.textContent = `${segments.length}段`;
+
+    listEl.innerHTML = '';
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div style="padding:40px; text-align:center; color:#64748b;">暂无匹配的简历段落</div>';
+      return;
+    }
+
+    filtered.forEach(seg => {
+      const card = document.createElement('div');
+      card.className = 'raw-segment-card';
+      card.innerHTML = `
+        <div class="raw-segment-header">
+          <div class="raw-segment-title">
+            <span>📄 段落 #${seg.index}</span>
+            <span class="raw-segment-len">(${seg.charCount} 字)</span>
+          </div>
+          <button class="mini-copy-btn" data-copy="${encodeURIComponent(seg.text)}">📋 一键复制本段</button>
+        </div>
+        <div class="raw-segment-body">${escapeHtml(seg.text)}</div>
+      `;
+      listEl.appendChild(card);
+    });
+
+    // 绑定本段复制
+    listEl.querySelectorAll('[data-copy]').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        const text = decodeURIComponent(el.getAttribute('data-copy'));
+        copyText(text, el);
+      };
+    });
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // 绑定动态复制按钮事件
@@ -1555,7 +1835,101 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 5. 全部复制按钮
+    // 5. 视图双模切换 (智能分类 vs 原始分段)
+    const tabStructured = document.getElementById('tab-btn-structured');
+    const tabRaw = document.getElementById('tab-btn-raw-segments');
+    const panelStructured = document.getElementById('resume-depot-result');
+    const panelRaw = document.getElementById('resume-raw-segments-result');
+
+    if (tabStructured && tabRaw && panelStructured && panelRaw) {
+      tabStructured.addEventListener('click', () => {
+        tabStructured.classList.add('active');
+        tabRaw.classList.remove('active');
+        panelStructured.style.display = 'block';
+        panelRaw.style.display = 'none';
+      });
+
+      tabRaw.addEventListener('click', () => {
+        tabRaw.classList.add('active');
+        tabStructured.classList.remove('active');
+        panelStructured.style.display = 'none';
+        panelRaw.style.display = 'block';
+
+        // 切换时如果尚未渲染原始段落，根据当前文本重新生成
+        const rawText = rawTextEl?.value || '';
+        const segments = currentResumeDepot?.rawSegments?.length ? currentResumeDepot.rawSegments : splitRawParagraphs(rawText);
+        renderRawSegments(segments, document.getElementById('raw-segments-search')?.value.trim() || '');
+      });
+    }
+
+    // 原始段落搜索过滤
+    const rawSearchInput = document.getElementById('raw-segments-search');
+    if (rawSearchInput) {
+      rawSearchInput.addEventListener('input', (e) => {
+        const query = e.target.value.trim();
+        const segments = currentResumeDepot?.rawSegments?.length ? currentResumeDepot.rawSegments : splitRawParagraphs(rawTextEl?.value || '');
+        renderRawSegments(segments, query);
+      });
+    }
+
+    // 复制全部基本档案
+    const btnCopyAllBasic = document.getElementById('btn-copy-all-basic');
+    if (btnCopyAllBasic) {
+      btnCopyAllBasic.addEventListener('click', () => {
+        if (!currentResumeDepot?.basicInfo) return;
+        const b = currentResumeDepot.basicInfo;
+        const text = `姓名：${b.name || ''}\n定位：${b.targetRole || ''}\n学校：${b.school || ''}\n手机：${b.phone || ''}\n邮箱：${b.email || ''}\n作品集：${b.portfolioUrl || ''}\n简介：${b.oneLiner || ''}`;
+        copyText(text.trim(), btnCopyAllBasic);
+      });
+    }
+
+    // 优势模块交互：添加自定义优势与一键清空/隐藏
+    const btnAddCustomAdv = document.getElementById('btn-add-custom-adv');
+    if (btnAddCustomAdv) {
+      btnAddCustomAdv.addEventListener('click', () => {
+        const newAdv = prompt('请输入新增的核心优势亮点：');
+        if (newAdv && newAdv.trim()) {
+          if (!currentResumeDepot) currentResumeDepot = { advantages: [] };
+          if (!currentResumeDepot.advantages) currentResumeDepot.advantages = [];
+          currentResumeDepot.advantages.push(newAdv.trim());
+          renderAdvantages(currentResumeDepot.advantages);
+          chrome.storage.local.set({ resumeDepot: currentResumeDepot });
+          showCopyToast('已成功添加新核心优势！');
+        }
+      });
+    }
+
+    const btnClearAllAdv = document.getElementById('btn-clear-all-adv');
+    if (btnClearAllAdv) {
+      btnClearAllAdv.addEventListener('click', () => {
+        if (!currentResumeDepot?.advantages?.length) {
+          alert('当前暂无优势内容可清空！');
+          return;
+        }
+        if (confirm('确定要清空/隐藏当前全部个人优势吗？（清空后可随时使用原始分段视图复制，或点击「+ 添加优势」重新定制）')) {
+          currentResumeDepot.advantages = [];
+          renderAdvantages([]);
+          chrome.storage.local.set({ resumeDepot: currentResumeDepot });
+          showCopyToast('已清空个人优势模块');
+        }
+      });
+    }
+
+    // 复制清洗后全文段落
+    const btnCopyAllRawSegments = document.getElementById('btn-copy-all-raw-segments');
+    if (btnCopyAllRawSegments) {
+      btnCopyAllRawSegments.addEventListener('click', () => {
+        const segments = currentResumeDepot?.rawSegments?.length ? currentResumeDepot.rawSegments : splitRawParagraphs(rawTextEl?.value || '');
+        if (!segments.length) {
+          alert('当前暂无简历段落！');
+          return;
+        }
+        const full = segments.map(s => `【段落 ${s.index}】\n${s.text}`).join('\n\n');
+        copyText(full, btnCopyAllRawSegments);
+      });
+    }
+
+    // 6. 各板块全部复制按钮
     const btnCopyAllAdv = document.getElementById('btn-copy-all-adv');
     if (btnCopyAllAdv) {
       btnCopyAllAdv.addEventListener('click', () => {
@@ -1628,7 +2002,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // 6. 保存武器库
+    // 7. 保存武器库
     const btnSaveDepot = document.getElementById('btn-save-resume-depot');
     if (btnSaveDepot) {
       btnSaveDepot.addEventListener('click', () => {
@@ -1642,7 +2016,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // 7. 导出武器库 JSON
+    // 8. 导出武器库 JSON
     const btnExportJson = document.getElementById('btn-export-resume-depot');
     if (btnExportJson) {
       btnExportJson.addEventListener('click', () => {
@@ -1662,7 +2036,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // 8. 清空重置
+    // 9. 清空重置
     const btnClearDepot = document.getElementById('btn-clear-resume-depot');
     if (btnClearDepot) {
       btnClearDepot.addEventListener('click', () => {
@@ -1670,6 +2044,7 @@ document.addEventListener('DOMContentLoaded', () => {
           chrome.storage.local.remove(['resumeDepot'], () => {
             currentResumeDepot = null;
             if (rawTextEl) rawTextEl.value = '';
+            document.getElementById('depot-basic-info-grid').innerHTML = '';
             document.getElementById('depot-adv-list').innerHTML = '';
             document.getElementById('depot-work-list').innerHTML = '';
             document.getElementById('depot-proj-list').innerHTML = '';
@@ -1677,6 +2052,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const hb = document.getElementById('depot-hobbies-box');
             if (hb) hb.innerHTML = '';
             document.getElementById('depot-edu-box').innerHTML = '';
+            document.getElementById('raw-segments-list').innerHTML = '';
             document.getElementById('parse-status-text').textContent = '已清空：请上传或粘贴新的简历开始解析';
             showCopyToast('简历武器库已清空');
           });
@@ -1684,7 +2060,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // 9. 页面初次加载时回显已有武器库
+    // 10. 页面初次加载时回显已有武器库
     chrome.storage.local.get(['resumeDepot'], (res) => {
       if (res && res.resumeDepot) {
         renderResumeDepot(res.resumeDepot);

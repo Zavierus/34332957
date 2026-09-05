@@ -413,6 +413,7 @@
         width: 336px;
         background: rgba(15, 23, 42, 0.96);
         backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
         border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 14px;
         box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 24px rgba(0, 242, 254, 0.12);
@@ -427,6 +428,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        cursor: move;
+        user-select: none;
       }
       .ats-title {
         font-size: 13px;
@@ -437,13 +440,67 @@
         gap: 6px;
       }
       .ats-badge {
-        font-size: 10.5px;
-        padding: 2px 8px;
+        font-size: 10px;
+        padding: 2px 7px;
         border-radius: 20px;
         background: rgba(255, 255, 255, 0.15);
         color: ${portal.themeColor};
         font-weight: 600;
       }
+      .hud-mode-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #e2e8f0;
+        font-size: 11px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .hud-mode-btn:hover {
+        background: rgba(0, 242, 254, 0.25);
+        color: #00f2fe;
+        border-color: #00f2fe;
+      }
+      .hud-minimize-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 4px;
+      }
+      .hud-minimize-btn:hover {
+        color: #fff;
+      }
+
+      /* 精简模式 (Compact Mode) */
+      .ats-panel.compact {
+        width: 280px;
+      }
+      .ats-panel.compact .section-label,
+      .ats-panel.compact .snippet-card,
+      .ats-panel.compact .cross-site-bar,
+      .ats-panel.compact [style*="grid-template-columns: 1fr 1fr"] {
+        display: none !important;
+      }
+      .ats-panel.compact .ats-body {
+        padding: 8px 12px;
+        gap: 6px;
+      }
+      .compact-stat-row {
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #94a3b8;
+        padding-bottom: 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .ats-panel.compact .compact-stat-row {
+        display: flex;
+      }
+
       .ats-body {
         padding: 14px 16px;
         display: flex;
@@ -564,6 +621,37 @@
         font-size: 10px;
         color: #64748b;
       }
+      .cross-site-bar {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .cross-title {
+        font-size: 10.5px;
+        color: #94a3b8;
+        display: flex;
+        justify-content: space-between;
+      }
+      .site-chips {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .site-chip-btn {
+        font-size: 10px;
+        padding: 3px 8px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        color: #cbd5e1;
+        cursor: pointer;
+      }
+      .site-chip-btn:hover {
+        background: ${portal.themeColor};
+        color: #0b0f19;
+      }
       .toast {
         position: absolute;
         bottom: 12px;
@@ -578,6 +666,19 @@
         box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         z-index: 100;
       }
+      .collapsed { display: none; }
+      .pill-badge {
+        display: none;
+        padding: 8px 14px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid ${portal.themeColor};
+        border-radius: 30px;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        color: ${portal.themeColor};
+        font-size: 12px;
+        font-weight: 700;
+      }
     `;
 
     const isCampus = /campus|join\.qq\.com|校招|应届|校园招聘/i.test(location.href);
@@ -585,14 +686,23 @@
 
     const content = document.createElement('div');
     content.innerHTML = `
-      <div class="ats-panel">
-        <div class="ats-header">
+      <div class="ats-panel" id="ats-panel-main">
+        <div class="ats-header" id="ats-drag-handle">
           <div class="ats-title">
-            <span>⚡ 大厂巡航副驾驶</span>
+            <span>⚡ 大厂巡航副驾</span>
           </div>
-          <span class="ats-badge">${badgeTitle}</span>
+          <div style="display:flex; align-items:center; gap:5px;">
+            <span class="ats-badge">${badgeTitle}</span>
+            <button class="hud-mode-btn" id="ats-mode-btn" title="切换 精简/完整 模式">⊡ 精简</button>
+            <button class="hud-minimize-btn" id="ats-min-btn" title="收起为胶囊">—</button>
+          </div>
         </div>
         <div class="ats-body">
+          <div class="compact-stat-row" id="compact-stat-row">
+            <span>雷达命中: <b id="compact-val-radar" style="color:${portal.themeColor};">0</b> 个</span>
+            <span style="color:#10b981; font-size:10px;">🟢 表单就绪</span>
+          </div>
+
           <!-- 职位雷达扫描卡片 -->
           <div class="radar-card" id="radar-box">
             <div class="radar-title-row">
@@ -673,8 +783,30 @@
               <div class="snippet-text">PDF直链</div>
             </div>
           </div>
+
+          <div class="cross-site-bar">
+            <div class="cross-title">
+              <span>🌐 切换目标网站</span>
+              <span style="color:#10b981; font-size:10px;">🟢 巡航互联就绪</span>
+            </div>
+            <div class="site-chips">
+              <button class="site-chip-btn" data-url="https://www.zhipin.com/web/geek/job" style="border-color:#00f2fe; color:#00f2fe;">BOSS直聘</button>
+              <button class="site-chip-btn" data-url="https://www.liepin.com/zhaopin/?city=050090" style="border-color:#a855f7; color:#c084fc;">猎聘网</button>
+              <button class="site-chip-btn" data-url="https://www.lagou.com/wn/jobs?city=%E6%B7%B1%E5%9C%B3" style="border-color:#10b981; color:#34d399;">拉勾网</button>
+              <button class="site-chip-btn" data-url="https://careers.tencent.com/search.html">腾讯社招</button>
+              <button class="site-chip-btn" data-url="https://jobs.bytedance.com/">字节社招</button>
+              <button class="site-chip-btn" data-url="https://we.dji.com/zh-CN/social">大疆社招</button>
+              <button class="site-chip-btn" data-url="https://join.qq.com/post.html" style="border-color:#38bdf8; color:#38bdf8;">🎓腾讯校招</button>
+              <button class="site-chip-btn" data-url="https://jobs.bytedance.com/campus/position" style="border-color:#60a5fa; color:#60a5fa;">🎓字节校招</button>
+              <button class="site-chip-btn" data-url="https://we.dji.com/zh-CN/campus" style="border-color:#00f2fe; color:#00f2fe;">🎓大疆校招</button>
+              <button class="site-chip-btn" data-url="https://campus.163.com/" style="border-color:#fb7185; color:#fb7185;">🎓网易校招</button>
+            </div>
+          </div>
         </div>
         <div class="toast" id="ats-toast">✓ 已复制到剪贴板</div>
+      </div>
+      <div class="pill-badge" id="ats-pill-badge">
+        ⚡ ${portal.name.split(' ')[0]} (<span id="ats-pill-count">0</span>)
       </div>
     `;
 
@@ -689,6 +821,95 @@
       toast.style.display = 'block';
       setTimeout(() => { toast.style.display = 'none'; }, 1800);
     };
+
+    // 模式切换与收起
+    const atsPanel = shadow.getElementById('ats-panel-main');
+    const modeBtn = shadow.getElementById('ats-mode-btn');
+    const minBtn = shadow.getElementById('ats-min-btn');
+    const pillBadge = shadow.getElementById('ats-pill-badge');
+
+    function applyHUDMode(mode) {
+      if (mode === 'mini') {
+        atsPanel.classList.add('collapsed');
+        pillBadge.style.display = 'block';
+      } else if (mode === 'compact') {
+        atsPanel.classList.remove('collapsed');
+        pillBadge.style.display = 'none';
+        atsPanel.classList.add('compact');
+        if (modeBtn) {
+          modeBtn.textContent = '⊞ 完整';
+          modeBtn.title = '切换回完整面板';
+        }
+        localStorage.setItem('jobcruise_hud_mode', 'compact');
+      } else {
+        atsPanel.classList.remove('collapsed');
+        pillBadge.style.display = 'none';
+        atsPanel.classList.remove('compact');
+        if (modeBtn) {
+          modeBtn.textContent = '⊡ 精简';
+          modeBtn.title = '切换为精简小窗';
+        }
+        localStorage.setItem('jobcruise_hud_mode', 'full');
+      }
+    }
+
+    const savedMode = localStorage.getItem('jobcruise_hud_mode') || 'full';
+    applyHUDMode(savedMode);
+
+    if (modeBtn) {
+      modeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCompact = atsPanel.classList.contains('compact');
+        applyHUDMode(isCompact ? 'full' : 'compact');
+      });
+    }
+
+    minBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyHUDMode('mini');
+    });
+
+    pillBadge.addEventListener('click', () => {
+      const restoreMode = localStorage.getItem('jobcruise_hud_mode') || 'full';
+      applyHUDMode(restoreMode);
+    });
+
+    // 跨网站切换按钮
+    shadow.querySelectorAll('.site-chip-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const url = btn.getAttribute('data-url');
+        if (url) {
+          chrome.runtime.sendMessage({ type: 'OPEN_PAGE', url });
+        }
+      });
+    });
+
+    // 拖拽支持
+    const handle = shadow.getElementById('ats-drag-handle');
+    let isDragging = false;
+    let startX, startY, initialRight, initialTop;
+
+    handle.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = dock.getBoundingClientRect();
+      initialRight = window.innerWidth - rect.right;
+      initialTop = rect.top;
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = startX - e.clientX;
+      const dy = e.clientY - startY;
+      dock.style.right = `${Math.max(10, initialRight + dx)}px`;
+      dock.style.top = `${Math.max(10, initialTop + dy)}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
 
     // 表单填充
     shadow.getElementById('btn-autofill').addEventListener('click', () => {
@@ -718,6 +939,8 @@
       const res = scanJobList(portal);
       const statsEl = shadow.getElementById('radar-stats-text');
       const countEl = shadow.getElementById('radar-matched-count');
+      const compactCountEl = shadow.getElementById('compact-val-radar');
+      const pillCountEl = shadow.getElementById('ats-pill-count');
       
       if (statsEl) {
         if (res.total > 0) {
@@ -726,9 +949,9 @@
           statsEl.textContent = `当前处于详情/网申页`;
         }
       }
-      if (countEl) {
-        countEl.textContent = res.matched;
-      }
+      if (countEl) countEl.textContent = res.matched;
+      if (compactCountEl) compactCountEl.textContent = res.matched;
+      if (pillCountEl) pillCountEl.textContent = res.matched;
     };
 
     // 批量在新标签页打开命中岗位

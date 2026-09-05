@@ -708,16 +708,45 @@
           </div>
         </div>
 
-        <!-- 分类解析成果速填面板 -->
+        <!-- 视图切换 Tab: 智能分类武器库 vs 原始分段自由复制 -->
+        <div class="depot-view-tabs">
+          <button type="button" class="depot-tab-btn active" id="tab-btn-structured">
+            <span>🤖 智能分类武器库视图</span>
+          </button>
+          <button type="button" class="depot-tab-btn" id="tab-btn-raw-segments">
+            <span>📝 原始分段自由复制视图 (手动极速复制/算法兜底)</span>
+            <span class="tab-badge" id="raw-tab-badge">0段</span>
+          </button>
+        </div>
+
+        <!-- 视图 A: 智能分类解析成果面板 -->
         <div class="resume-depot-result" id="resume-depot-result">
-          <!-- 1. 个人优势与亮点 -->
-          <div class="depot-section-card">
+          <!-- 0. 个人基本信息与作品集速填 (自动提取姓名、学校、电话、邮箱、作品集等) -->
+          <div class="depot-section-card" id="depot-basic-info-card">
+            <div class="depot-card-header">
+              <div class="depot-header-left">
+                <span class="depot-badge" style="background:rgba(16,185,129,0.2); color:#34d399;">👤 基础档案</span>
+                <h2 class="depot-title">个人基本信息与作品集 (一键复制或填入)</h2>
+              </div>
+              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-basic">📋 复制全部档案</button>
+            </div>
+            <div class="basic-info-grid" id="depot-basic-info-grid">
+              <!-- 动态渲染姓名、电话、邮箱、院校、作品集网址、求职方向等 -->
+            </div>
+          </div>
+
+          <!-- 1. 个人优势与核心竞争力 -->
+          <div class="depot-section-card" id="depot-adv-card">
             <div class="depot-card-header">
               <div class="depot-header-left">
                 <span class="depot-badge" style="background:rgba(0,242,254,0.2); color:#00f2fe;">🌟 核心亮点</span>
                 <h2 class="depot-title">个人优势与核心竞争力</h2>
               </div>
-              <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-adv">📋 复制全部优势</button>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary mini-copy-btn" id="btn-add-custom-adv">➕ 添加优势</button>
+                <button class="btn btn-secondary mini-copy-btn" id="btn-clear-all-adv" style="border-color:rgba(239,68,68,0.3); color:#fca5a5;">🗑️ 清空/隐藏优势</button>
+                <button class="btn btn-secondary mini-copy-btn" id="btn-copy-all-adv">📋 复制全部优势</button>
+              </div>
             </div>
             <div class="depot-items-list" id="depot-adv-list">
               <!-- 动态渲染优势项 -->
@@ -821,6 +850,23 @@
                 <!-- 动态渲染教育履历 -->
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- 视图 B: 纯文本分段自由复制视图 (手动极速复制/算法兜底) -->
+        <div class="resume-raw-segments-result" id="resume-raw-segments-result" style="display:none;">
+          <div class="raw-search-bar">
+            <div class="raw-search-input-wrap">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="raw-segments-search" placeholder="输入任意关键字快速筛选段落 (如：千川、深圳大学、Blender、项目、SOP、ROI)...">
+            </div>
+            <div class="raw-segments-meta">
+              <span id="raw-segments-count-badge" class="count-badge">共 0 个自然段落</span>
+              <button class="mini-btn" id="btn-copy-all-raw-segments">📋 复制清洗后全文</button>
+            </div>
+          </div>
+          <div id="raw-segments-list" class="raw-segments-list">
+            <!-- 动态渲染每个自然段落独立卡片 -->
           </div>
         </div>
       </section>
