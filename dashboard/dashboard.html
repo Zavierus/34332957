@@ -37,6 +37,11 @@
           <span>每日复盘与战略顾问</span>
           <span class="active-badge" id="sidebar-retro-badge" style="background:rgba(236,72,153,0.25); color:#f472b6;">AI</span>
         </button>
+        <button class="nav-item" data-view="view-daily-digest">
+          <span class="nav-icon">📰</span>
+          <span>每日全网求职情报</span>
+          <span class="active-badge" id="sidebar-digest-badge" style="background:rgba(245,158,11,0.25); color:#fbbf24;">今日精选</span>
+        </button>
         <button class="nav-item" data-view="view-resume-depot">
           <span class="nav-icon">📄</span>
           <span>简历解析与网申速填库</span>
@@ -899,6 +904,84 @@
           </div>
         </div>
       </section>
+
+      <!-- 视图 7: 每日全网求职情报与公众号直聘 -->
+      <section class="view-panel" id="view-daily-digest">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">📰 每日全网优质求职情报 · 名企直聘 & 公众号专栏</h1>
+            <p class="panel-desc">每天首次启动 Chrome 自动挖掘全网精选岗位。重点聚合<b>微信公众号直聘推文</b>、出海独角兽、跨境电商、游戏社区与商业视觉精品 HC，支持一键锁定深圳/远程与自荐文案复制。</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" id="btn-refresh-digest">🔄 重新刷新情报</button>
+            <button class="btn btn-primary" id="btn-open-add-digest-job">+ 添加招聘线索</button>
+          </div>
+        </div>
+
+        <!-- 每日情报状态指示条 -->
+        <div class="digest-status-banner">
+          <div class="digest-status-left">
+            <span class="digest-pulse-indicator"></span>
+            <div>
+              <span class="digest-date-text" id="digest-current-date">今日发布：2026年9月6日</span>
+              <span class="digest-update-tag">🔥 每日启动自动推送到桌面</span>
+            </div>
+          </div>
+          <div class="digest-status-right">
+            <span class="digest-profile-tag">🎯 核心画像：深圳/出海 · 商业化运营 / 达人拓展 / 游戏社区 / 商业摄影 / 跨境电商</span>
+          </div>
+        </div>
+
+        <!-- 筛选与搜索工具条 -->
+        <div class="table-toolbar" style="margin-top: 14px;">
+          <div class="filters-row" style="flex-wrap: wrap; gap: 10px; width: 100%;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <span style="font-size: 11.5px; color: #94a3b8; font-weight: 600;">📍 地区选择:</span>
+              <div class="digest-filter-chips" id="digest-city-filters">
+                <button class="filter-chip active" data-city="ALL">全部地区</button>
+                <button class="filter-chip" data-city="深圳">📍 深圳特选</button>
+                <button class="filter-chip" data-city="远程/出海">🌐 出海/远程</button>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto;">
+              <span style="font-size: 11.5px; color: #94a3b8; font-weight: 600;">🏷️ 赛道分类:</span>
+              <div class="digest-filter-chips" id="digest-category-filters">
+                <button class="filter-chip active" data-cat="ALL">全部精选</button>
+                <button class="filter-chip" data-cat="出海/商业化">出海/商业化</button>
+                <button class="filter-chip" data-cat="游戏/社区">游戏/社区</button>
+                <button class="filter-chip" data-cat="电商/达人">电商/达人</button>
+                <button class="filter-chip" data-cat="影像/视觉">影像/视觉</button>
+                <button class="filter-chip" data-cat="公众号直聘">📱 公众号推文专栏</button>
+              </div>
+            </div>
+
+            <div style="width: 100%; display: flex; gap: 10px; margin-top: 6px;">
+              <input type="text" id="digest-search-input" placeholder="🔍 搜索公司名称、岗位、技能标签（如：TikTok、达人、深圳南山、商业化、双休）..." class="search-input" style="flex: 1;">
+              <span id="digest-result-count" style="font-size: 11.5px; color: #94a3b8; align-self: center; white-space: nowrap;">共 12 条精选情报</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 情报列表卡片网格 -->
+        <div class="digest-cards-grid" id="digest-cards-container">
+          <!-- 动态渲染岗位与推文卡片 -->
+        </div>
+
+        <!-- 微信公众号名企直聘官方通道推荐 -->
+        <div class="wechat-official-banner" style="margin-top: 24px;">
+          <div class="wechat-header">
+            <span style="font-size: 20px;">📱</span>
+            <div>
+              <div style="font-weight: 700; color: #fff; font-size: 14px;">名企微信公众号求职直聘专栏导航</div>
+              <div style="font-size: 11.5px; color: #94a3b8;">无需通过中介平台，微信搜索关注官方招聘号，点击【加入我们 / 岗位投递】直接送达用人部门与业务线 HR</div>
+            </div>
+          </div>
+          <div class="wechat-accounts-grid" id="wechat-accounts-container">
+            <!-- 动态渲染 6 个核心公众号入口 -->
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -942,6 +1025,64 @@
       </div>
       <div class="modal-body">
         <div id="modal-greeting-text" style="line-height:1.6; font-size:13.5px; color:#cbd5e1; background:rgba(0,0,0,0.4); padding:14px; border-radius:8px; border-left:3px solid #00f2fe;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加自定义招聘线索弹窗 -->
+  <div class="modal-overlay" id="add-digest-job-modal">
+    <div class="modal-box" style="width: 520px;">
+      <div class="modal-header">
+        <h3>+ 添加全网 / 公众号招聘线索</h3>
+        <button class="modal-close" id="btn-close-digest-modal">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field" style="margin-bottom:12px;">
+          <label for="digest-new-title">岗位名称</label>
+          <input type="text" id="digest-new-title" placeholder="例如：海外TikTok商业化运营主管" class="search-input" style="width:100%;">
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <div class="form-field" style="flex:1;">
+            <label for="digest-new-company">公司 / 团队</label>
+            <input type="text" id="digest-new-company" placeholder="例如：某出海跨境独角兽" class="search-input" style="width:100%;">
+          </div>
+          <div class="form-field" style="flex:1;">
+            <label for="digest-new-salary">薪资范围</label>
+            <input type="text" id="digest-new-salary" placeholder="例如：18-30K" class="search-input" style="width:100%;">
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <div class="form-field" style="flex:1;">
+            <label for="digest-new-city">工作城市 / 商圈</label>
+            <input type="text" id="digest-new-city" placeholder="例如：深圳·南山" class="search-input" style="width:100%;">
+          </div>
+          <div class="form-field" style="flex:1;">
+            <label for="digest-new-cat">所属赛道</label>
+            <select id="digest-new-cat" class="filter-select" style="width:100%;">
+              <option value="出海/商业化">出海/商业化</option>
+              <option value="游戏/社区">游戏/社区</option>
+              <option value="电商/达人">电商/达人</option>
+              <option value="影像/视觉">影像/视觉</option>
+              <option value="公众号直聘">公众号直聘</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-field" style="margin-bottom:12px;">
+          <label for="digest-new-tags">核心亮点标签 (逗号分隔)</label>
+          <input type="text" id="digest-new-tags" placeholder="例如：双休, 达人拓展, 海外市场, 六险一金" class="search-input" style="width:100%;">
+        </div>
+        <div class="form-field" style="margin-bottom:12px;">
+          <label for="digest-new-url">原文链接 / 投递网址</label>
+          <input type="text" id="digest-new-url" placeholder="https://..." class="search-input" style="width:100%;">
+        </div>
+        <div class="form-field">
+          <label for="digest-new-notes">岗位描述 / 核心亮点</label>
+          <textarea id="digest-new-notes" placeholder="简要记录JD、内推码或HR联系方式..." style="width:100%; height:65px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; padding:8px; font-size:12px;"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-cancel-digest-modal">取消</button>
+        <button class="btn btn-primary" id="btn-confirm-add-digest">确认添加并展示</button>
       </div>
     </div>
   </div>

@@ -22,6 +22,7 @@
   let config = {
     dailyLimit: 30,
     minSalaryK: 9,
+    targetCity: '深圳',
     blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,保险,推广兼职'
   };
 
@@ -32,7 +33,7 @@
     }
     chrome.storage.local.get(['config', 'jobTags'], (res) => {
       if (res && res.config) {
-        config = { ...config, ...res.config };
+        config = { targetCity: '深圳', ...config, ...res.config };
         const today = new Date().toISOString().split('T')[0];
         if (config.lastActiveDate === today) {
           const counts = config.siteTodayCounts || {};
@@ -69,6 +70,27 @@
 
   function screenJob(title, salary, company, card) {
     if (!title) return { pass: false, reason: '未获取到职位标题' };
+
+    // 0. 目标城市强过滤（严格防异地侵入，默认锁定深圳）
+    const targetCity = (config.targetCity || '深圳').trim();
+    if (targetCity) {
+      const areaEl = card ? card.querySelector('.job-dq-box, .job-area, .job-city, [data-nick="job-area"], .area-box, .city-name') : null;
+      let jobArea = areaEl ? areaEl.textContent.trim() : '';
+      if (!jobArea && card) {
+        const infoEl = card.querySelector('.job-info, .job-labels-box, .job-card-left');
+        if (infoEl) {
+          const m = infoEl.textContent.match(/([^\s·•|]+-[^\s·•|]+|[^\s·•|]+市|[^\s·•|]+区)/);
+          if (m) jobArea = m[0];
+        }
+      }
+      if (jobArea) {
+        const majorCities = ['北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '东莞', '佛山', '西安', '长沙', '苏州', '重庆', '天津', '青岛', '厦门', '珠海', '郑州', '合肥', '无锡', '宁波'];
+        const hasOtherMajor = majorCities.some(c => c !== targetCity && jobArea.includes(c));
+        if (!jobArea.includes(targetCity) && (hasOtherMajor || (!jobArea.includes('异地') && !jobArea.includes('全国') && !jobArea.includes('远程')))) {
+          return { pass: false, reason: `[异地跳过] 岗位地点为「${jobArea}」，非目标城市(${targetCity})` };
+        }
+      }
+    }
 
     // 提取卡片业务标签 (猎聘卡片通常带有业务领域/核心技能标签)
     let cardLabels = '';
@@ -537,9 +559,12 @@
               </div>
               <div class="stat-val" id="val-today-count">0 <span style="font-size:11px; color:#94a3b8;">/ 30</span></div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">本次投递</div>
-              <div class="stat-val" id="val-session-count">0</div>
+            <div class="stat-card" id="btn-quick-adjust-city" style="cursor: pointer; transition: border-color 0.2s;" title="点击可修改目标城市 (默认: 深圳)">
+              <div class="stat-label" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>📍 目标城市</span>
+                <span style="font-size:10px; color:#c084fc; text-decoration:underline;">✏️换城市</span>
+              </div>
+              <div class="stat-val" id="val-target-city" style="font-size: 15px; color: #34d399; margin-top: 3px;">深圳</div>
             </div>
           </div>
 
@@ -557,9 +582,12 @@
             </button>
           </div>
 
-          <div style="margin-top: 6px;">
-            <button class="btn btn-secondary" id="btn-lp-open-quickfill" style="width:100%; font-size:11.5px; padding:7px 10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.35); color:#c084fc; border-radius:6px; cursor:pointer;">
-              <span>📋 展开简历速填小抽屉</span>
+          <div style="display: flex; gap: 6px; margin-top: 6px;">
+            <button class="btn btn-secondary" id="btn-lp-open-quickfill" style="flex:1; font-size:11px; padding:6px 8px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.35); color:#c084fc; border-radius:6px; cursor:pointer;">
+              <span>📋 简历速填小抽屉</span>
+            </button>
+            <button class="btn btn-secondary" id="btn-lp-open-digest" style="flex:1; font-size:11px; padding:6px 8px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); color:#fbbf24; border-radius:6px; cursor:pointer;" title="查看每日全网优质求职情报与公众号直招推文">
+              <span>📰 今日全网情报</span>
             </button>
           </div>
 
@@ -711,6 +739,32 @@
           alert('请输入 5 到 999 之间的有效整数！');
         }
       }
+    });
+
+    // 原地快捷切换目标城市
+    shadowRoot.getElementById('btn-quick-adjust-city')?.addEventListener('click', () => {
+      const curCity = config.targetCity || '深圳';
+      const input = prompt(`📍【切换猎聘巡航目标城市】\n当前猎聘锁定城市为：${curCity}\n\n如需更换，请输入目标城市名称（如：深圳、广州、上海、北京等）：`, curCity);
+      if (input !== null && input.trim()) {
+        const newCity = input.trim();
+        config.targetCity = newCity;
+        chrome.storage.local.get(['config'], (res) => {
+          const cfg = res.config || {};
+          cfg.targetCity = newCity;
+          chrome.storage.local.set({ config: cfg }, () => {
+            updateHUD();
+            logHUD(`<span class="success">[城市已锁定]</span> 猎聘目标城市已切换为 <b>${newCity}</b>，非该城市岗位将自动跳过！`);
+          });
+        });
+      }
+    });
+
+    // 查看今日全网求职情报
+    shadowRoot.getElementById('btn-lp-open-digest')?.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'OPEN_PAGE',
+        url: chrome.runtime.getURL('dashboard/dashboard.html#daily-digest')
+      });
     });
 
     btnToggle.addEventListener('click', () => {
@@ -882,6 +936,9 @@
     if (pipeLimitEl) pipeLimitEl.textContent = limit;
     if (pipeCountEl) pipeCountEl.textContent = `+${sessionCount}`;
     if (pipeTargetEl) pipeTargetEl.textContent = pipelineTarget || limit;
+
+    const cityEl = shadowRoot.getElementById('val-target-city');
+    if (cityEl) cityEl.textContent = config.targetCity || '深圳';
   }
 
   // ================= 猎聘登录态智能识别 =================
@@ -1233,6 +1290,9 @@
             break;
           } else if (applyResult.reason === 'captcha_triggered') {
             logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【人机验证拦截】请手动完成验证后点击【继续】！</span>`);
+          } else if (applyResult.reason === 'audit_issue') {
+            logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【猎聘审核/资质拦截】${applyResult.message}，已自动跳过该岗位</span>`);
+            await sleep(800);
           } else {
             logHUD(`<span class="skip" style="color:#94a3b8;">[送达未确认] ${company} · ${title} (${applyResult.message || '未响应'})，已跳过 (不计入投递数)</span>`);
             await sleep(600);
@@ -1331,16 +1391,51 @@
       return false;
     }
 
+    function checkLiepinAuditOrProfileIssue() {
+      const modals = document.querySelectorAll('.ant-modal-content, .react-modal, .dialog-box, .ant-message, [class*="modal"]');
+      for (const m of modals) {
+        if (m.offsetWidth > 0 && m.offsetHeight > 0) {
+          const txt = m.textContent.trim();
+          if (txt.includes('审核中') || txt.includes('审核未通过') || txt.includes('未通过审核') || txt.includes('审核提示')) {
+            return { issue: true, reason: '简历正在审核中或未通过，暂不可投递' };
+          }
+          if (txt.includes('完善简历') || txt.includes('简历完整度') || txt.includes('请先创建简历') || txt.includes('请完善在线简历') || txt.includes('暂无简历')) {
+            return { issue: true, reason: '猎聘在线简历未完善，请先完善在线简历' };
+          }
+          if (txt.includes('实名认证') || txt.includes('人脸识别') || txt.includes('账号受限') || txt.includes('风控检测') || txt.includes('账号异常')) {
+            return { issue: true, reason: '账号触发猎聘安全审核或需要实名认证' };
+          }
+        }
+      }
+      return null;
+    }
+
     async function handleLiepinModal() {
-      const textarea = document.querySelector('.ant-modal-content textarea, .react-modal textarea');
+      // 1. 自动选中默认简历单选框 (若未选中)
+      const uncheckedRadio = document.querySelector('.ant-modal-content input[type="radio"]:not(:checked), .react-modal input[type="radio"]:not(:checked)');
+      if (uncheckedRadio) uncheckedRadio.click();
+      const uncheckedRadioLabel = document.querySelector('.ant-modal-content .ant-radio-wrapper:not(.ant-radio-wrapper-checked), .react-modal .radio-item:not(.active)');
+      if (uncheckedRadioLabel) uncheckedRadioLabel.click();
+
+      // 2. 自动勾选协议复选框 (若存在)
+      const agreeCheckbox = document.querySelector('.ant-modal-content input[type="checkbox"]:not(:checked), .react-modal input[type="checkbox"]:not(:checked)');
+      if (agreeCheckbox) agreeCheckbox.click();
+      const agreeCheckboxLabel = document.querySelector('.ant-modal-content .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-checked)');
+      if (agreeCheckboxLabel) agreeCheckboxLabel.click();
+
+      // 3. 填写自荐信/打招呼附言
+      const textarea = document.querySelector('.ant-modal-content textarea, .react-modal textarea, [class*="modal"] textarea');
       if (textarea && textarea.offsetParent !== null) {
         textarea.focus();
         textarea.value = noteText;
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.dispatchEvent(new Event('change', { bubbles: true }));
-        await sleep(500);
+        textarea.dispatchEvent(new Event('blur', { bubbles: true }));
+        await sleep(400);
       }
-      const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, .react-modal button.btn-primary, .ant-modal-confirm-btns button.ant-btn-primary');
+
+      // 4. 点击确认提交按钮
+      const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, .react-modal button.btn-primary, .ant-modal-confirm-btns button.ant-btn-primary, [class*="modal"] button[type="submit"]');
       if (confirmBtn) {
         confirmBtn.click();
         await sleep(800);
@@ -1366,13 +1461,18 @@
     }
 
     function dismissStuckModal() {
-      const closeBtn = document.querySelector('.ant-modal-close, .react-modal-close, .close-btn');
+      const closeBtn = document.querySelector('.ant-modal-close, .react-modal-close, .close-btn, [class*="modal-close"]');
       if (closeBtn && closeBtn.offsetWidth > 0) closeBtn.click();
     }
 
     if (checkLiepinCaptcha()) {
       isPaused = true;
       return { success: false, reason: 'captcha_triggered', message: '触发平台人机验证' };
+    }
+
+    const preAudit = checkLiepinAuditOrProfileIssue();
+    if (preAudit) {
+      return { success: false, reason: 'audit_issue', message: preAudit.reason };
     }
 
     applyBtn.click();
@@ -1382,13 +1482,24 @@
       return { success: false, reason: 'limit_reached', message: '猎聘今日投递次数已达上限' };
     }
 
+    const postClickAudit = checkLiepinAuditOrProfileIssue();
+    if (postClickAudit) {
+      dismissStuckModal();
+      return { success: false, reason: 'audit_issue', message: postClickAudit.reason };
+    }
+
     await handleLiepinModal();
 
     const start = Date.now();
     let isSuccess = false;
-    while (Date.now() - start < 2500) {
+    while (Date.now() - start < 2800) {
       if (checkLiepinLimitDialog()) {
         return { success: false, reason: 'limit_reached', message: '猎聘今日投递次数已达上限' };
+      }
+      const loopAudit = checkLiepinAuditOrProfileIssue();
+      if (loopAudit) {
+        dismissStuckModal();
+        return { success: false, reason: 'audit_issue', message: loopAudit.reason };
       }
       if (checkIsLiepinSuccess()) {
         isSuccess = true;
@@ -1467,18 +1578,292 @@
     }
   });
 
+  // ================= HR 智能快捷回复应答助手 (猎聘网) =================
+  const DEFAULT_QUICK_REPLIES = [
+    {
+      id: 'qr_1',
+      tag: '🌍 问询海外区域/品类',
+      title: '请教海外区域与业务品类 (用户定制)',
+      text: '您好，感谢关注。我看了下咱们的岗位描述，想先请教一下，咱们目前这条业务线主要面向的是哪个海外区域和业务品类呢？'
+    },
+    {
+      id: 'qr_2',
+      tag: '📋 索取岗位JD',
+      title: '积极意向+索取详细职责与JD',
+      text: '您好，非常感谢您的认可与邀请！我对咱们公司的业务方向很感兴趣。方便发一下该岗位的详细职责与业务重点吗？随时沟通交流～'
+    },
+    {
+      id: 'qr_3',
+      tag: '📄 简历/作品案例推送',
+      title: '沉淀案例推送+约聊',
+      text: '您好，非常荣幸收到关注！附件已更新我针对该方向沉淀的最新简历与作品案例，背景契合度较高。请问咱们方便约个时间做进一步电话沟通吗？'
+    },
+    {
+      id: 'qr_4',
+      tag: '💰 薪资与作息',
+      title: '了解薪资预算与上下班机制',
+      text: '您好，收到邀请，非常感谢！想先简单了解一下，咱们目前该岗位的薪资预算区间以及作息/加班机制是怎样的呢？'
+    },
+    {
+      id: 'qr_5',
+      tag: '🤝 礼貌婉拒',
+      title: '方向略有偏差，委婉婉拒',
+      text: '您好，非常感谢您的认可与邀请！仔细评估后感觉目前个人求职规划略有偏差，暂时不考虑该机会，祝您早日招到心仪候选人！'
+    }
+  ];
+
+  function showQuickReplyToast(msg) {
+    const existing = document.getElementById('ziaver-qr-toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.id = 'ziaver-qr-toast';
+    toast.style.cssText = `
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 12, 28, 0.95);
+      border: 1px solid #c084fc;
+      color: #e2e8f0;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 16px rgba(168,85,247,0.25);
+      z-index: 99999999;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    `;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 350);
+    }, 2200);
+  }
+
+  function fillChatInput(text) {
+    const inputSelectors = [
+      'div.chat-input[contenteditable="true"]',
+      'div[contenteditable="true"]',
+      '.chat-editor [contenteditable="true"]',
+      '.im-editor [contenteditable="true"]',
+      '.chat-message-input',
+      'textarea.chat-input',
+      '.im-editor textarea',
+      '.chat-editor textarea',
+      'textarea',
+      'input[type="text"]'
+    ];
+    let targetInput = null;
+    for (const sel of inputSelectors) {
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        if (el.closest('#ziaver-liepin-hud') || el.closest('#ziaver-quick-reply-bar')) continue;
+        if (el.offsetWidth > 0 || el.offsetHeight > 0) {
+          targetInput = el;
+          break;
+        }
+      }
+      if (targetInput) break;
+    }
+
+    if (!targetInput) {
+      navigator.clipboard.writeText(text);
+      showQuickReplyToast('📋 已复制到剪贴板，请在聊天框按 Ctrl+V 粘贴！');
+      return;
+    }
+
+    targetInput.focus();
+    if (targetInput.isContentEditable) {
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, text);
+      if (!targetInput.innerText.trim()) {
+        targetInput.innerText = text;
+      }
+      targetInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+      targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+      targetInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+    } else {
+      targetInput.value = text;
+      targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+      targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    showQuickReplyToast('✨ 话术已一键填入输入框，请核对微调后发送！');
+  }
+
+  function initChatQuickReplies() {
+    let customReplies = [];
+
+    function loadReplies(cb) {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['customQuickReplies'], (res) => {
+          if (res && Array.isArray(res.customQuickReplies)) {
+            customReplies = res.customQuickReplies;
+          }
+          if (cb) cb();
+        });
+      } else {
+        if (cb) cb();
+      }
+    }
+
+    function renderBar() {
+      const editorContainers = document.querySelectorAll('.im-editor, .im-input, .chat-box, .chat-editor, .chat-conversation, .chat-input, .message-controls, .im-chat, .chat-op, .im-send-box, .chat-send-box');
+      if (!editorContainers || editorContainers.length === 0) return;
+
+      if (document.getElementById('ziaver-quick-reply-bar')) return;
+
+      const bar = document.createElement('div');
+      bar.id = 'ziaver-quick-reply-bar';
+      bar.style.cssText = `
+        position: relative;
+        z-index: 9999;
+        margin: 6px 0;
+        padding: 7px 12px;
+        background: rgba(15, 12, 28, 0.96);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid rgba(168, 85, 247, 0.45);
+        border-radius: 8px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+      `;
+
+      const allReplies = [...DEFAULT_QUICK_REPLIES, ...customReplies];
+
+      bar.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 12px; font-weight: 700; color: #c084fc;">⚡ HR 智能快捷回复助手</span>
+            <span style="font-size: 10px; color: #94a3b8;">(点击一键填入输入框)</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button id="btn-add-quick-reply" style="background: rgba(168, 85, 247, 0.15); border: 1px dashed rgba(168, 85, 247, 0.4); color: #c084fc; font-size: 10.5px; padding: 2px 7px; border-radius: 4px; cursor: pointer;">+ 自定义话术</button>
+            <button id="btn-toggle-qr-collapse" style="background: transparent; border: none; color: #94a3b8; font-size: 12px; cursor: pointer; padding: 0 4px;" title="收起/展开">—</button>
+          </div>
+        </div>
+        <div id="qr-chips-container" style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin;">
+          ${allReplies.map(r => `
+            <div class="qr-chip" data-id="${r.id}" title="${r.title}：\n${r.text}" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 14px; padding: 3px 9px; cursor: pointer; white-space: nowrap; font-size: 11px; color: #e2e8f0; transition: all 0.15s ease;">
+              <span class="qr-chip-text">${r.tag || r.title}</span>
+              <span class="qr-copy-btn" data-text="${encodeURIComponent(r.text)}" title="仅复制到剪贴板" style="color: #94a3b8; font-size: 10px; margin-left: 2px; padding: 0 2px;">📋</span>
+              ${r.id.startsWith('custom_') ? `<span class="qr-del-btn" data-id="${r.id}" title="删除此自定义话术" style="color: #ef4444; font-size: 10px; margin-left: 2px;">×</span>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+
+      const targetContainer = document.querySelector('.im-editor, .im-input, .chat-box, .chat-editor, .chat-conversation, .chat-input, .message-controls, .im-chat, .chat-op, .im-send-box, .chat-send-box');
+      if (targetContainer) {
+        targetContainer.parentNode.insertBefore(bar, targetContainer);
+      } else {
+        document.body.appendChild(bar);
+      }
+
+      bar.querySelectorAll('.qr-chip').forEach(chip => {
+        chip.addEventListener('click', (e) => {
+          if (e.target.classList.contains('qr-copy-btn') || e.target.classList.contains('qr-del-btn')) return;
+          const id = chip.getAttribute('data-id');
+          const reply = allReplies.find(r => r.id === id);
+          if (reply) {
+            fillChatInput(reply.text);
+          }
+        });
+        chip.addEventListener('mouseenter', () => {
+          chip.style.background = 'rgba(168, 85, 247, 0.2)';
+          chip.style.borderColor = '#c084fc';
+        });
+        chip.addEventListener('mouseleave', () => {
+          chip.style.background = 'rgba(255, 255, 255, 0.06)';
+          chip.style.borderColor = 'rgba(168, 85, 247, 0.3)';
+        });
+      });
+
+      bar.querySelectorAll('.qr-copy-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const text = decodeURIComponent(btn.getAttribute('data-text'));
+          navigator.clipboard.writeText(text);
+          showQuickReplyToast('📋 话术已复制到剪贴板！');
+        });
+      });
+
+      bar.querySelectorAll('.qr-del-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = btn.getAttribute('data-id');
+          customReplies = customReplies.filter(r => r.id !== id);
+          if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.set({ customQuickReplies: customReplies }, () => {
+              bar.remove();
+              renderBar();
+              showQuickReplyToast('🗑️ 自定义话术已删除');
+            });
+          }
+        });
+      });
+
+      bar.querySelector('#btn-add-quick-reply')?.addEventListener('click', () => {
+        const tag = prompt('请输入快捷话术标签名称 (例如: 问询海外作息 / 远程办公):');
+        if (!tag || !tag.trim()) return;
+        const text = prompt('请输入回复话术完整内容:');
+        if (!text || !text.trim()) return;
+
+        const newReply = {
+          id: 'custom_' + Date.now(),
+          tag: tag.trim(),
+          title: tag.trim(),
+          text: text.trim()
+        };
+        customReplies.push(newReply);
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ customQuickReplies: customReplies }, () => {
+            bar.remove();
+            renderBar();
+            showQuickReplyToast('🎉 自定义话术已保存并添加到工具条！');
+          });
+        }
+      });
+
+      const toggleBtn = bar.querySelector('#btn-toggle-qr-collapse');
+      const chipsContainer = bar.querySelector('#qr-chips-container');
+      toggleBtn?.addEventListener('click', () => {
+        if (chipsContainer.style.display === 'none') {
+          chipsContainer.style.display = 'flex';
+          toggleBtn.textContent = '—';
+        } else {
+          chipsContainer.style.display = 'none';
+          toggleBtn.textContent = '+';
+        }
+      });
+    }
+
+    loadReplies(() => {
+      renderBar();
+      setInterval(() => {
+        if (!document.getElementById('ziaver-quick-reply-bar')) {
+          renderBar();
+        }
+      }, 2000);
+    });
+  }
+
   if (location.hostname.includes('liepin.com')) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         refreshConfig(() => {
           createHUD();
           checkAndResumePipeline();
+          initChatQuickReplies();
         });
       });
     } else {
       refreshConfig(() => {
         createHUD();
         checkAndResumePipeline();
+        initChatQuickReplies();
       });
     }
   }

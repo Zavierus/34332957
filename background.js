@@ -149,18 +149,45 @@ function initOrUpdateStorage() {
   });
 }
 
+// ================= 每日全网求职情报每日晨间强提醒 =================
+function checkDailyJobDigest() {
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+  chrome.storage.local.get(['lastDailyDigestDate'], (res) => {
+    const today = new Date().toISOString().split('T')[0];
+    if (!res || res.lastDailyDigestDate !== today) {
+      chrome.storage.local.set({ lastDailyDigestDate: today }, () => {
+        setTimeout(() => {
+          if (chrome.notifications) {
+            chrome.notifications.create('daily_job_digest_' + Date.now(), {
+              type: 'basic',
+              iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+              title: '🌅 今日全网求职情报已就绪！',
+              message: '已为您精选公众号名企直聘、大厂招聘官网与社群内推优质岗位（电商/游戏/视觉运营 · 深圳特选），点击一键查看！',
+              priority: 2,
+              requireInteraction: true
+            });
+          }
+        }, 3500);
+      });
+    }
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[ZIAVER Autopilot] 插件安装/更新');
   initOrUpdateStorage();
+  checkDailyJobDigest();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   console.log('[ZIAVER Autopilot] 浏览器启动检查');
   initOrUpdateStorage();
+  checkDailyJobDigest();
 });
 
 // Service Worker 加载时立即执行一次增量同步检查，保证重载即时生效
 initOrUpdateStorage();
+checkDailyJobDigest();
 
 // ================= 全网多平台流水线巡航调度中心 (Pipeline Engine) =================
 const PIPELINE_SITES = [
@@ -712,11 +739,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     sendResponse({ status: 'ok', count: opened });
     return true;
+  } else if (request.type === 'OPEN_DAILY_DIGEST') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html#daily-digest') });
+    sendResponse({ status: 'ok' });
+    return true;
   }
 });
 
-// 点击桌面通知时，自动切换聚焦到招聘标签页
-chrome.notifications.onClicked.addListener(() => {
+// 点击桌面通知时，区分日常求职情报还是普通切换
+chrome.notifications.onClicked.addListener((notifId) => {
+  if (notifId && notifId.startsWith('daily_job_digest_')) {
+    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html#daily-digest') });
+    return;
+  }
   chrome.tabs.query({ url: ['*://*.zhipin.com/*', '*://*.liepin.com/*', '*://*.lagou.com/*'] }, (tabs) => {
     if (tabs.length > 0) {
       chrome.windows.update(tabs[0].windowId, { focused: true });

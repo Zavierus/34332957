@@ -17,15 +17,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot)
+  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot 或 #daily-digest)
   const urlParams = new URLSearchParams(window.location.search);
-  const targetViewName = urlParams.get('tab') || window.location.hash.replace('#', '');
+  let targetViewName = urlParams.get('tab') || window.location.hash.replace('#', '');
+  if (targetViewName === 'daily-digest') targetViewName = 'view-daily-digest';
   if (targetViewName) {
     const targetNavItem = document.querySelector(`.nav-item[data-view="${targetViewName}"]`);
     if (targetNavItem) {
       targetNavItem.click();
     }
   }
+
+  window.addEventListener('hashchange', () => {
+    let hash = window.location.hash.replace('#', '');
+    if (hash === 'daily-digest') hash = 'view-daily-digest';
+    const item = document.querySelector(`.nav-item[data-view="${hash}"]`);
+    if (item) item.click();
+  });
 
   // 2. 状态变量
   let currentTags = [];
@@ -2169,8 +2177,442 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ================= 7. 每日全网求职情报与公众号直聘控制中心 =================
+  const DEFAULT_DIGEST_JOBS = [
+    {
+      id: 'job_1',
+      title: '海外商业化运营专家 (跨境电商)',
+      company: 'Shopee (虾皮跨境)',
+      salary: '20-35K·15薪',
+      city: '深圳·南山区 (科技园)',
+      category: '出海/商业化',
+      source: '📱 微信公众号推文直招',
+      tags: ['海外商业化', '大促操盘', '周末双休', '六险一金', '年终奖丰厚'],
+      notes: '负责东南亚及拉美重点国家站点商业化流量分发与广告变现策略，统筹KA商家大促生命周期，建立数据归因模型。',
+      url: 'https://careers.shopee.cn/',
+      greeting: '您好！关注到Shopee招聘官方推文正在急聘【海外商业化运营专家】。我长期深耕出海与商业化运营赛道，熟悉海外市场流量漏斗与跨境生态，数据敏感度高、执行落地强。附上我的个人简历与项目案例，期待能与用人主管深入沟通！'
+    },
+    {
+      id: 'job_2',
+      title: '海外游戏社区运营 / 海外发行',
+      company: '腾讯互娱 (IEG)',
+      salary: '18-32K·16薪',
+      city: '深圳·南山区 (科兴科学园)',
+      category: '游戏/社区',
+      source: '🏢 腾讯招聘官方公众号直招',
+      tags: ['海外发行', 'Discord/X社群', '创作者生态', '周末双休', '免费早晚餐'],
+      notes: '负责腾讯互娱重点出海自研及代理游戏在欧美及亚太地区的Discord/Reddit核心玩家社群搭建、KOL内容孵化与长线版本运营。',
+      url: 'https://careers.tencent.com/search.html?query=co_1',
+      greeting: '您好！看到腾讯互娱正在招募【海外游戏社区运营】。我有丰富的游戏用户生命周期运营与社群冷启动经验，擅长海外社群矩阵联动与创作者生态激励。简历与作品集已附上，期盼有机会加入IEG团队！'
+    },
+    {
+      id: 'job_3',
+      title: 'TikTok 跨境达人运营 / 商务经理',
+      company: '字节跳动 (TikTok E-commerce)',
+      salary: '22-38K·16薪',
+      city: '深圳·福田区 (中心区中洲)',
+      category: '电商/达人',
+      source: '🚀 字节跳动招聘推文内推',
+      tags: ['TikTok电商', '海外网红BD', '带货GMV', '大厂期权', '极客氛围'],
+      notes: '负责北美/东南亚TikTok Shop核心类目达人拓展与矩阵签约，促成海外KOL达播带货合作，建立本地化达人服务SOP。',
+      url: 'https://jobs.bytedance.com/',
+      greeting: '您好！在字节招聘推文看到正在招募【TikTok 跨境达人运营/商务经理】。我具备成熟的达人BD开拓能力与高情商商务谈判经验，能独立攻坚头部海外红人建联。附件已附上以往商务履约与达人带货数据复盘，盼进一步交流！'
+    },
+    {
+      id: 'job_4',
+      title: '泛二次元游戏社区运营 / 本地化',
+      company: '米哈游 (miHoYo 海外部)',
+      salary: '18-30K·14薪',
+      city: '深圳 / 支持部分远程',
+      category: '游戏/社区',
+      source: '🎮 米哈游招聘推文直聘',
+      tags: ['二次元出海', '玩家生态', 'UGC运营', '年度大促', '节日大礼包'],
+      notes: '负责出海泛二次元旗舰产品的全球同服社群氛围建设、二创大赛组织与本地化玩家反馈跟踪，维护高粘性核心KOC。',
+      url: 'https://jobs.mihoyo.com/',
+      greeting: '您好！在米哈游招聘推文看到海外业务正在招聘【泛二次元游戏社区运营】。我本身热爱二次元与游戏文化，对核心玩家心理与UGC内容共创有深刻洞察与落地实战。附上我的个人简历与社区运营作品案例，诚挚期待交流！'
+    },
+    {
+      id: 'job_5',
+      title: '海外网红媒介拓展 / 商业化运营',
+      company: 'SHEIN (希音跨境独角兽)',
+      salary: '16-28K·14薪',
+      city: '深圳·南山区 (后海汇)',
+      category: '出海/商业化',
+      source: '📱 微信公众号推文直招',
+      tags: ['快时尚出海', 'Instagram/YT网红', 'ROI导向', '扁平管理', '年终丰厚'],
+      notes: '负责SHEIN快时尚与美妆家居品类在海外各大主流社媒的KOL/KOC投放与招募，监控ROI投放产出并沉淀爆款合作打法。',
+      url: 'https://talent.shein.com/',
+      greeting: '您好！关注到希音官方招聘正在直招【海外网红媒介拓展/商业化运营】。我有海外社媒达人矩阵挖掘与投放归因经验，沟通韧性强、追求ROI正循环。附件已同步我的详细工作经历，希望能进一步沟通探讨！'
+    },
+    {
+      id: 'job_6',
+      title: '品牌商业摄影师 / 产品视觉创意策划',
+      company: '影石 Insta360',
+      salary: '16-26K·14薪',
+      city: '深圳·宝安区 (海秀路)',
+      category: '影像/视觉',
+      source: '🏢 Insta360 官方直聘',
+      tags: ['全景影像', '商业视觉', '高端产品静物', '创意制片', '年轻团队'],
+      notes: '主导Insta360全景相机、运动相机及配件新品的全球宣发主视觉、电商KV摄影及场景化视觉包装，具备商业影棚全流程把控能力。',
+      url: 'https://arashivision.hirede.com/',
+      greeting: '您好！在Insta360官方招聘推文看到咱们在急聘【品牌商业摄影师/产品视觉创意策划】。我具备多年商业摄影与视觉策划经验，精通布光、构图、修图与场景调性把控，作品集链接已附于简历中，期待能参与打造顶级视觉作品！'
+    },
+    {
+      id: 'job_7',
+      title: '高级电商运营专员 / 独立站操盘',
+      company: 'Anker (安克创新)',
+      salary: '15-26K·14薪',
+      city: '深圳·龙华区 / 南山区',
+      category: '出海/商业化',
+      source: '📱 安克创新公众号推文',
+      tags: ['消费电子出海', '独立站运营', '精细化SOP', '五险一金', '海外差旅'],
+      notes: '负责安克旗下充电、智能影音等海外独立站与亚马逊站点的日常精细化运营、爆款链接打造及大促活动节点规划。',
+      url: 'https://anker.zhiye.com/',
+      greeting: '您好！在安克创新招聘推文看到正在热招【高级电商运营专员】。我对消费电子出海运营及精细化SOP流程有着扎实的操盘经验，数据分析与抗压落地能力突出。简历与业绩已附在附件，期待与您深入沟通！'
+    },
+    {
+      id: 'job_8',
+      title: '商业空间与产品视觉总监 / 摄影主管',
+      company: '喜茶 / 奈雪 (新茶饮品牌出海)',
+      salary: '18-28K·14薪',
+      city: '深圳·南山区 (大冲)',
+      category: '影像/视觉',
+      source: '📱 品牌官方公众号推文直聘',
+      tags: ['品牌美学', '商业空间', '产品静物', '审美在线', '茶饮下午茶福利'],
+      notes: '统筹品牌出海海外旗舰店空间陈列摄影、海外菜单主视觉及新品海报拍摄，把控品牌高品质调性输出。',
+      url: 'https://careers.tencent.com/',
+      greeting: '您好！关注到贵司官方推文正在招聘【商业空间与产品视觉摄影主管】。我具备成熟的品牌视觉包装、商业空间布光拍摄与后期把控实力，对新消费美学理解深刻。已附上个人摄影作品集，祝贵司业务蒸蒸日上！'
+    },
+    {
+      id: 'job_9',
+      title: '自研出海游戏本地化与用户运营',
+      company: '莉莉丝游戏 (Lilith Games)',
+      salary: '20-35K·16薪',
+      city: '深圳 / 远程协同',
+      category: '游戏/社区',
+      source: '📱 莉莉丝招聘公众号直聘',
+      tags: ['SLG出海', '全球同服', '周末双休', '餐饮补贴', '超高年终'],
+      notes: '负责海外重度策略SLG及休闲新游的多语言本地化内容校对、跨文化玩家社群维护与节点线上活动策划。',
+      url: 'https://careers.lilith.com/',
+      greeting: '您好！在莉莉丝招聘公众号看到海外业务正在招聘【自研出海游戏本地化与用户运营】。我对海外主流游戏玩家习惯有深刻洞察，具备成熟的多语境沟通与玩家留存运营策略。简历已附，期盼获得交流机会！'
+    },
+    {
+      id: 'job_10',
+      title: '千川/信息流广告投放操盘手',
+      company: '头部跨境品牌出海服务商',
+      salary: '16-30K + 绩效提成',
+      city: '深圳·南山区 (高新园)',
+      category: '电商/达人',
+      source: '⚡ 猎头直聘急招',
+      tags: ['巨量千川', 'Meta/Google投放', '爆量素材', '五险一金', '高额提成'],
+      notes: '负责百万级月度消耗账户的买量投放、计划搭建、素材创意脚本测试与ROI控制，与短视频编导紧密协作产出爆量素材。',
+      url: 'https://www.zhipin.com/',
+      greeting: '您好！看到咱们正在紧急招募【千川/信息流广告投放操盘手】。我熟悉主流投放工具与跑量底层逻辑，对素材网感与投产比把控严密，能抗高消耗指标。期待能与业务负责人直接沟通！'
+    },
+    {
+      id: 'job_11',
+      title: '微信视频号 / 抖音电商闭环运营',
+      company: '知名品牌华南运营中心',
+      salary: '14-22K·13薪',
+      city: '深圳·福田区',
+      category: '电商/达人',
+      source: '📱 公众号直聘专栏',
+      tags: ['全域电商', '自播团队', '排品策略', '五险一金', '定期团建'],
+      notes: '负责品牌自播间人货场搭建、场控排品与数据复盘，优化直播间自然流承接与成交转化率。',
+      url: 'https://www.lagou.com/',
+      greeting: '您好！在直招推文看到贵司正在招聘【电商闭环运营】。我有全域直播间搭建与排品推品经验，擅长复盘留存与促单话术优化。简历已同步，期盼进一步联系！'
+    },
+    {
+      id: 'job_12',
+      title: '海外发行运营 / 媒介商务主管',
+      company: '三七互娱 (37GAMES 海外中心)',
+      salary: '16-28K·14薪',
+      city: '深圳·南山区',
+      category: '出海/商业化',
+      source: '🏢 三七互娱招聘推文',
+      tags: ['游戏发行', '全球买量', '海外渠道', '双休', '商业保险'],
+      notes: '负责海外代理与自研产品在欧美日韩市场的渠道上架对接、海外KOL内容合作与公关推介，配合买量节奏促成新增爆发。',
+      url: 'https://talent.37.com/',
+      greeting: '您好！关注到三七互娱招聘推文正在招募【海外发行运营/媒介商务主管】。我对海外发行流程与渠道商务建联有系统化认知，执行力坚决，抗压即战力强。简历已附上，期待交流！'
+    }
+  ];
+
+  const WECHAT_OFFICIAL_ACCOUNTS = [
+    {
+      name: '腾讯招聘 (Tencent_Recruit)',
+      tag: '鹅厂直聘',
+      desc: '腾讯官方招聘服务号，每周二/周四推送互娱IEG、CSIG、微信事业群深圳社招特急HC，支持免中介直接推送到总监HR。',
+      tip: '💡 关注后回复【深圳运营】或进入底部菜单【社招通道】'
+    },
+    {
+      name: '字节跳动招聘 (bytedance_jobs)',
+      tag: '字节内推直聘',
+      desc: '字节官方求职号，覆盖TikTok、抖音电商、商业化平台。推文内常附带一键内推二维码，简历直达直属业务Leader。',
+      tip: '💡 关注后进入菜单【我要投递 - 社会招聘 - 工作城市选深圳】'
+    },
+    {
+      name: '米哈游招聘 (miHoYo_Job)',
+      tag: '米哈游全球HC',
+      desc: '米哈游海外拓展与自研新品急聘通道，专注游戏运营、泛二次元社群生态、创作者矩阵与本地化岗位。',
+      tip: '💡 关注后回复【海外运营】获取最新批次直聘岗位'
+    },
+    {
+      name: 'Shopee虾皮招聘 (ShopeeCareers)',
+      tag: '跨境出海标杆',
+      desc: 'Shopee跨境电商与泛出海业务核心招聘号，深圳南山科技园研发与运营大本营，双休不内卷、六险一金福利标杆。',
+      tip: '💡 关注后点击【微招聘 - 深圳社招 - 商业化/运营】'
+    },
+    {
+      name: 'DJI大疆招聘 (DJI_Recruitment)',
+      tag: '智能影像硬件出海',
+      desc: '大疆创新官方社招推文发布平台，包含天空之城总部品牌视觉、商业摄影、海外本地化与产品运营专场。',
+      tip: '💡 关注后点击【加入大疆 - 社会招聘 - 搜索设计/运营】'
+    },
+    {
+      name: '华为招聘 (Huawei_Careers)',
+      tag: '华为出海与终端',
+      desc: '华为终端云服务与海外电商业务官方社招公众号，重点吸纳深港澳地区高素质出海运营、视觉与媒介商务人才。',
+      tip: '💡 关注后进入【微招聘 - 社会招聘 - 工作地点深圳】'
+    }
+  ];
+
+  function initDailyDigest() {
+    let customJobs = [];
+    let activeCity = 'ALL';
+    let activeCategory = 'ALL';
+    let searchKeyword = '';
+
+    const container = document.getElementById('digest-cards-container');
+    const wechatContainer = document.getElementById('wechat-accounts-container');
+    const resultCountEl = document.getElementById('digest-result-count');
+    const dateEl = document.getElementById('digest-current-date');
+
+    // 动态渲染今日日期
+    if (dateEl) {
+      const now = new Date();
+      dateEl.textContent = `今日发布：${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 (每日首次启动 Chrome 自动更新)`;
+    }
+
+    // 渲染公众号直聘卡片
+    if (wechatContainer) {
+      wechatContainer.innerHTML = WECHAT_OFFICIAL_ACCOUNTS.map(acc => `
+        <div class="wechat-acc-card">
+          <div class="wechat-acc-top">
+            <span class="wechat-acc-name">${acc.name}</span>
+            <span class="wechat-acc-tag">${acc.tag}</span>
+          </div>
+          <div class="wechat-acc-desc">${acc.desc}</div>
+          <div class="wechat-acc-tip">${acc.tip}</div>
+        </div>
+      `).join('');
+    }
+
+    function loadCustomJobs(cb) {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['customDigestJobs'], (res) => {
+          if (res && Array.isArray(res.customDigestJobs)) {
+            customJobs = res.customDigestJobs;
+          }
+          if (cb) cb();
+        });
+      } else {
+        if (cb) cb();
+      }
+    }
+
+    function renderCards() {
+      if (!container) return;
+      const allJobs = [...customJobs, ...DEFAULT_DIGEST_JOBS];
+
+      const filtered = allJobs.filter(job => {
+        // 地区筛选
+        if (activeCity !== 'ALL') {
+          if (activeCity === '深圳' && !job.city.includes('深圳')) return false;
+          if (activeCity === '远程/出海' && (!job.city.includes('远程') && !job.city.includes('出海') && !job.category.includes('出海'))) return false;
+        }
+        // 赛道筛选
+        if (activeCategory !== 'ALL') {
+          if (activeCategory === '公众号直聘' && !job.source.includes('公众号')) return false;
+          if (activeCategory !== '公众号直聘' && job.category !== activeCategory) return false;
+        }
+        // 搜索关键词
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.trim().toLowerCase();
+          const targetText = `${job.title} ${job.company} ${job.city} ${job.notes} ${(job.tags || []).join(' ')}`.toLowerCase();
+          if (!targetText.includes(kw)) return false;
+        }
+        return true;
+      });
+
+      if (resultCountEl) {
+        resultCountEl.textContent = `共 ${filtered.length} 条精选情报 (已过滤)`;
+      }
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #94a3b8; background: rgba(0,0,0,0.2); border-radius: 10px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+            <div style="font-weight: 600;">未找到符合当前条件的招聘情报</div>
+            <div style="font-size: 11.5px; margin-top: 4px;">建议切换赛道分类、地区筛选或清空关键词重试。</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(job => `
+        <div class="digest-card" data-id="${job.id}">
+          <div class="digest-card-header">
+            <div class="digest-card-title">${job.title}</div>
+            <div class="digest-card-salary">${job.salary}</div>
+          </div>
+          <div class="digest-card-sub">
+            <span class="digest-company-name">🏢 ${job.company}</span>
+            <span class="digest-city-tag">📍 ${job.city}</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px;">
+            <span style="color: #fbbf24; font-weight: 600;">${job.source}</span>
+            <span style="color: #34d399; font-weight: 600;">✨ 契合度 98%</span>
+          </div>
+          <div class="digest-tags-row">
+            ${(job.tags || []).map(t => `<span class="digest-tag-chip ${t.includes('双休') || t.includes('六险') || t.includes('年终') ? 'highlight' : ''}">${t}</span>`).join('')}
+          </div>
+          <div class="digest-notes-box">
+            ${job.notes}
+          </div>
+          <div class="digest-card-actions">
+            <button class="digest-btn-copy" data-greeting="${encodeURIComponent(job.greeting || '')}">
+              📋 复制针对性自荐语
+            </button>
+            <a href="${job.url}" target="_blank" class="digest-btn-link" rel="noopener noreferrer">
+              🚀 直达投递 / 推文 ↗
+            </a>
+          </div>
+        </div>
+      `).join('');
+
+      container.querySelectorAll('.digest-btn-copy').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const text = decodeURIComponent(btn.getAttribute('data-greeting') || '');
+          if (text) {
+            navigator.clipboard.writeText(text);
+            showCopyToast('📋 该岗位专属定制自荐信已复制到剪贴板！');
+          }
+        });
+      });
+    }
+
+    // 绑定地区按钮
+    document.querySelectorAll('#digest-city-filters .filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('#digest-city-filters .filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        activeCity = chip.getAttribute('data-city');
+        renderCards();
+      });
+    });
+
+    // 绑定赛道按钮
+    document.querySelectorAll('#digest-category-filters .filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('#digest-category-filters .filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        activeCategory = chip.getAttribute('data-cat');
+        renderCards();
+      });
+    });
+
+    // 绑定搜索输入
+    const searchInput = document.getElementById('digest-search-input');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        searchKeyword = e.target.value;
+        renderCards();
+      });
+    }
+
+    // 刷新按钮
+    document.getElementById('btn-refresh-digest')?.addEventListener('click', () => {
+      activeCity = 'ALL';
+      activeCategory = 'ALL';
+      searchKeyword = '';
+      if (searchInput) searchInput.value = '';
+      document.querySelectorAll('#digest-city-filters .filter-chip').forEach(c => c.classList.remove('active'));
+      document.querySelector('#digest-city-filters .filter-chip[data-city="ALL"]')?.classList.add('active');
+      document.querySelectorAll('#digest-category-filters .filter-chip').forEach(c => c.classList.remove('active'));
+      document.querySelector('#digest-category-filters .filter-chip[data-cat="ALL"]')?.classList.add('active');
+      renderCards();
+      showCopyToast('🔄 今日全网求职情报与公众号直招专栏已全部刷新！');
+    });
+
+    // 添加自定义线索弹窗
+    const modal = document.getElementById('add-digest-job-modal');
+    const openBtn = document.getElementById('btn-open-add-digest-job');
+    const closeBtn = document.getElementById('btn-close-digest-modal');
+    const cancelBtn = document.getElementById('btn-cancel-digest-modal');
+    const confirmBtn = document.getElementById('btn-confirm-add-digest');
+
+    if (openBtn && modal) {
+      openBtn.addEventListener('click', () => {
+        modal.style.display = 'flex';
+      });
+    }
+
+    const closeModal = () => {
+      if (modal) modal.style.display = 'none';
+    };
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', () => {
+        const title = (document.getElementById('digest-new-title')?.value || '').trim();
+        const company = (document.getElementById('digest-new-company')?.value || '').trim();
+        const salary = (document.getElementById('digest-new-salary')?.value || '').trim();
+        const city = (document.getElementById('digest-new-city')?.value || '').trim();
+        const cat = document.getElementById('digest-new-cat')?.value || '出海/商业化';
+        const tagsRaw = (document.getElementById('digest-new-tags')?.value || '').trim();
+        const url = (document.getElementById('digest-new-url')?.value || '').trim() || 'https://www.zhipin.com/';
+        const notes = (document.getElementById('digest-new-notes')?.value || '').trim();
+
+        if (!title || !company) {
+          alert('请至少填写岗位名称和公司/团队名称！');
+          return;
+        }
+
+        const newJob = {
+          id: 'custom_' + Date.now(),
+          title,
+          company,
+          salary: salary || '面议/高薪',
+          city: city || '深圳',
+          category: cat,
+          source: '📌 自定义收集线索',
+          tags: tagsRaw ? tagsRaw.split(/[,，\s]+/).filter(Boolean) : ['优质自招', '重点跟进'],
+          notes: notes || '用户手动记录的高价值求职线索。',
+          url,
+          greeting: `您好！看到咱们在招聘【${title}】。我有丰富的相关业务方向实战经验，执行力强、注重数据产出，期待能与用人团队沟通！`
+        };
+
+        customJobs.unshift(newJob);
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ customDigestJobs: customJobs }, () => {
+            closeModal();
+            renderCards();
+            showCopyToast('🎉 招聘线索已保存并置顶展示！');
+          });
+        }
+      });
+    }
+
+    loadCustomJobs(() => {
+      renderCards();
+    });
+  }
+
   // 初始化简历武器库事件
   initResumeDepotEvents();
+  initDailyDigest();
 
   // 初始化加载
   loadAllData();
