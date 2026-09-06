@@ -563,7 +563,11 @@
             </button>
           </div>
 
-          <div class="log-box" id="hud-log-stream">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding: 0 2px;">
+            <span style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">📋 实时运行日志 (保留最新80条)</span>
+            <span id="btn-clear-lp-log" style="font-size: 10px; color: #c084fc; text-decoration: underline; cursor: pointer;">清空</span>
+          </div>
+          <div class="log-box" id="hud-log-stream" style="max-height: 120px; overflow-y: auto;">
             <div>[猎聘就绪] 点击启动即可开始高亮词条匹配应聘。</div>
           </div>
 
@@ -754,6 +758,14 @@
       hudContainer.style.bottom = `${Math.max(10, initialBottom + dy)}px`;
     });
 
+    // 清空日志按钮
+    shadowRoot.getElementById('btn-clear-lp-log')?.addEventListener('click', () => {
+      const stream = shadowRoot.getElementById('hud-log-stream');
+      if (stream) {
+        stream.innerHTML = '<div style="color:#64748b;">[系统就绪] 日志已清空，猎聘巡航待命...</div>';
+      }
+    });
+
     window.addEventListener('mouseup', () => {
       isDragging = false;
     });
@@ -762,10 +774,18 @@
   function logHUD(html) {
     const stream = shadowRoot?.getElementById('hud-log-stream');
     if (!stream) return;
+    const now = new Date();
+    const timeStr = `[${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}]`;
+
+    // 控制台镜像输出
+    const plainText = html.replace(/<[^>]+>/g, '');
+    console.log(`%c[ZIAVER 猎聘] ${timeStr} ${plainText}`, 'color: #c084fc;');
+
     const line = document.createElement('div');
-    line.innerHTML = html;
+    line.style.cssText = 'margin-bottom: 2px; word-break: break-all;';
+    line.innerHTML = `<span style="color:#64748b; font-size:10px; margin-right:4px;">${timeStr}</span>${html}`;
     stream.prepend(line);
-    while (stream.children.length > 25) {
+    while (stream.children.length > 80) {
       stream.removeChild(stream.lastChild);
     }
   }

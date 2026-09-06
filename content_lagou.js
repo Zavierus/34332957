@@ -638,7 +638,11 @@
             </button>
           </div>
 
-          <div class="hud-log-box" id="hud-log-scroll">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding: 0 2px;">
+            <span style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">📋 实时运行日志 (保留最新80条)</span>
+            <span id="btn-clear-lagou-log" style="font-size: 10px; color: #34d399; text-decoration: underline; cursor: pointer;">清空</span>
+          </div>
+          <div class="hud-log-box" id="hud-log-scroll" style="max-height: 120px; overflow-y: auto;">
             <div style="color:#94a3b8;">[就绪] 严格匹配高亮词条与9K起薪，点击开启或由全网流水线调用。</div>
           </div>
 
@@ -824,6 +828,14 @@
       hudContainer.style.bottom = `${Math.max(10, initialBottom + dy)}px`;
     });
 
+    // 清空日志按钮
+    shadowRoot.getElementById('btn-clear-lagou-log')?.addEventListener('click', () => {
+      const stream = shadowRoot.getElementById('hud-log-scroll');
+      if (stream) {
+        stream.innerHTML = '<div style="color:#64748b;">[系统就绪] 日志已清空，拉勾巡航待命...</div>';
+      }
+    });
+
     window.addEventListener('mouseup', () => {
       isDragging = false;
     });
@@ -938,11 +950,20 @@
     if (!shadowRoot) return;
     const logBox = shadowRoot.getElementById('hud-log-scroll');
     if (!logBox) return;
-    const item = document.createElement('div');
-    const time = new Date().toTimeString().split(' ')[0];
-    item.innerHTML = `<span style="color:#64748b;">${time}</span> ${htmlMsg}`;
-    logBox.appendChild(item);
-    logBox.scrollTop = logBox.scrollHeight;
+    const now = new Date();
+    const timeStr = `[${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}]`;
+
+    // 控制台镜像输出
+    const plainText = htmlMsg.replace(/<[^>]+>/g, '');
+    console.log(`%c[ZIAVER 拉勾] ${timeStr} ${plainText}`, 'color: #34d399;');
+
+    const line = document.createElement('div');
+    line.style.cssText = 'margin-bottom: 2px; word-break: break-all;';
+    line.innerHTML = `<span style="color:#64748b; font-size:10px; margin-right:4px;">${timeStr}</span>${htmlMsg}`;
+    logBox.prepend(line);
+    while (logBox.children.length > 80) {
+      logBox.removeChild(logBox.lastChild);
+    }
   }
 
   // ================= 拉勾登录态智能识别 =================

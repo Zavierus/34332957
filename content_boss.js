@@ -79,10 +79,10 @@
 
   // ================= 高亮职业词条强校验 =================
   function screenJobCard(card) {
-    const titleEl = card.querySelector('.job-name, .job-title');
-    const salaryEl = card.querySelector('.salary');
-    const companyEl = card.querySelector('.company-name, .company-info a');
-    const tagsEl = card.querySelector('.tag-list, .job-tags');
+    const titleEl = card.querySelector('.job-name, .job-title, .job-card-left .job-name, a[ka*="job_list_"], [class*="job-name"]');
+    const salaryEl = card.querySelector('.salary, [class*="salary"]');
+    const companyEl = card.querySelector('.company-name, .company-info a, [class*="company-name"], .company-info');
+    const tagsEl = card.querySelector('.tag-list, .job-tags, .info-desc, [class*="tag-list"]');
 
     const title = titleEl ? titleEl.textContent.trim() : '';
     const salary = salaryEl ? salaryEl.textContent.trim() : '';
@@ -574,7 +574,11 @@
             </button>
           </div>
 
-          <div class="log-box" id="hud-log-stream">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; padding: 0 2px;">
+            <span style="font-size: 10.5px; color: #94a3b8; font-weight: 600;">📋 实时运行日志 (保留最新80条)</span>
+            <span id="btn-clear-boss-log" style="font-size: 10px; color: #00f2fe; text-decoration: underline; cursor: pointer;">清空</span>
+          </div>
+          <div class="log-box" id="hud-log-stream" style="max-height: 120px; overflow-y: auto;">
             <div>[系统就绪] 只投递包含后台高亮词条的岗位，点击启动即可巡航。</div>
           </div>
 
@@ -765,6 +769,14 @@
       hudContainer.style.bottom = `${Math.max(10, initialBottom + dy)}px`;
     });
 
+    // 清空日志按钮
+    shadowRoot.getElementById('btn-clear-boss-log')?.addEventListener('click', () => {
+      const stream = shadowRoot.getElementById('hud-log-stream');
+      if (stream) {
+        stream.innerHTML = '<div style="color:#64748b;">[系统就绪] 日志已清空，巡航待命中...</div>';
+      }
+    });
+
     window.addEventListener('mouseup', () => {
       isDragging = false;
     });
@@ -773,10 +785,18 @@
   function logHUD(html) {
     const stream = shadowRoot?.getElementById('hud-log-stream');
     if (!stream) return;
+    const now = new Date();
+    const timeStr = `[${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}]`;
+    
+    // 控制台镜像详细输出 (去除 HTML 标签)
+    const plainText = html.replace(/<[^>]+>/g, '');
+    console.log(`%c[ZIAVER BOSS] ${timeStr} ${plainText}`, 'color: #00f2fe;');
+
     const line = document.createElement('div');
-    line.innerHTML = html;
+    line.style.cssText = 'margin-bottom: 2px; word-break: break-all;';
+    line.innerHTML = `<span style="color:#64748b; font-size:10px; margin-right:4px;">${timeStr}</span>${html}`;
     stream.prepend(line);
-    while (stream.children.length > 30) {
+    while (stream.children.length > 80) {
       stream.removeChild(stream.lastChild);
     }
   }
@@ -1065,7 +1085,95 @@
     logHUD('<span>[巡航结束]</span> 巡航停止。');
   }
 
+  // ================= 弹窗管理与遮罩清理工具 =================
+  function cleanModalMasks() {
+    const masks = document.querySelectorAll(
+      '.dialog-mask, .boss-dialog-mask, .v-modal, .ui-mask, .mask-box, [class*="dialog-mask"], [class*="modal-mask"]'
+    );
+    for (const m of masks) {
+      if (!m || m.id === 'ziaver-boss-hud' || m.closest('#ziaver-boss-hud')) continue;
+      const rect = m.getBoundingClientRect();
+      if (rect.width >= window.innerWidth * 0.6 && rect.height >= window.innerHeight * 0.6) {
+        m.remove();
+      }
+    }
+  }
+
+  function handleBossAlreadySentDialog() {
+    // 1. 查找全页面中所有可能的模态弹窗容器
+    const dialogSelectors = [
+      '.boss-dialog', '.dialog-container', '.dialog-wrap', '.dialog-box', 
+      '.ui-dialog', '.boss-popup', '.greet-boss-dialog', '.stay-page-dialog',
+      '[class*="dialog"]', '[class*="modal"]', '[class*="popup"]', '[role="dialog"]'
+    ];
+    
+    let handled = false;
+    const dialogs = document.querySelectorAll(dialogSelectors.join(', '));
+    for (const d of dialogs) {
+      if (!d || d.id === 'ziaver-boss-hud' || d.closest('#ziaver-boss-hud')) continue;
+      
+      const txt = (d.textContent || '').trim();
+      if (
+        txt.includes('已向BOSS发送消息') ||
+        txt.includes('已向对方发送') ||
+        txt.includes('设置招呼语') ||
+        (txt.includes('留在此页') && (txt.includes('继续沟通') || txt.includes('发送消息') || txt.includes('您好')))
+      ) {
+        // 关键防护：必须点击「留在此页」，坚决严禁点击「继续沟通」（否则会跳转到聊天流中断检索）
+        let stayBtn = null;
+        const allBtns = d.querySelectorAll('button, a, span, .btn');
+        for (const b of allBtns) {
+          const bTxt = b.textContent.trim();
+          if (bTxt === '留在此页' || bTxt.includes('留在此页')) {
+            stayBtn = b;
+            break;
+          }
+        }
+
+        if (stayBtn) {
+          stayBtn.click();
+          handled = true;
+        } else {
+          // 若未找到“留在此页”按钮，点击右上角 ✕ 关闭按钮
+          const closeBtn = d.querySelector('.icon-close, .close, .dialog-close, .close-btn, .iboss-close, [ka*="close"], svg');
+          if (closeBtn) {
+            closeBtn.click();
+            handled = true;
+          } else {
+            d.style.display = 'none';
+            d.remove();
+            handled = true;
+          }
+        }
+
+        // 清理背景遮罩
+        cleanModalMasks();
+        return true;
+      }
+    }
+
+    // 2. 兜底扫描全文档文本完全为“留在此页”的按钮
+    const fallbackBtns = document.querySelectorAll('button, a, span');
+    for (const b of fallbackBtns) {
+      if (!b || b.closest('#ziaver-boss-hud')) continue;
+      if (b.textContent.trim() === '留在此页') {
+        b.click();
+        cleanModalMasks();
+        return true;
+      }
+    }
+
+    return handled;
+  }
+
   async function runJobLoop() {
+    // 循环启动前，先清理残留弹窗和遮罩
+    if (handleBossAlreadySentDialog()) {
+      logHUD('<span class="success">[环境清理] 检测到屏幕中央残留的「已向BOSS发送消息」回执，已自动点击「留在此页」并移除遮罩</span>');
+      await sleep(400);
+    }
+    cleanModalMasks();
+
     while (isRunning) {
       if (isPaused) {
         await sleep(1000);
@@ -1082,11 +1190,16 @@
         break;
       }
 
-      let jobCards = document.querySelectorAll('.job-card-wrapper, .job-card-box, ul.job-list-box > li');
+      // 确保界面无遮挡
+      handleBossAlreadySentDialog();
+      cleanModalMasks();
+
+      let jobCards = document.querySelectorAll('.job-card-wrapper, .job-card-box, ul.job-list-box > li, .job-card-body');
       if (!jobCards || jobCards.length === 0) {
+        logHUD('<span class="skip">[视口滚动] 当前视口未见职位卡片，尝试平滑向下滚动 400px...</span>');
         window.scrollBy({ top: 400, behavior: 'smooth' });
         await sleep(2500);
-        jobCards = document.querySelectorAll('.job-card-wrapper, .job-card-box, ul.job-list-box > li');
+        jobCards = document.querySelectorAll('.job-card-wrapper, .job-card-box, ul.job-list-box > li, .job-card-body');
       }
 
       if (!jobCards || jobCards.length === 0) {
@@ -1105,6 +1218,10 @@
         logHUD('<span class="skip">未在当前页面找到职位卡片，请打开 BOSS 职位搜索列表页。</span>');
         break;
       }
+
+      let unhandledCount = 0;
+      jobCards.forEach(c => { if (c.dataset.ziaverHandled !== 'true') unhandledCount++; });
+      logHUD(`<span class="highlight">[卡片扫描]</span> 当前页共发现 ${jobCards.length} 个职位 (待比对: ${unhandledCount} 个)`);
 
       for (let i = 0; i < jobCards.length; i++) {
         if (!isRunning) break;
@@ -1129,16 +1246,39 @@
         if (card.dataset.ziaverHandled === 'true') continue;
         card.dataset.ziaverHandled = 'true';
 
-        // 核心：基于高亮选中的职业词条进行判断
+        // 每次处理卡片前，再次确保没有弹窗遮罩阻挡
+        handleBossAlreadySentDialog();
+        cleanModalMasks();
+
+        // 提取岗位与企业基本信息，用于精细化 Debug 日志
+        const titleEl = card.querySelector('.job-name, .job-title, .job-card-left .job-name, a[ka*="job_list_"], [class*="job-name"]');
+        const salaryEl = card.querySelector('.salary, [class*="salary"]');
+        const companyEl = card.querySelector('.company-name, .company-info a, [class*="company-name"], .company-info');
+        const previewTitle = titleEl ? titleEl.textContent.trim() : '未知岗位';
+        const previewSalary = salaryEl ? salaryEl.textContent.trim() : '面议';
+        const previewCompany = companyEl ? companyEl.textContent.trim() : '未知企业';
+
+        // 1. 快速排查：若卡片已有「继续沟通」或「已沟通」，坚决直接跳过！绝不点开详情抽屉浪费时间
+        const cardRawText = card.innerText || card.textContent || '';
+        if (
+          cardRawText.includes('继续沟通') ||
+          cardRawText.includes('已沟通') ||
+          cardRawText.includes('已聊过')
+        ) {
+          logHUD(`<span class="skip">[已沟通跳过] #${i + 1} ${previewCompany} · ${previewTitle} (此前已沟通过)</span>`);
+          continue;
+        }
+
+        // 2. 基于高亮选中的职业词条进行判断
         const screenResult = screenJobCard(card);
         if (!screenResult.pass) {
-          logHUD(`<span class="skip">${screenResult.reason}</span>`);
+          logHUD(`<span class="skip">[规则过滤] #${i + 1} ${previewCompany} · ${previewTitle}: ${screenResult.reason}</span>`);
           continue;
         }
 
         const { title, salary, company, tags, matchedTag } = screenResult.data;
 
-        // 寻找“立即沟通”
+        // 3. 寻找“立即沟通”按钮
         let btnChat = null;
         const allBtns = card.querySelectorAll('a, button, span');
         for (const b of allBtns) {
@@ -1154,6 +1294,7 @@
         }
 
         if (!btnChat) {
+          logHUD(`<span class="skip">[展开抽屉] #${i + 1} 卡片无外置按钮，尝试展开右侧详情抽屉...</span>`);
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
           card.click();
           await sleep(1200);
@@ -1167,83 +1308,91 @@
                 btnChat = b;
                 break;
               }
+              if (txt === '继续沟通' || txt === '已沟通') {
+                logHUD(`<span class="skip">[已沟通跳过] #${i + 1} ${company} · ${title} (详情抽屉显示已沟通)</span>`);
+                break;
+              }
             }
           }
         }
 
-        if (btnChat) {
-          const greetingText = synthesizeDynamicGreeting(title, matchedTag, company);
+        if (!btnChat) {
+          logHUD(`<span class="skip">[无可用按钮] #${i + 1} ${company} · ${title} 未找到「立即沟通」按钮，安全跳过</span>`);
+          continue;
+        }
 
-          logHUD(`<span class="highlight">[命中高亮词条: ${matchedTag}]</span> ${company} · ${title} (${salary})`);
-          logHUD(`<span class="skip" style="color:#a5f3fc;">动态话术已合成: "${greetingText.slice(0, 32)}..."</span>`);
+        const greetingText = synthesizeDynamicGreeting(title, matchedTag, company);
 
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(Math.floor(Math.random() * 600) + 500);
+        logHUD(`<span class="highlight">[🎯命中词条: ${matchedTag}]</span> #${i + 1} ${company} · ${title} (${salary})`);
+        logHUD(`<span class="skip" style="color:#a5f3fc;">[动态话术合成] "${greetingText.slice(0, 32)}..."</span>`);
 
-          // 严格校验投递过程与真实送达回执 (彻底解决虚假计数与弹窗阻挡)
-          const chatResult = await executeAndVerifyBossChat(card, btnChat, greetingText);
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(Math.floor(Math.random() * 500) + 400);
 
-          if (chatResult.success) {
-            todayCount++;
-            sessionCount++;
-            updateHUD();
+        // 严格校验投递过程与真实送达回执 (捕获「已向BOSS发送消息」并点击「留在此页」)
+        const chatResult = await executeAndVerifyBossChat(card, btnChat, greetingText);
 
-            // 独立持久化 BOSS 今日投递数据
-            if (chrome.storage && chrome.storage.local) {
-              const today = new Date().toISOString().split('T')[0];
-              const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
-              siteCounts.boss = todayCount;
-              const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
-              chrome.storage.local.set({
-                config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
-              });
-            }
+        if (chatResult.success) {
+          todayCount++;
+          sessionCount++;
+          updateHUD();
 
-            // 发送详尽记录至后台表格
-            chrome.runtime.sendMessage({
-              type: 'APPLY_LOG',
-              data: {
-                platform: 'BOSS直聘',
-                company,
-                title,
-                salary,
-                matchedTag,
-                greeting: greetingText,
-                status: '已沟通'
-              }
+          // 独立持久化 BOSS 今日投递数据
+          if (chrome.storage && chrome.storage.local) {
+            const today = new Date().toISOString().split('T')[0];
+            const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+            siteCounts.boss = todayCount;
+            const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+            chrome.storage.local.set({
+              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
             });
-
-            if (pipelineMode) {
-              chrome.runtime.sendMessage({
-                type: 'PIPELINE_SITE_PROGRESS',
-                site: 'boss',
-                count: sessionCount,
-                todayCount: todayCount
-              });
-            }
-
-            logHUD(`<span class="success">[真实送达确认]</span> 消息已真实发送并入库报表！`);
-
-            const delayMs = getRandomDelayMs();
-            logHUD(`<span class="skip">安全冷却中... 随机等待 ${(delayMs / 1000).toFixed(1)} 秒</span>`);
-            await sleep(delayMs);
-          } else if (chatResult.reason === 'limit_reached') {
-            logHUD(`<span class="highlight" style="color:#ef4444; font-weight:bold; font-size:12px;">🛑【平台上限熔断】BOSS直聘已达到今日沟通上限！为防止风控封号，已立即自动停止巡航。</span>`);
-            if (pipelineMode) {
-              logHUD('<span class="highlight" style="color:#f59e0b;">[流水线转场] BOSS本站已满额，自动向全网巡航下一站交接...</span>');
-              chrome.runtime.sendMessage({
-                type: 'PIPELINE_SITE_FINISHED',
-                site: 'boss',
-                count: sessionCount
-              });
-            }
-            break;
-          } else if (chatResult.reason === 'captcha_triggered') {
-            logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【滑块验证拦截】已自动暂停巡航，请手动完成页面人机验证后点击【继续】！</span>`);
-          } else {
-            logHUD(`<span class="skip" style="color:#94a3b8;">[送达未确认] ${company} · ${title} (${chatResult.message || '未响应'})，安全跳过 (不虚增计数)</span>`);
-            await sleep(600);
           }
+
+          // 发送详尽记录至后台表格
+          chrome.runtime.sendMessage({
+            type: 'APPLY_LOG',
+            data: {
+              platform: 'BOSS直聘',
+              company,
+              title,
+              salary,
+              matchedTag,
+              greeting: greetingText,
+              status: '已沟通',
+              exactCount: todayCount
+            }
+          });
+
+          if (pipelineMode) {
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_PROGRESS',
+              site: 'boss',
+              count: sessionCount,
+              todayCount: todayCount
+            });
+          }
+
+          logHUD(`<span class="success">[真实送达确认]</span> #${sessionCount} 消息已成功送达并入库报表！(今日已投 ${todayCount}/${config.dailyLimit})`);
+
+          const delayMs = getRandomDelayMs();
+          logHUD(`<span class="skip">[防风控冷却] 随机安全等待 ${(delayMs / 1000).toFixed(1)} 秒...</span>`);
+          await sleep(delayMs);
+        } else if (chatResult.reason === 'limit_reached') {
+          logHUD(`<span class="highlight" style="color:#ef4444; font-weight:bold; font-size:12px;">🛑【平台上限熔断】BOSS直聘已达到今日沟通上限！为防止风控封号，已立即自动停止巡航。</span>`);
+          if (pipelineMode) {
+            logHUD('<span class="highlight" style="color:#f59e0b;">[流水线转场] BOSS本站已满额，自动向全网巡航下一站交接...</span>');
+            chrome.runtime.sendMessage({
+              type: 'PIPELINE_SITE_FINISHED',
+              site: 'boss',
+              count: sessionCount
+            });
+          }
+          break;
+        } else if (chatResult.reason === 'captcha_triggered') {
+          logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【滑块验证拦截】已自动暂停巡航，请手动完成页面人机验证后点击【继续】！</span>`);
+        } else {
+          logHUD(`<span class="skip" style="color:#94a3b8;">[送达未确认] #${i + 1} ${company} · ${title} (${chatResult.message || '未响应'})，安全跳过 (不虚增计数)</span>`);
+          await sleep(600);
         }
       }
 
@@ -1259,9 +1408,10 @@
       }
 
       if (isRunning && !isPaused) {
-        logHUD('<span>[翻页检测]</span> 尝试加载下一页...');
+        logHUD('<span>[本屏处理完毕]</span> 本视口职位卡片已全部处理，正在尝试加载下一页/加载更多...');
         const nextBtn = document.querySelector('.ui-icon-arrow-right, a.next, .pagination-next');
         if (nextBtn && !nextBtn.classList.contains('disabled')) {
+          logHUD('<span>[翻页动作]</span> 检测到下一页按钮，点击翻页...');
           if (pipelineMode) {
             try {
               sessionStorage.setItem('ziaver_pipeline_boss_state', JSON.stringify({
@@ -1275,6 +1425,7 @@
           nextBtn.click();
           await sleep(4000);
         } else {
+          logHUD('<span>[滚动加载]</span> 平滑向下滚动 800px 触发新职位加载...');
           window.scrollBy({ top: 800, behavior: 'smooth' });
           await sleep(3500);
         }
@@ -1395,6 +1546,12 @@
 
     // 5. 检查是否确认成功送达
     function checkIsDeliverySuccess() {
+      // 5.1 核心：若捕获到「已向BOSS发送消息」回执弹窗，点击「留在此页」并直接判定送达成功！
+      if (handleBossAlreadySentDialog()) {
+        logHUD('<span class="success">[弹窗捕获] 检测到「已向BOSS发送消息」！自动点击「留在此页」并移除遮罩</span>');
+        return true;
+      }
+
       const curTxt = btnChat ? btnChat.textContent.trim() : '';
       if (curTxt === '继续沟通' || curTxt === '已沟通' || curTxt === '已聊过') {
         return true;
@@ -1427,12 +1584,14 @@
 
     // 6. 清理可能卡住的残留弹窗，防止遮挡后续卡片点击
     function dismissAnyStuckDialog() {
+      handleBossAlreadySentDialog();
       const closeBtns = document.querySelectorAll('.dialog-close, .close-btn, .iboss-close, .dialog-wrap .close, .dialog-container .close');
       for (const cb of closeBtns) {
         if (cb.offsetWidth > 0 && cb.offsetHeight > 0) {
           cb.click();
         }
       }
+      cleanModalMasks();
     }
 
     // === 执行投递与阶段状态检查 ===
@@ -1443,8 +1602,15 @@
     }
 
     // 点击“立即沟通”
+    logHUD('<span class="highlight">[触发沟通]</span> 正在点击【立即沟通】...');
     btnChat.click();
-    await sleep(800);
+    await sleep(600);
+
+    // 优先检查是否秒弹「已向BOSS发送消息」
+    if (handleBossAlreadySentDialog()) {
+      logHUD('<span class="success">[弹窗捕获] 成功捕获「已向BOSS发送消息」！自动点击「留在此页」，清除阻挡遮罩</span>');
+      return { success: true, message: '已向BOSS发送消息弹窗确认送达' };
+    }
 
     // 检查是否立刻触发了上限熔断
     if (checkPlatformLimitDialog()) {
@@ -1464,11 +1630,16 @@
     // 处理二次确认弹窗
     await handleSecondaryConfirmDialog();
 
-    // 轮询 2.5 秒严格校验送达回执
+    // 轮询 3.5 秒严格校验送达回执
     const startTime = Date.now();
     let isSuccess = false;
 
-    while (Date.now() - startTime < 2500) {
+    while (Date.now() - startTime < 3500) {
+      if (handleBossAlreadySentDialog()) {
+        logHUD('<span class="success">[弹窗捕获] 轮询检测到「已向BOSS发送消息」！自动点击「留在此页」并清理遮罩</span>');
+        isSuccess = true;
+        break;
+      }
       if (checkPlatformLimitDialog()) {
         return { success: false, reason: 'limit_reached', message: '平台今日打招呼次数已达上限' };
       }
@@ -1481,14 +1652,16 @@
         isSuccess = true;
         break;
       }
-      await sleep(300);
+      await sleep(250);
     }
 
     if (isSuccess) {
+      cleanModalMasks();
       return { success: true };
     } else {
       // 未确认成功：安全关闭可能残留的弹窗，防止遮罩阻挡
       dismissAnyStuckDialog();
+      cleanModalMasks();
       return {
         success: false,
         reason: 'unverified',

@@ -659,7 +659,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         siteKey = 'ats';
       }
 
-      config.siteTodayCounts[siteKey] = (config.siteTodayCounts[siteKey] || 0) + 1;
+      if (request.data && request.data.exactCount !== undefined) {
+        config.siteTodayCounts[siteKey] = request.data.exactCount;
+      } else {
+        config.siteTodayCounts[siteKey] = (config.siteTodayCounts[siteKey] || 0) + 1;
+      }
       // 汇总各站总和为全网总计数
       config.todayCount = Object.values(config.siteTodayCounts).reduce((a, b) => a + (Number(b) || 0), 0);
       
