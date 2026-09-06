@@ -410,6 +410,70 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ================= 7.1 跨账户全量配置与数据迁移 =================
+  document.getElementById('btn-export-full-backup')?.addEventListener('click', () => {
+    chrome.storage.local.get(['jobTags', 'config', 'applicantProfile', 'resumeDepot', 'applyLog'], (res) => {
+      const backupData = {
+        app: 'JobCruise',
+        version: '2.5.5',
+        exportTime: new Date().toLocaleString(),
+        jobTags: res.jobTags || currentTags || [],
+        config: res.config || currentConfig || {},
+        applicantProfile: res.applicantProfile || {},
+        resumeDepot: res.resumeDepot || null,
+        applyLog: res.applyLog || currentLogs || []
+      };
+      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `JobCruise_全量数据备份_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showCopyToast('全量数据备份已成功导出！换账户后一键导入即可无缝恢复。');
+    });
+  });
+
+  const btnTriggerImport = document.getElementById('btn-trigger-import-backup');
+  const inputImportFile = document.getElementById('input-import-backup-file');
+  if (btnTriggerImport && inputImportFile) {
+    btnTriggerImport.addEventListener('click', () => {
+      inputImportFile.click();
+    });
+
+    inputImportFile.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = JSON.parse(evt.target.result);
+          if (!data || typeof data !== 'object') {
+            throw new Error('无效的 JSON 配置文件');
+          }
+
+          const updates = {};
+          if (Array.isArray(data.jobTags)) updates.jobTags = data.jobTags;
+          if (data.config && typeof data.config === 'object') updates.config = data.config;
+          if (data.applicantProfile && typeof data.applicantProfile === 'object') updates.applicantProfile = data.applicantProfile;
+          if (data.resumeDepot) updates.resumeDepot = data.resumeDepot;
+          if (Array.isArray(data.applyLog)) updates.applyLog = data.applyLog;
+
+          chrome.storage.local.set(updates, () => {
+            showCopyToast('✅ 全量数据包已成功恢复！正在刷新界面...');
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          });
+        } catch (err) {
+          alert('导入失败：' + (err.message || '文件格式不正确，请选择导出的备份 JSON 文件'));
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    });
+  }
+
   // ================= 8. 全网流水线多平台协同控制 =================
   const dashPipeProgressBox = document.getElementById('dash-pipe-progress-box');
   const dashPipeLiveSite = document.getElementById('dash-pipe-live-site');
@@ -2033,6 +2097,39 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         URL.revokeObjectURL(url);
         showCopyToast('简历武器库 JSON 备份已导出！');
+      });
+    }
+
+    // 8.1 导入武器库 JSON
+    const btnTriggerImportDepot = document.getElementById('btn-trigger-import-depot');
+    const inputImportDepot = document.getElementById('input-import-depot-file');
+    if (btnTriggerImportDepot && inputImportDepot) {
+      btnTriggerImportDepot.addEventListener('click', () => {
+        inputImportDepot.click();
+      });
+
+      inputImportDepot.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const depotData = JSON.parse(evt.target.result);
+            if (!depotData || typeof depotData !== 'object') {
+              throw new Error('无效的简历 JSON 文件');
+            }
+            const targetDepot = depotData.resumeDepot || depotData;
+            currentResumeDepot = targetDepot;
+            renderResumeDepot(targetDepot);
+            chrome.storage.local.set({ resumeDepot: targetDepot }, () => {
+              showCopyToast('✅ 简历武器库已成功导入并保存至本地网申库！');
+            });
+          } catch (err) {
+            alert('简历库导入失败：' + (err.message || '文件格式不正确'));
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
       });
     }
 

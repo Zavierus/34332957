@@ -541,6 +541,33 @@
               <button type="submit" class="btn btn-primary" id="btn-save-all-settings" style="padding: 12px 28px; font-size: 14px;">💾 保存所有设置</button>
             </div>
           </form>
+
+          <!-- 跨账户 / 跨设备全量配置迁移与备份 -->
+          <div style="margin-top: 26px; padding: 20px 22px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(0, 242, 254, 0.3); border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <div>
+                <div style="font-size: 15px; font-weight: 700; color: #00f2fe; display: flex; align-items: center; gap: 8px;">
+                  <span>📦 跨账户 / 跨设备数据全量迁移与备份中心</span>
+                  <span style="font-size: 10px; background: rgba(0, 242, 254, 0.15); color: #00f2fe; padding: 1px 6px; border-radius: 4px; font-weight: 600;">多账户无缝继承</span>
+                </div>
+                <p style="font-size: 12px; color: #94a3b8; margin-top: 4px; line-height: 1.6;">
+                  当您在 Chrome 切换登录其他账户时，新账户的插件存储默认是独立空白的。您可在此<b>一键导出当前全量数据备份</b>，在新账户中<b>一键导入恢复</b>，即可瞬间继承全部高亮词条、投递上限、打招呼模板与简历武器库！
+                </p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px;">
+              <button type="button" class="btn btn-primary" id="btn-export-full-backup" style="display: flex; align-items: center; gap: 6px; padding: 9px 18px; font-size: 12px;">
+                <span>📤 一键导出当前全量数据备份 (JSON)</span>
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-trigger-import-backup" style="display: flex; align-items: center; gap: 6px; padding: 9px 18px; font-size: 12px; border-color: rgba(16, 185, 129, 0.45); color: #34d399; background: rgba(16, 185, 129, 0.1);">
+                <span>📥 一键导入恢复数据包</span>
+              </button>
+              <input type="file" id="input-import-backup-file" accept=".json" style="display: none;">
+            </div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 10px; line-height: 1.6;">
+              💡 备份数据包包含：生效高亮职业词条、每日安全上限与防风控参数、个性化打招呼话术、大厂网申档案、网申简历库（基本信息/优势/经历/项目）。
+            </div>
+          </div>
         </div>
       </section>
 
@@ -668,6 +695,8 @@
             <input type="file" id="resume-file-input" accept=".txt,.md,.json,.pdf,.docx,.doc" style="display:none;">
             <button class="btn btn-secondary" id="btn-trigger-upload-file">📁 上传简历文件</button>
             <button class="btn btn-secondary" id="btn-export-resume-depot">📥 导出武器库 JSON</button>
+            <button class="btn btn-secondary" id="btn-trigger-import-depot" style="border-color:rgba(16,185,129,0.45); color:#34d399;">📤 导入武器库 JSON</button>
+            <input type="file" id="input-import-depot-file" accept=".json" style="display:none;">
             <button class="btn btn-primary" id="btn-save-resume-depot">💾 保存到本地网申库</button>
             <button class="btn btn-secondary" id="btn-clear-resume-depot" style="border-color:rgba(239,68,68,0.4); color:#fca5a5;">🗑️ 清空重置</button>
           </div>
