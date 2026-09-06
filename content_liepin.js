@@ -19,11 +19,24 @@
   let currentTagIndex = 0;
   let pipelineStatusCache = null;
 
+  // 捕获并抑制聊一聊弹出的多余空白新标签页，防止多窗口泛滥
+  let lastLiepinChatOpenedTime = 0;
+  const rawWindowOpen = window.open;
+  window.open = function (url, target, features) {
+    if (isRunning && url && (String(url).includes('/im/') || String(url).includes('/chat/') || String(url).includes('liepin.com/a/'))) {
+      console.log('[ZIAVER 猎聘] 捕获并抑制聊一聊弹出的聊天新标签页:', url);
+      lastLiepinChatOpenedTime = Date.now();
+      return null;
+    }
+    return rawWindowOpen.apply(this, arguments);
+  };
+
   let config = {
     dailyLimit: 30,
     minSalaryK: 9,
     targetCity: '深圳',
-    blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,保险,推广兼职'
+    blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,保险,推广兼职',
+    acceptAllInPageFilter: true // 优先按页面筛选投递，避免微小词差导致岗位被跳过
   };
 
   function refreshConfig(callback) {
@@ -33,7 +46,7 @@
     }
     chrome.storage.local.get(['config', 'jobTags'], (res) => {
       if (res && res.config) {
-        config = { targetCity: '深圳', ...config, ...res.config };
+        config = { targetCity: '深圳', acceptAllInPageFilter: true, ...config, ...res.config };
         const today = new Date().toISOString().split('T')[0];
         if (config.lastActiveDate === today) {
           const counts = config.siteTodayCounts || {};
@@ -66,6 +79,190 @@
     }
 
     return `您好！看到咱们在招「${cleanTitle}」，感觉整体要求跟我还蛮匹配的。我有相关方向的实战经验，执行力强、比较看重数据和落地。简历在附件中，如果合适随时沟通交流，祝您工作顺利、天天开心～`;
+  }
+
+  // ================= 薪资解析器 (兼容猎聘 10-15万、10万以下、8-12K 等格式) =================
+  function parseSalaryMaxK(salaryStr) {
+    if (!salaryStr) return null;
+    const s = salaryStr.trim();
+    // 10-15万 或 10-15万·13薪 或 15万以上
+    const wanMatch = s.match(/(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?万/);
+    if (wanMatch) {
+      const maxWan = wanMatch[2] ? parseFloat(wanMatch[2]) : parseFloat(wanMatch[1]);
+      return Math.round((maxWan * 10000) / 12 / 1000); // 15万年薪折算月薪约 12.5K
+    }
+    if (s.includes('10万以下')) return 8;
+    const kMatch = s.match(/(\d+)(?:-(\d+))?[k千]/i);
+    if (kMatch) {
+      return kMatch[2] ? parseInt(kMatch[2], 10) : parseInt(kMatch[1], 10);
+    }
+    return null;
+  }
+
+  // ================= 猎聘顶部筛选自动化检测与应用引擎 =================
+  function getLiepinCurrentFilters() {
+    let city = '';
+    let salary = '';
+    let exp = '';
+    let active = '';
+
+    // 1. 从页面“已选条件”区域提取
+    const selectedContainers = document.querySelectorAll(
+      '.selected-box, .selected-condition, .selected-item-box, [class*="selected"], .search-condition'
+    );
+    for (const box of selectedContainers) {
+      const text = box.textContent || '';
+      if (text.includes('已选条件') || text.includes('深圳') || text.includes('10-15万') || text.includes('1年以内') || text.includes('10万以下')) {
+        const tags = Array.from(box.querySelectorAll('span, a, div, .ant-tag')).map(el => el.textContent.replace(/[x×]/g, '').trim()).filter(Boolean);
+        for (const t of tags) {
+          if (t.includes('深圳') || t.includes('北京') || t.includes('上海') || t.includes('广州')) city = t;
+          if (t.includes('万') || t.includes('千') || t.includes('薪')) salary = t;
+          if (t.includes('年') || t.includes('应届') || t.includes('实习')) exp = t;
+        }
+      }
+    }
+
+    // 2. 从 URL Query 参数提取补充
+    const params = new URLSearchParams(window.location.search);
+    if (!city && params.get('city') === '050090') city = '深圳';
+    if (!salary && params.get('salary')) {
+      const s = params.get('salary');
+      if (s === '10$15') salary = '10-15万';
+      else salary = s;
+    }
+    if (!exp && params.get('workYearCode')) {
+      const w = params.get('workYearCode');
+      if (w === '1') exp = '1年以内';
+      else if (w === '0') exp = '应届生';
+      else exp = `${w}年`;
+    }
+
+    const hasFilters = !!(city || salary || exp);
+    const summary = [city, salary, exp].filter(Boolean).join(' · ') || '未选(全量推荐)';
+
+    return { city, salary, exp, hasFilters, summary };
+  }
+
+  async function applyLiepinTopFilters(customOptions = {}) {
+    const targetCity = customOptions.city || '深圳';
+    const targetSalary = customOptions.salary || '10-15万';
+    const targetExp = customOptions.exp || '1年以内';
+    const targetActive = customOptions.recruiterActive || '不限';
+
+    logHUD(`<span class="highlight">[自动配置筛选]</span> 正在为您配置顶部精选筛选：【${targetCity} · ${targetSalary} · ${targetExp} · 活跃:${targetActive}】...`);
+
+    function tryClickOption(catHint, optName) {
+      const allElements = document.querySelectorAll('div, dl, tr, p, section, li');
+      for (const row of allElements) {
+        if (row.children.length >= 2 && row.children.length <= 40) {
+          const rowText = (row.textContent || '').slice(0, 120);
+          if (rowText.includes(catHint)) {
+            const items = row.querySelectorAll('a, span, button, li');
+            for (const item of items) {
+              const txt = item.textContent.trim();
+              if (txt === optName && item.children.length === 0) {
+                if (item.classList.contains('active') || item.classList.contains('selected') || item.classList.contains('ant-tag')) {
+                  return true;
+                }
+                try {
+                  item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  ['mouseenter', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                    item.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                  });
+                  if (typeof item.click === 'function') item.click();
+                  return true;
+                } catch (e) {}
+              }
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    tryClickOption('城市', targetCity);
+    await sleep(400);
+    tryClickOption('薪资', targetSalary);
+    await sleep(400);
+    tryClickOption('经验', targetExp);
+    await sleep(400);
+    tryClickOption('招聘者活跃', targetActive);
+    await sleep(800);
+
+    const curFilters = getLiepinCurrentFilters();
+    if (!curFilters.hasFilters || !curFilters.city.includes('深圳')) {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.pathname = '/zhaopin/';
+      currentUrl.searchParams.set('city', '050090');
+      currentUrl.searchParams.set('salary', '10$15');
+      currentUrl.searchParams.set('workYearCode', '1');
+      if (!currentUrl.searchParams.get('key')) {
+        const firstTag = activeTags[0] || '运营';
+        currentUrl.searchParams.set('key', firstTag);
+      }
+      logHUD(`<span class="success">[精准URL载入]</span> 正在跳转至包含精选条件的搜索页: ${targetCity} · ${targetSalary} · ${targetExp}...`);
+      await sleep(600);
+      window.location.href = currentUrl.toString();
+      return;
+    }
+
+    logHUD(`<span class="success">[筛选已就绪]</span> 顶部筛选已成功配置：<b>${curFilters.summary}</b>！`);
+    updateHUD();
+  }
+
+  // ================= 智能卡片聊一聊按钮与状态识别引擎 =================
+  function findLiepinChatButton(card) {
+    if (!card) return { button: null, isHandled: false, reason: '未获取到卡片DOM' };
+
+    // 1. 模拟鼠标移入卡片，激活悬浮出现的“聊一聊”按钮
+    try {
+      card.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+      card.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    } catch (e) {}
+
+    // 2. 预先检查卡片中是否已明确显示为已沟通/已应聘
+    const cardFullText = (card.textContent || '').trim();
+    const alreadyDoneTokens = ['已沟通', '继续沟通', '已应聘', '已投递', '已打招呼', '已聊', '聊过', '已联系', '再次沟通'];
+
+    // 3. 猎聘目标可点击的沟通/应聘按钮文字（涵盖“聊一聊”）
+    const targetTokens = ['聊一聊', '去聊聊', '立即沟通', '在线沟通', '打招呼', '立即应聘', '极速应聘', '应聘', '投递简历', '沟通'];
+
+    // 4. 优先检查具备按钮属性或类名的交互元素
+    const candidateNodes = card.querySelectorAll(
+      'button, a, div[role="button"], span.btn, .btn-chat, .chat-btn, .btn-apply, .apply-btn, [class*="chat"], [class*="apply"], [class*="btn"], .job-card-pc-container button, [data-nick="job-card"] button, .job-card-right button, .job-card-right a'
+    );
+
+    for (const el of candidateNodes) {
+      const txt = el.textContent.trim();
+      // 判断是否已沟通
+      if (alreadyDoneTokens.some(tok => txt === tok || (txt.includes(tok) && !targetTokens.some(tt => txt.includes(tt))))) {
+        return { button: null, isHandled: true, reason: `此前已沟通/已应聘 (${txt})` };
+      }
+      // 判断是否可发起沟通
+      if (targetTokens.some(tok => txt === tok || txt.includes(tok))) {
+        if (el.disabled || el.getAttribute('disabled') !== null || el.classList.contains('disabled') || el.classList.contains('ant-btn-disabled')) {
+          return { button: null, isHandled: true, reason: '按钮处于禁用状态' };
+        }
+        return { button: el, isHandled: false, text: txt };
+      }
+    }
+
+    // 5. 若常规按钮未查到，遍历所有叶子文本节点进行二次深度查找
+    const allLeafNodes = card.querySelectorAll('*');
+    for (const leaf of allLeafNodes) {
+      if (leaf.children.length === 0) {
+        const txt = leaf.textContent.trim();
+        if (targetTokens.includes(txt)) {
+          const clickable = leaf.closest('button, a, div[role="button"], [class*="btn"]') || leaf;
+          return { button: clickable, isHandled: false, text: txt };
+        }
+        if (alreadyDoneTokens.includes(txt)) {
+          return { button: null, isHandled: true, reason: `此前已沟通 (${txt})` };
+        }
+      }
+    }
+
+    return { button: null, isHandled: false, reason: '未找到可用的聊一聊/应聘按钮' };
   }
 
   function screenJob(title, salary, company, card) {
@@ -120,41 +317,65 @@
         break;
       }
       // C. 柔性赛道意图匹配 (大幅提高猎聘卡片命中率)
-      if (lowerTag === '达人运营' || lowerTag === '达播bd' || lowerTag === '达人拓展') {
-        if (fullCardText.includes('达人') && (fullCardText.includes('运营') || fullCardText.includes('bd') || fullCardText.includes('商务') || fullCardText.includes('合作') || fullCardText.includes('媒介'))) {
+      if (lowerTag === '达人运营' || lowerTag === '达播bd' || lowerTag === '达人拓展' || lowerTag === '媒介') {
+        if (fullCardText.includes('达人') && (fullCardText.includes('运营') || fullCardText.includes('bd') || fullCardText.includes('商务') || fullCardText.includes('合作') || fullCardText.includes('媒介') || fullCardText.includes('渠道'))) {
           matchedTag = tag;
-          matchType = '达人赛道柔性命中';
+          matchType = '达人/商务柔性命中';
           break;
         }
       } else if (lowerTag === '千川投放' || lowerTag === '巨量千川') {
-        if (fullCardText.includes('千川') || (fullCardText.includes('信息流') && fullCardText.includes('投放'))) {
+        if (fullCardText.includes('千川') || (fullCardText.includes('信息流') && fullCardText.includes('投放')) || fullCardText.includes('广告投放')) {
           matchedTag = tag;
           matchType = '千川投放柔性命中';
           break;
         }
       } else if (lowerTag === '电商运营' || lowerTag === '店铺运营') {
-        if ((fullCardText.includes('电商') || fullCardText.includes('店铺') || fullCardText.includes('天猫') || fullCardText.includes('抖音') || fullCardText.includes('淘系')) && (fullCardText.includes('运营') || fullCardText.includes('店长') || fullCardText.includes('操盘') || fullCardText.includes('专员'))) {
+        if ((fullCardText.includes('电商') || fullCardText.includes('店铺') || fullCardText.includes('天猫') || fullCardText.includes('抖音') || fullCardText.includes('淘系') || fullCardText.includes('京东') || fullCardText.includes('跨境')) && (fullCardText.includes('运营') || fullCardText.includes('店长') || fullCardText.includes('操盘') || fullCardText.includes('专员') || fullCardText.includes('助理'))) {
           matchedTag = tag;
           matchType = '电商赛道柔性命中';
           break;
         }
       } else if (lowerTag === '直播运营' || lowerTag === '直播间运营') {
-        if (fullCardText.includes('直播') && (fullCardText.includes('运营') || fullCardText.includes('场控') || fullCardText.includes('中控') || fullCardText.includes('排品'))) {
+        if (fullCardText.includes('直播') && (fullCardText.includes('运营') || fullCardText.includes('场控') || fullCardText.includes('中控') || fullCardText.includes('排品') || fullCardText.includes('主播'))) {
           matchedTag = tag;
           matchType = '直播赛道柔性命中';
           break;
         }
       } else if (lowerTag === '短视频运营' || lowerTag === '短视频编导') {
-        if (fullCardText.includes('短视频') && (fullCardText.includes('运营') || fullCardText.includes('编导') || fullCardText.includes('剪辑'))) {
+        if ((fullCardText.includes('短视频') || fullCardText.includes('新媒体') || fullCardText.includes('视频')) && (fullCardText.includes('运营') || fullCardText.includes('编导') || fullCardText.includes('剪辑') || fullCardText.includes('策划'))) {
           matchedTag = tag;
           matchType = '短视频赛道柔性命中';
           break;
         }
       } else if (lowerTag === '游戏运营' || lowerTag === '游戏社区' || lowerTag === '玩家运营') {
-        if (fullCardText.includes('游戏') && (fullCardText.includes('运营') || fullCardText.includes('社区') || fullCardText.includes('发行') || fullCardText.includes('生态'))) {
+        if (fullCardText.includes('游戏') && (fullCardText.includes('运营') || fullCardText.includes('社区') || fullCardText.includes('发行') || fullCardText.includes('生态') || fullCardText.includes('策划'))) {
           matchedTag = tag;
           matchType = '游戏赛道柔性命中';
           break;
+        }
+      } else if (lowerTag === '商业摄影' || lowerTag === '摄影' || lowerTag === '视觉策划') {
+        if (fullCardText.includes('摄影') || fullCardText.includes('摄像') || fullCardText.includes('视觉') || fullCardText.includes('美工') || fullCardText.includes('修图') || fullCardText.includes('设计') || fullCardText.includes('策划')) {
+          matchedTag = tag;
+          matchType = '摄影/视觉赛道柔性命中';
+          break;
+        }
+      } else if (lowerTag === '综合运营' || lowerTag === '运营专员' || lowerTag === '用户运营') {
+        if (fullCardText.includes('运营') || fullCardText.includes('专员') || fullCardText.includes('助理') || fullCardText.includes('执行')) {
+          matchedTag = tag;
+          matchType = '综合运营柔性命中';
+          break;
+        }
+      }
+    }
+
+    // D. 页面筛选宽容模式：若当前页面已是用户按筛选（深圳·10-15万·1年）过滤出的列表，且包含运营/电商/新媒体/视觉/商务相关词汇，自动予以匹配
+    if (!matchedTag && config.acceptAllInPageFilter !== false) {
+      const curFilters = getLiepinCurrentFilters();
+      if (curFilters.hasFilters) {
+        const broadKeywords = ['运营', '专员', '助理', '电商', '视觉', '设计', '摄影', '策划', '新媒体', '短视频', '商务', '媒介', '渠道', '投放', '店长', '执行'];
+        if (broadKeywords.some(k => fullCardText.includes(k))) {
+          matchedTag = activeTags[0] || '综合运营';
+          matchType = '页面精选筛选自适应命中';
         }
       }
     }
@@ -172,11 +393,11 @@
       }
     }
 
-    // 3. 薪资门槛
-    const match = salary.match(/(\d+)(?:-(\d+))?K/i);
-    if (match) {
-      const maxK = match[2] ? parseInt(match[2], 10) : parseInt(match[1], 10);
-      if (maxK < config.minSalaryK) {
+    // 3. 薪资门槛 (智能兼容万/千/K)
+    const maxK = parseSalaryMaxK(salary);
+    if (maxK !== null && maxK < config.minSalaryK) {
+      const curFilters = getLiepinCurrentFilters();
+      if (!curFilters.salary || (!curFilters.salary.includes('10万以下') && !curFilters.salary.includes('10-15万'))) {
         return { pass: false, reason: `[低薪跳过] ${salary} 未达 ${config.minSalaryK}K` };
       }
     }
@@ -573,6 +794,23 @@
             <span class="tag-link" id="btn-open-dashboard">打开完整后台管理 ↗</span>
           </div>
 
+          <!-- 猎聘顶部筛选自适应面板 -->
+          <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+              <span>📌 页面筛选: <b id="val-lp-filter-status" style="color: #34d399;">检测中...</b></span>
+              <span id="btn-lp-recheck-filter" style="color: #c084fc; text-decoration: underline; cursor: pointer; font-size: 10px;">刷新检测</span>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn btn-secondary" id="btn-lp-apply-preset-filter" style="flex: 1; font-size: 11px; padding: 6px 8px; background: rgba(236, 72, 153, 0.18); border: 1px solid rgba(236, 72, 153, 0.45); color: #f472b6; border-radius: 6px; cursor: pointer; font-weight: 700;" title="点击自动在猎聘顶部勾选：深圳 · 10-15万 · 1年以内 · 不限活跃">
+                <span>🎯 一键帮我选 (深圳·10-15万·1年)</span>
+              </button>
+            </div>
+            <label style="font-size: 10px; color: #cbd5e1; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+              <input type="checkbox" id="chk-lp-filter-match-mode" checked style="accent-color: #a855f7;">
+              <span>优先按页面筛选投递 (页面选好时不因词条微差跳过)</span>
+            </label>
+          </div>
+
           <div class="action-btns">
             <button class="btn btn-primary" id="btn-toggle-run">
               <span>🚀 开启猎聘定向应聘</span>
@@ -767,6 +1005,24 @@
       });
     });
 
+    // 猎聘顶部筛选一键自动配置与刷新检测
+    shadowRoot.getElementById('btn-lp-apply-preset-filter')?.addEventListener('click', () => {
+      applyLiepinTopFilters();
+    });
+    shadowRoot.getElementById('btn-lp-recheck-filter')?.addEventListener('click', () => {
+      updateHUD();
+      const curFilters = getLiepinCurrentFilters();
+      logHUD(`<span class="highlight">[筛选状态]</span> 猎聘当前已生效条件：<b>${curFilters.summary}</b>`);
+    });
+    const chkFilterMatch = shadowRoot.getElementById('chk-lp-filter-match-mode');
+    if (chkFilterMatch) {
+      chkFilterMatch.checked = config.acceptAllInPageFilter !== false;
+      chkFilterMatch.addEventListener('change', () => {
+        config.acceptAllInPageFilter = chkFilterMatch.checked;
+        logHUD(`<span class="highlight">[匹配策略]</span> 已${config.acceptAllInPageFilter ? '开启' : '关闭'}【优先按页面筛选投递】`);
+      });
+    }
+
     btnToggle.addEventListener('click', () => {
       if (!isRunning) {
         startLiepinCruise();
@@ -939,6 +1195,13 @@
 
     const cityEl = shadowRoot.getElementById('val-target-city');
     if (cityEl) cityEl.textContent = config.targetCity || '深圳';
+
+    const curFilters = getLiepinCurrentFilters();
+    const filterEl = shadowRoot.getElementById('val-lp-filter-status');
+    if (filterEl) {
+      filterEl.textContent = curFilters.summary;
+      filterEl.style.color = curFilters.hasFilters ? '#34d399' : '#f59e0b';
+    }
   }
 
   // ================= 猎聘登录态智能识别 =================
@@ -1041,11 +1304,17 @@
     pipelineTarget = target || (config.dailyLimit || 30);
     sessionCount = initialSessionCount || 0;
 
-    // 智能定向检索关键词校验：如果猎聘当前为广谱推荐流且未带 key= 参数，自动导航至精准搜索
+    // 智能定向检索与页面筛选保护：
+    // 若用户在页面已选好条件（如深圳、10-15万、1年以内等）或 URL 已经带有筛选参数，绝对不强制重定向刷新覆盖用户的筛选！
     const currentUrl = window.location.href;
     const targetTag = activeTags[currentTagIndex] || activeTags[0] || '';
-    if (targetTag && !currentUrl.includes('key=')) {
-      logHUD(`<span class="highlight">[定向检索重定向]</span> 猎聘当前为广谱推荐流，正在自动进入【${targetTag}】精准定向搜索...`);
+    const curFilters = getLiepinCurrentFilters();
+    const hasUserFilters = curFilters.hasFilters || currentUrl.includes('salary=') || currentUrl.includes('workYearCode=');
+
+    if (hasUserFilters) {
+      logHUD(`<span class="success">[保留页面筛选]</span> 检测到页面已包含筛选条件（<b>${curFilters.summary}</b>），直接在当前筛选列表进行定向投递！`);
+    } else if (targetTag && !currentUrl.includes('key=')) {
+      logHUD(`<span class="highlight">[自动配置筛选]</span> 正在为您载入【${targetTag}】并自动配置（深圳 · 10-15万 · 1年以内）精准条件...`);
       if (pipelineMode) {
         try {
           sessionStorage.setItem('ziaver_pipeline_liepin_state', JSON.stringify({
@@ -1058,8 +1327,8 @@
         } catch (e) {}
       }
       setTimeout(() => {
-        window.location.href = `https://www.liepin.com/zhaopin/?city=050090&key=${encodeURIComponent(targetTag)}`;
-      }, 1200);
+        window.location.href = `https://www.liepin.com/zhaopin/?city=050090&salary=10$15&workYearCode=1&key=${encodeURIComponent(targetTag)}`;
+      }, 1000);
       return;
     }
 
@@ -1210,29 +1479,33 @@
         pageMatchedCount++;
         const matchedTag = screenResult.matchedTag;
 
-        // 寻找“应聘”或“立即沟通”
-        let applyBtn = null;
-        const buttons = card.querySelectorAll('button, a, span');
-        for (const b of buttons) {
-          const txt = b.textContent.trim();
-          if (txt === '应聘' || txt === '立即应聘' || txt === '极速应聘' || txt === '打招呼') {
-            applyBtn = b;
-            break;
-          }
-          if (txt === '已应聘' || txt === '已沟通') {
-            applyBtn = null;
-            break;
-          }
+        // 寻找猎聘“聊一聊”或“立即沟通”或“应聘”按钮
+        const btnInfo = findLiepinChatButton(card);
+        if (btnInfo.isHandled) {
+          logHUD(`<span class="skip">[已沟通跳过] ${company} · ${title} (${btnInfo.reason})</span>`);
+          continue;
         }
 
-        if (applyBtn) {
-          const noteText = generateDynamicNote(title, matchedTag, company);
-          logHUD(`<span class="highlight">[命中高亮词条: ${matchedTag}${screenResult.matchType ? ` · ${screenResult.matchType}` : ''}]</span> ${company} · ${title} (${salary})`);
-          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(Math.floor(Math.random() * 500) + 600);
+        const applyBtn = btnInfo.button;
+        if (!applyBtn) {
+          logHUD(`<span class="skip">[未找到按钮] ${company} · ${title} (未找到可用的聊一聊/应聘按钮)</span>`);
+          continue;
+        }
 
-          // 严格校验猎聘应聘与真实送达回执
-          const applyResult = await executeAndVerifyLiepinApply(card, applyBtn, noteText);
+        const noteText = generateDynamicNote(title, matchedTag, company);
+        logHUD(`<span class="highlight">[命中岗位: ${matchedTag}${screenResult.matchType ? ` · ${screenResult.matchType}` : ''}]</span> ${company} · ${title} (${salary})`);
+        
+        try {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.style.outline = '2px solid #c084fc';
+        } catch (e) {}
+        await sleep(Math.floor(Math.random() * 500) + 600);
+
+        // 严格校验猎聘应聘与真实送达回执
+        const applyResult = await executeAndVerifyLiepinApply(card, applyBtn, noteText);
+        try {
+          card.style.outline = applyResult.success ? '2px solid #34d399' : 'none';
+        } catch (e) {}
 
           if (applyResult.success) {
             sessionCount++;
@@ -1298,7 +1571,6 @@
             await sleep(600);
           }
         }
-      }
 
       // 强拦截：卡片遍历结束后，若今日上限已达或流水线本站目标已达成，立刻终止循环，坚决禁止执行翻页！
       if (!isRunning) break;
@@ -1330,7 +1602,12 @@
             } catch (e) {}
           }
           await sleep(2000);
-          window.location.href = `https://www.liepin.com/zhaopin/?city=050090&key=${encodeURIComponent(nextTag)}`;
+          const nextUrlObj = new URL(window.location.href);
+          nextUrlObj.searchParams.set('key', nextTag);
+          if (!nextUrlObj.searchParams.get('city')) nextUrlObj.searchParams.set('city', '050090');
+          if (!nextUrlObj.searchParams.get('salary')) nextUrlObj.searchParams.set('salary', '10$15');
+          if (!nextUrlObj.searchParams.get('workYearCode')) nextUrlObj.searchParams.set('workYearCode', '1');
+          window.location.href = nextUrlObj.toString();
           return;
         }
       }
@@ -1355,6 +1632,21 @@
 
   // ================= 严格送达校验与风控熔断引擎 (猎聘) =================
   async function executeAndVerifyLiepinApply(card, applyBtn, noteText) {
+    function triggerSafeClick(el) {
+      if (!el) return;
+      try {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (e) {}
+      ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(evtName => {
+        try {
+          el.dispatchEvent(new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window }));
+        } catch (e) {}
+      });
+      if (typeof el.click === 'function') {
+        try { el.click(); } catch (e) {}
+      }
+    }
+
     function checkLiepinCaptcha() {
       const captcha = document.querySelector('.nc_wrapper, .geetest_holder, [class*="captcha"], [class*="verify-box"]');
       if (captcha && (captcha.offsetWidth > 0 || captcha.offsetHeight > 0)) return true;
@@ -1413,15 +1705,15 @@
     async function handleLiepinModal() {
       // 1. 自动选中默认简历单选框 (若未选中)
       const uncheckedRadio = document.querySelector('.ant-modal-content input[type="radio"]:not(:checked), .react-modal input[type="radio"]:not(:checked)');
-      if (uncheckedRadio) uncheckedRadio.click();
+      if (uncheckedRadio) triggerSafeClick(uncheckedRadio);
       const uncheckedRadioLabel = document.querySelector('.ant-modal-content .ant-radio-wrapper:not(.ant-radio-wrapper-checked), .react-modal .radio-item:not(.active)');
-      if (uncheckedRadioLabel) uncheckedRadioLabel.click();
+      if (uncheckedRadioLabel) triggerSafeClick(uncheckedRadioLabel);
 
       // 2. 自动勾选协议复选框 (若存在)
       const agreeCheckbox = document.querySelector('.ant-modal-content input[type="checkbox"]:not(:checked), .react-modal input[type="checkbox"]:not(:checked)');
-      if (agreeCheckbox) agreeCheckbox.click();
+      if (agreeCheckbox) triggerSafeClick(agreeCheckbox);
       const agreeCheckboxLabel = document.querySelector('.ant-modal-content .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-checked)');
-      if (agreeCheckboxLabel) agreeCheckboxLabel.click();
+      if (agreeCheckboxLabel) triggerSafeClick(agreeCheckboxLabel);
 
       // 3. 填写自荐信/打招呼附言
       const textarea = document.querySelector('.ant-modal-content textarea, .react-modal textarea, [class*="modal"] textarea');
@@ -1431,32 +1723,61 @@
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.dispatchEvent(new Event('change', { bubbles: true }));
         textarea.dispatchEvent(new Event('blur', { bubbles: true }));
-        await sleep(400);
+        await sleep(350);
       }
 
       // 4. 点击确认提交按钮
-      const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, .react-modal button.btn-primary, .ant-modal-confirm-btns button.ant-btn-primary, [class*="modal"] button[type="submit"]');
-      if (confirmBtn) {
-        confirmBtn.click();
-        await sleep(800);
+      const confirmBtns = document.querySelectorAll(
+        '.ant-modal-content button, .react-modal button, [class*="modal"] button, .dialog-box button'
+      );
+      for (const btn of confirmBtns) {
+        const txt = btn.textContent.trim();
+        if (
+          txt === '确定' || txt === '确认' || txt === '发送' || txt === '提交' ||
+          txt === '聊一聊' || txt === '立即沟通' || txt === '确认应聘' || txt === '立即投递' ||
+          btn.classList.contains('ant-btn-primary')
+        ) {
+          triggerSafeClick(btn);
+          await sleep(600);
+          break;
+        }
       }
     }
 
     function checkIsLiepinSuccess() {
       const curTxt = applyBtn ? applyBtn.textContent.trim() : '';
-      if (curTxt === '已应聘' || curTxt === '已沟通' || curTxt === '应聘成功') return true;
+      const successWords = ['已应聘', '已沟通', '应聘成功', '继续沟通', '已投递', '已打招呼', '聊过'];
+      if (successWords.some(w => curTxt.includes(w))) return true;
+
       const cardBtns = card.querySelectorAll('button, a, span');
       for (const b of cardBtns) {
         const t = b.textContent.trim();
-        if (t === '已应聘' || t === '已沟通' || t === '应聘成功') return true;
+        if (successWords.some(w => t.includes(w))) return true;
       }
-      const toasts = document.querySelectorAll('.ant-message-success, .ant-message-notice-success, .toast-success');
+
+      const toasts = document.querySelectorAll('.ant-message-success, .ant-message-notice-success, .toast-success, .ant-message-notice, .toast');
       for (const t of toasts) {
         const txt = t.textContent.trim();
-        if (txt.includes('应聘成功') || txt.includes('投递成功') || txt.includes('打招呼成功') || txt.includes('成功')) {
+        if (
+          txt.includes('应聘成功') || txt.includes('投递成功') || txt.includes('打招呼成功') ||
+          txt.includes('沟通成功') || txt.includes('发起成功') || txt.includes('成功') ||
+          txt.includes('已发起') || txt.includes('已发送')
+        ) {
           return true;
         }
       }
+
+      // 检查是否调用了 window.open 打开聊天窗
+      if (lastLiepinChatOpenedTime && Date.now() - lastLiepinChatOpenedTime < 5000) {
+        return true;
+      }
+
+      // 检查是否打开了 IM 侧边栏/聊天面板
+      const imContainer = document.querySelector('.im-chat, .chat-conversation, .chat-box, .chat-editor, .im-editor');
+      if (imContainer && (imContainer.offsetWidth > 0 || imContainer.offsetHeight > 0)) {
+        return true;
+      }
+
       return false;
     }
 
@@ -1475,7 +1796,8 @@
       return { success: false, reason: 'audit_issue', message: preAudit.reason };
     }
 
-    applyBtn.click();
+    // 执行真实点击序列
+    triggerSafeClick(applyBtn);
     await sleep(800);
 
     if (checkLiepinLimitDialog()) {
@@ -1492,7 +1814,7 @@
 
     const start = Date.now();
     let isSuccess = false;
-    while (Date.now() - start < 2800) {
+    while (Date.now() - start < 3000) {
       if (checkLiepinLimitDialog()) {
         return { success: false, reason: 'limit_reached', message: '猎聘今日投递次数已达上限' };
       }

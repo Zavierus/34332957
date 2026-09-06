@@ -200,7 +200,7 @@ const PIPELINE_SITES = [
   {
     id: 'liepin',
     name: '猎聘网',
-    url: 'https://www.liepin.com/zhaopin/?city=050090',
+    url: 'https://www.liepin.com/zhaopin/?city=050090&salary=10$15&workYearCode=1',
     matchUrl: '*://*.liepin.com/*'
   },
   {
@@ -365,9 +365,12 @@ function launchCurrentPipelineSite() {
 
     let siteUrl = currentSite.url;
     if (currentSite.id === 'liepin') {
-      // 猎聘必须使用定向高亮词条检索，杜绝无关键词的泛滥流
+      // 猎聘优先附带深圳、10-15万、1年以内精准筛选参数
+      const lpParams = 'city=050090&salary=10$15&workYearCode=1';
       if (firstTag) {
-        siteUrl = `https://www.liepin.com/zhaopin/?city=050090&key=${encodeURIComponent(firstTag)}`;
+        siteUrl = `https://www.liepin.com/zhaopin/?${lpParams}&key=${encodeURIComponent(firstTag)}`;
+      } else {
+        siteUrl = `https://www.liepin.com/zhaopin/?${lpParams}`;
       }
     } else if (currentSite.id === 'lagou') {
       if (firstTag) {
