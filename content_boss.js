@@ -524,7 +524,7 @@
             </div>
             <div class="pipeline-info-row">
               <span id="hud-pipe-site-text" style="color:#e2e8f0; font-weight:700;">【BOSS直聘】</span>
-              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">本站: <b id="hud-pipe-site-count" style="color:#00f2fe;">0</b>/<span id="hud-pipe-site-target">30</span></span>
+              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">今日: <b id="hud-pipe-site-today" style="color:#00f2fe;">0</b>/<span id="hud-pipe-site-limit">30</span> <span style="color:#94a3b8; font-size:10px;">(本次 <b id="hud-pipe-site-count" style="color:#38bdf8;">+0</b>/<span id="hud-pipe-site-target">30</span>)</span></span>
             </div>
             <div class="pipeline-bar-wrap">
               <div class="pipeline-bar-fill" id="hud-pipe-bar-fill" style="width: 0%;"></div>
@@ -541,8 +541,11 @@
           </div>
 
           <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">今日已投 / 上限</div>
+            <div class="stat-card" id="btn-quick-adjust-limit" style="cursor: pointer; transition: border-color 0.2s;" title="点击可直接修改今日上限 (5~999)">
+              <div class="stat-label" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>今日已投 / 上限</span>
+                <span style="font-size:10px; color:#00f2fe; text-decoration:underline;">✏️改上限</span>
+              </div>
               <div class="stat-val" id="val-today-count">0 <span class="stat-sub">/ 30</span></div>
             </div>
             <div class="stat-card">
@@ -692,6 +695,31 @@
       });
     });
 
+    // 原地快捷调节今日投递上限
+    shadowRoot.getElementById('btn-quick-adjust-limit')?.addEventListener('click', () => {
+      const currentLimit = config.dailyLimit || 30;
+      const input = prompt(`⚡【快速调节每日投递上限】\n当前每日安全投递上限为：${currentLimit} 次\n\n请输入新的每日投递上限 (支持 5 ~ 999 次)：`, currentLimit);
+      if (input !== null) {
+        const newLimit = parseInt(input.trim(), 10);
+        if (!isNaN(newLimit) && newLimit >= 5 && newLimit <= 999) {
+          config.dailyLimit = newLimit;
+          if (pipelineMode && (!pipelineTarget || pipelineTarget === currentLimit)) {
+            pipelineTarget = newLimit;
+          }
+          chrome.storage.local.get(['config'], (res) => {
+            const cfg = res.config || {};
+            cfg.dailyLimit = newLimit;
+            chrome.storage.local.set({ config: cfg }, () => {
+              updateHUD();
+              logHUD(`<span class="success">[上限已更新]</span> 今日安全投递上限已快速调整为 <b>${newLimit}</b> 次！`);
+            });
+          });
+        } else {
+          alert('请输入 5 到 999 之间的有效整数！');
+        }
+      }
+    });
+
     btnToggle.addEventListener('click', () => {
       if (!isRunning) {
         startAutopilot();
@@ -778,7 +806,12 @@
 
       if (siteTag) siteTag.textContent = `第 ${curIdx + 1}/${totalSites} 站`;
       if (siteText) siteText.textContent = `【${siteName}】`;
-      if (siteCountEl) siteCountEl.textContent = status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount;
+      const limit = config.dailyLimit || 30;
+      const pipeTodayEl = shadowRoot.getElementById('hud-pipe-site-today');
+      const pipeLimitEl = shadowRoot.getElementById('hud-pipe-site-limit');
+      if (pipeTodayEl) pipeTodayEl.textContent = todayCount;
+      if (pipeLimitEl) pipeLimitEl.textContent = limit;
+      if (siteCountEl) siteCountEl.textContent = `+${status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount}`;
       if (siteTargetEl) siteTargetEl.textContent = status.perSiteTarget || 30;
 
       const pct = status.overallPercent !== undefined ? status.overallPercent : 0;
@@ -830,9 +863,15 @@
     if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
     if (compactSess) compactSess.textContent = sessionCount;
 
-    // 同步更新流水线卡片当前站计数
+    // 同步更新流水线卡片今日与本次投递计数
+    const pipeTodayEl = shadowRoot.getElementById('hud-pipe-site-today');
+    const pipeLimitEl = shadowRoot.getElementById('hud-pipe-site-limit');
     const pipeCountEl = shadowRoot.getElementById('hud-pipe-site-count');
-    if (pipeCountEl) pipeCountEl.textContent = sessionCount;
+    const pipeTargetEl = shadowRoot.getElementById('hud-pipe-site-target');
+    if (pipeTodayEl) pipeTodayEl.textContent = todayCount;
+    if (pipeLimitEl) pipeLimitEl.textContent = limit;
+    if (pipeCountEl) pipeCountEl.textContent = `+${sessionCount}`;
+    if (pipeTargetEl) pipeTargetEl.textContent = pipelineTarget || limit;
   }
 
   // ================= HR 回复未读监听 =================
@@ -1139,54 +1178,72 @@
           logHUD(`<span class="skip" style="color:#a5f3fc;">动态话术已合成: "${greetingText.slice(0, 32)}..."</span>`);
 
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(Math.floor(Math.random() * 800) + 600);
+          await sleep(Math.floor(Math.random() * 600) + 500);
 
-          btnChat.click();
+          // 严格校验投递过程与真实送达回执 (彻底解决虚假计数与弹窗阻挡)
+          const chatResult = await executeAndVerifyBossChat(card, btnChat, greetingText);
 
-          await handleGreetingDialog(greetingText);
+          if (chatResult.success) {
+            todayCount++;
+            sessionCount++;
+            updateHUD();
 
-          todayCount++;
-          sessionCount++;
-          updateHUD();
-
-          // 独立持久化 BOSS 今日投递数据
-          if (chrome.storage && chrome.storage.local) {
-            const today = new Date().toISOString().split('T')[0];
-            const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
-            siteCounts.boss = todayCount;
-            const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
-            chrome.storage.local.set({
-              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
-            });
-          }
-
-          // 发送详尽记录至后台表格
-          chrome.runtime.sendMessage({
-            type: 'APPLY_LOG',
-            data: {
-              platform: 'BOSS直聘',
-              company,
-              title,
-              salary,
-              matchedTag,
-              greeting: greetingText,
-              status: '已沟通'
+            // 独立持久化 BOSS 今日投递数据
+            if (chrome.storage && chrome.storage.local) {
+              const today = new Date().toISOString().split('T')[0];
+              const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+              siteCounts.boss = todayCount;
+              const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+              chrome.storage.local.set({
+                config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
+              });
             }
-          });
 
-          if (pipelineMode) {
+            // 发送详尽记录至后台表格
             chrome.runtime.sendMessage({
-              type: 'PIPELINE_SITE_PROGRESS',
-              site: 'boss',
-              count: sessionCount
+              type: 'APPLY_LOG',
+              data: {
+                platform: 'BOSS直聘',
+                company,
+                title,
+                salary,
+                matchedTag,
+                greeting: greetingText,
+                status: '已沟通'
+              }
             });
+
+            if (pipelineMode) {
+              chrome.runtime.sendMessage({
+                type: 'PIPELINE_SITE_PROGRESS',
+                site: 'boss',
+                count: sessionCount,
+                todayCount: todayCount
+              });
+            }
+
+            logHUD(`<span class="success">[真实送达确认]</span> 消息已真实发送并入库报表！`);
+
+            const delayMs = getRandomDelayMs();
+            logHUD(`<span class="skip">安全冷却中... 随机等待 ${(delayMs / 1000).toFixed(1)} 秒</span>`);
+            await sleep(delayMs);
+          } else if (chatResult.reason === 'limit_reached') {
+            logHUD(`<span class="highlight" style="color:#ef4444; font-weight:bold; font-size:12px;">🛑【平台上限熔断】BOSS直聘已达到今日沟通上限！为防止风控封号，已立即自动停止巡航。</span>`);
+            if (pipelineMode) {
+              logHUD('<span class="highlight" style="color:#f59e0b;">[流水线转场] BOSS本站已满额，自动向全网巡航下一站交接...</span>');
+              chrome.runtime.sendMessage({
+                type: 'PIPELINE_SITE_FINISHED',
+                site: 'boss',
+                count: sessionCount
+              });
+            }
+            break;
+          } else if (chatResult.reason === 'captcha_triggered') {
+            logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【滑块验证拦截】已自动暂停巡航，请手动完成页面人机验证后点击【继续】！</span>`);
+          } else {
+            logHUD(`<span class="skip" style="color:#94a3b8;">[送达未确认] ${company} · ${title} (${chatResult.message || '未响应'})，安全跳过 (不虚增计数)</span>`);
+            await sleep(600);
           }
-
-          logHUD(`<span class="success">[投递成功]</span> 已记录到投递表格！`);
-
-          const delayMs = getRandomDelayMs();
-          logHUD(`<span class="skip">安全冷却中... 随机等待 ${(delayMs / 1000).toFixed(1)} 秒</span>`);
-          await sleep(delayMs);
         }
       }
 
@@ -1225,21 +1282,218 @@
     }
   }
 
-  async function handleGreetingDialog(customGreeting) {
-    await sleep(1000);
-    const modalTextarea = document.querySelector('.dialog-container textarea, .dialog-wrap textarea, .boss-popup textarea');
-    if (modalTextarea && modalTextarea.offsetParent !== null) {
-      modalTextarea.focus();
-      modalTextarea.value = customGreeting;
-      modalTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-      modalTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-      await sleep(600);
-
-      const sendBtn = document.querySelector('.dialog-container button.btn-sure, .dialog-wrap button.btn-primary, .boss-popup .btn-sure');
-      if (sendBtn) {
-        sendBtn.click();
-        await sleep(800);
+  // ================= 严格送达校验与风控熔断引擎 =================
+  async function executeAndVerifyBossChat(card, btnChat, greetingText) {
+    // 1. 检查是否存在安全滑块验证
+    function checkCaptcha() {
+      const captchaEl = document.querySelector(
+        '.geetest_holder, .nc_wrapper, .sec-verify-box, #captcha, [class*="captcha"], [class*="verify-box"]'
+      );
+      if (captchaEl && (captchaEl.offsetWidth > 0 || captchaEl.offsetHeight > 0)) {
+        return true;
       }
+      const bodyText = (document.body.innerText || '').slice(0, 3000);
+      return bodyText.includes('请完成安全验证') || bodyText.includes('完成拼图') || bodyText.includes('请完成验证');
+    }
+
+    // 2. 检查平台风控/打招呼上限弹窗
+    function checkPlatformLimitDialog() {
+      const modals = document.querySelectorAll('.dialog-container, .boss-popup, .dialog-wrap, .dialog-box, .boss-dialog, .ui-dialog');
+      for (const m of modals) {
+        if (m.offsetWidth > 0 && m.offsetHeight > 0) {
+          const txt = m.textContent.trim();
+          if (
+            txt.includes('今日打招呼次数已达上限') ||
+            txt.includes('打招呼次数已达上限') ||
+            txt.includes('沟通次数已达上限') ||
+            txt.includes('打招呼已用完') ||
+            txt.includes('沟通人数已达上限') ||
+            txt.includes('今日沟通人数已达上限') ||
+            txt.includes('操作过于频繁') ||
+            txt.includes('沟通过于频繁') ||
+            txt.includes('今日已达到上限') ||
+            txt.includes('达到今日沟通上限') ||
+            txt.includes('请明天再来')
+          ) {
+            const confirmBtn = m.querySelector('button, .btn, .dialog-close, .close-btn, .iboss-close');
+            if (confirmBtn) confirmBtn.click();
+            return true;
+          }
+        }
+      }
+      // 检查 Toast 提示
+      const toasts = document.querySelectorAll('.toast, .boss-toast, [class*="toast"], .message-wrap, .ant-message');
+      for (const t of toasts) {
+        const txt = t.textContent.trim();
+        if (
+          txt.includes('上限') ||
+          txt.includes('过于频繁') ||
+          txt.includes('打招呼次数已用完') ||
+          txt.includes('请明天再来')
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // 3. 检查并处理二次确认弹窗 (无 textarea 的通用确认弹窗，如期望薪资/城市不符、代招急聘确认)
+    async function handleSecondaryConfirmDialog() {
+      const modals = document.querySelectorAll('.dialog-container, .boss-popup, .dialog-wrap, .dialog-box, .ui-dialog');
+      for (const m of modals) {
+        if (m.offsetWidth > 0 && m.offsetHeight > 0) {
+          // 如果带有 textarea，交给输入话术逻辑处理
+          if (m.querySelector('textarea')) continue;
+
+          const txt = m.textContent.trim();
+          if (
+            txt.includes('期望') ||
+            txt.includes('不符') ||
+            txt.includes('是否继续') ||
+            txt.includes('仍要沟通') ||
+            txt.includes('代招') ||
+            txt.includes('急聘') ||
+            txt.includes('确认沟通')
+          ) {
+            logHUD('<span class="highlight">[二次确认]</span> 自动确认平台岗位期望差异提示...');
+            const buttons = m.querySelectorAll('button, a, .btn');
+            for (const b of buttons) {
+              const bTxt = b.textContent.trim();
+              if (bTxt === '仍要沟通' || bTxt === '确定' || bTxt === '确认' || bTxt === '继续沟通' || bTxt === '我知道了') {
+                b.click();
+                await sleep(800);
+                return true;
+              }
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    // 4. 处理带 textarea 的自定义打招呼弹窗
+    async function handleGreetingTextareaDialog() {
+      const modalTextarea = document.querySelector('.dialog-container textarea, .dialog-wrap textarea, .boss-popup textarea, .greet-boss-dialog textarea');
+      if (modalTextarea && modalTextarea.offsetParent !== null) {
+        modalTextarea.focus();
+        modalTextarea.value = greetingText;
+        modalTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+        modalTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(500);
+
+        const sendBtn = document.querySelector(
+          '.dialog-container button.btn-sure, .dialog-wrap button.btn-primary, .boss-popup .btn-sure, .greet-boss-dialog button.btn-sure, .dialog-container button.btn-primary'
+        );
+        if (sendBtn) {
+          sendBtn.click();
+          await sleep(800);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // 5. 检查是否确认成功送达
+    function checkIsDeliverySuccess() {
+      const curTxt = btnChat ? btnChat.textContent.trim() : '';
+      if (curTxt === '继续沟通' || curTxt === '已沟通' || curTxt === '已聊过') {
+        return true;
+      }
+      const cardBtns = card.querySelectorAll('a, button, span');
+      for (const b of cardBtns) {
+        const t = b.textContent.trim();
+        if (t === '继续沟通' || t === '已沟通' || t === '已聊过') {
+          return true;
+        }
+      }
+      const toasts = document.querySelectorAll('.toast, .boss-toast, [class*="toast"], .message-wrap, .ant-message');
+      for (const t of toasts) {
+        const txt = t.textContent.trim();
+        if (
+          txt.includes('打招呼成功') ||
+          txt.includes('消息已发送') ||
+          txt.includes('已向对方发送招呼') ||
+          txt.includes('沟通成功')
+        ) {
+          return true;
+        }
+      }
+      const imDialog = document.querySelector('.chat-conversation, .chat-box, .im-chat, .geek-chat-dialog');
+      if (imDialog && (imDialog.offsetWidth > 0 || imDialog.offsetHeight > 0)) {
+        return true;
+      }
+      return false;
+    }
+
+    // 6. 清理可能卡住的残留弹窗，防止遮挡后续卡片点击
+    function dismissAnyStuckDialog() {
+      const closeBtns = document.querySelectorAll('.dialog-close, .close-btn, .iboss-close, .dialog-wrap .close, .dialog-container .close');
+      for (const cb of closeBtns) {
+        if (cb.offsetWidth > 0 && cb.offsetHeight > 0) {
+          cb.click();
+        }
+      }
+    }
+
+    // === 执行投递与阶段状态检查 ===
+    if (checkCaptcha()) {
+      isPaused = true;
+      playDoubleChime();
+      return { success: false, reason: 'captcha_triggered', message: '触发平台安全滑块验证' };
+    }
+
+    // 点击“立即沟通”
+    btnChat.click();
+    await sleep(800);
+
+    // 检查是否立刻触发了上限熔断
+    if (checkPlatformLimitDialog()) {
+      return { success: false, reason: 'limit_reached', message: '平台今日打招呼次数已达上限' };
+    }
+
+    // 检查是否弹出滑块
+    if (checkCaptcha()) {
+      isPaused = true;
+      playDoubleChime();
+      return { success: false, reason: 'captcha_triggered', message: '触发平台安全滑块验证' };
+    }
+
+    // 处理自定义打招呼 textarea
+    await handleGreetingTextareaDialog();
+
+    // 处理二次确认弹窗
+    await handleSecondaryConfirmDialog();
+
+    // 轮询 2.5 秒严格校验送达回执
+    const startTime = Date.now();
+    let isSuccess = false;
+
+    while (Date.now() - startTime < 2500) {
+      if (checkPlatformLimitDialog()) {
+        return { success: false, reason: 'limit_reached', message: '平台今日打招呼次数已达上限' };
+      }
+      if (checkCaptcha()) {
+        isPaused = true;
+        playDoubleChime();
+        return { success: false, reason: 'captcha_triggered', message: '触发平台安全滑块验证' };
+      }
+      if (checkIsDeliverySuccess()) {
+        isSuccess = true;
+        break;
+      }
+      await sleep(300);
+    }
+
+    if (isSuccess) {
+      return { success: true };
+    } else {
+      // 未确认成功：安全关闭可能残留的弹窗，防止遮罩阻挡
+      dismissAnyStuckDialog();
+      return {
+        success: false,
+        reason: 'unverified',
+        message: '未检测到按钮转变为已沟通或成功回执，已跳过'
+      };
     }
   }
 

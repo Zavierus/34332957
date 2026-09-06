@@ -588,7 +588,7 @@
             </div>
             <div class="pipeline-info-row">
               <span id="hud-pipe-site-text" style="color:#e2e8f0; font-weight:700;">【拉勾招聘】</span>
-              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">本站: <b id="hud-pipe-site-count" style="color:#34d399;">0</b>/<span id="hud-pipe-site-target">30</span></span>
+              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">今日: <b id="hud-pipe-site-today" style="color:#34d399;">0</b>/<span id="hud-pipe-site-limit">30</span> <span style="color:#94a3b8; font-size:10px;">(本次 <b id="hud-pipe-site-count" style="color:#6ee7b7;">+0</b>/<span id="hud-pipe-site-target">30</span>)</span></span>
             </div>
             <div class="pipeline-bar-wrap">
               <div class="pipeline-bar-fill" id="hud-pipe-bar-fill" style="width: 0%;"></div>
@@ -605,8 +605,11 @@
           </div>
 
           <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">今日已投 / 上限</div>
+            <div class="stat-card" id="btn-quick-adjust-limit" style="cursor: pointer; transition: border-color 0.2s;" title="点击可直接修改今日上限 (5~999)">
+              <div class="stat-label" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>今日已投 / 上限</span>
+                <span style="font-size:10px; color:#34d399; text-decoration:underline;">✏️改上限</span>
+              </div>
               <div class="stat-val" id="val-today-count">0 <span style="font-size:11px; color:#94a3b8;">/ 30</span></div>
             </div>
             <div class="stat-card">
@@ -753,6 +756,31 @@
       });
     });
 
+    // 原地快捷调节今日投递上限
+    shadowRoot.getElementById('btn-quick-adjust-limit')?.addEventListener('click', () => {
+      const currentLimit = config.dailyLimit || 30;
+      const input = prompt(`⚡【快速调节每日投递上限】\n当前每日安全上限为：${currentLimit} 次\n\n请输入新的每日投递上限 (支持 5 ~ 999 次)：`, currentLimit);
+      if (input !== null) {
+        const newLimit = parseInt(input.trim(), 10);
+        if (!isNaN(newLimit) && newLimit >= 5 && newLimit <= 999) {
+          config.dailyLimit = newLimit;
+          if (pipelineMode && (!pipelineTarget || pipelineTarget === currentLimit)) {
+            pipelineTarget = newLimit;
+          }
+          chrome.storage.local.get(['config'], (res) => {
+            const cfg = res.config || {};
+            cfg.dailyLimit = newLimit;
+            chrome.storage.local.set({ config: cfg }, () => {
+              updateHUD();
+              logHUD(`<span class="success">[上限已更新]</span> 今日安全投递上限已快速调整为 <b>${newLimit}</b> 次！`);
+            });
+          });
+        } else {
+          alert('请输入 5 到 999 之间的有效整数！');
+        }
+      }
+    });
+
     btnToggle.addEventListener('click', () => {
       if (isRunning) {
         stopAutopilot();
@@ -829,7 +857,12 @@
 
       if (siteTag) siteTag.textContent = `第 ${curIdx + 1}/${totalSites} 站`;
       if (siteText) siteText.textContent = `【${siteName}】`;
-      if (siteCountEl) siteCountEl.textContent = status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount;
+      const limit = config.dailyLimit || 30;
+      const pipeTodayEl = shadowRoot.getElementById('hud-pipe-site-today');
+      const pipeLimitEl = shadowRoot.getElementById('hud-pipe-site-limit');
+      if (pipeTodayEl) pipeTodayEl.textContent = todayCount;
+      if (pipeLimitEl) pipeLimitEl.textContent = limit;
+      if (siteCountEl) siteCountEl.textContent = `+${status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount}`;
       if (siteTargetEl) siteTargetEl.textContent = status.perSiteTarget || 30;
 
       const pct = status.overallPercent !== undefined ? status.overallPercent : 0;
@@ -879,9 +912,15 @@
     if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
     if (compactSess) compactSess.textContent = sessionCount;
 
-    // 同步更新流水线卡片当前站计数
+    // 同步更新流水线卡片今日与本次投递计数
+    const pipeTodayEl = shadowRoot.getElementById('hud-pipe-site-today');
+    const pipeLimitEl = shadowRoot.getElementById('hud-pipe-site-limit');
     const pipeCountEl = shadowRoot.getElementById('hud-pipe-site-count');
-    if (pipeCountEl) pipeCountEl.textContent = sessionCount;
+    const pipeTargetEl = shadowRoot.getElementById('hud-pipe-site-target');
+    if (pipeTodayEl) pipeTodayEl.textContent = todayCount;
+    if (pipeLimitEl) pipeLimitEl.textContent = limit;
+    if (pipeCountEl) pipeCountEl.textContent = `+${sessionCount}`;
+    if (pipeTargetEl) pipeTargetEl.textContent = pipelineTarget || limit;
 
     const pipeInd = shadowRoot.getElementById('hud-pipeline-indicator');
     const pipeInfo = shadowRoot.getElementById('hud-pipeline-target-info');
@@ -1208,55 +1247,73 @@
           logHUD(`<span class="skip" style="color:#6ee7b7;">合成自然话术: "${greetingText.slice(0, 30)}..."</span>`);
 
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(800);
+          await sleep(Math.floor(Math.random() * 500) + 600);
 
-          btnChat.click();
-          playDoubleChime();
+          // 严格校验拉勾投递与真实送达回执
+          const chatResult = await executeAndVerifyLagouChat(card, btnChat, greetingText);
 
-          // 尝试处理可能弹出的打招呼输入弹窗或确认按钮
-          await handleLagouModal(greetingText);
+          if (chatResult.success) {
+            sessionCount++;
+            todayCount++;
+            updateHUD();
 
-          sessionCount++;
-          todayCount++;
-          updateHUD();
-
-          // 持久化今日统计 (拉勾独立计数)
-          if (chrome.storage && chrome.storage.local) {
-            const today = new Date().toISOString().split('T')[0];
-            const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
-            siteCounts.lagou = todayCount;
-            const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
-            chrome.storage.local.set({
-              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
-            });
-          }
-
-          // 记录至后台投递中心
-          chrome.runtime.sendMessage({
-            type: 'APPLY_LOG',
-            data: {
-              platform: '拉勾招聘',
-              company,
-              title,
-              salary,
-              matchedTag,
-              greeting: greetingText,
-              status: '已沟通'
+            // 持久化今日统计 (拉勾独立计数)
+            if (chrome.storage && chrome.storage.local) {
+              const today = new Date().toISOString().split('T')[0];
+              const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+              siteCounts.lagou = todayCount;
+              const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+              chrome.storage.local.set({
+                config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
+              });
             }
-          });
 
-          // 向流水线汇报实时进度
-          chrome.runtime.sendMessage({
-            type: 'PIPELINE_SITE_PROGRESS',
-            site: 'lagou',
-            count: sessionCount
-          });
+            // 记录至后台投递中心
+            chrome.runtime.sendMessage({
+              type: 'APPLY_LOG',
+              data: {
+                platform: '拉勾招聘',
+                company,
+                title,
+                salary,
+                matchedTag,
+                greeting: greetingText,
+                status: '已沟通'
+              }
+            });
 
-          logHUD(`<span class="success">[投递成功]</span> 已记录到报表表格！`);
+            // 向流水线汇报实时进度
+            if (pipelineMode) {
+              chrome.runtime.sendMessage({
+                type: 'PIPELINE_SITE_PROGRESS',
+                site: 'lagou',
+                count: sessionCount,
+                todayCount: todayCount
+              });
+            }
 
-          const delayMs = getRandomDelayMs();
-          logHUD(`<span class="skip">拟人化等待 ${(delayMs / 1000).toFixed(1)} 秒防风控...</span>`);
-          await sleep(delayMs);
+            logHUD(`<span class="success">[真实投递确认]</span> ${company} · ${title} 成功送达入库！`);
+
+            const delayMs = getRandomDelayMs();
+            logHUD(`<span class="skip">拟人化等待 ${(delayMs / 1000).toFixed(1)} 秒防风控...</span>`);
+            await sleep(delayMs);
+          } else if (chatResult.reason === 'limit_reached') {
+            logHUD(`<span class="highlight" style="color:#ef4444; font-weight:bold;">🛑【平台上限熔断】拉勾网已达今日投递/沟通上限！已自动停止巡航。</span>`);
+            if (pipelineMode) {
+              logHUD('<span class="highlight" style="color:#f59e0b;">[流水线转场] 拉勾已满额，自动向中枢汇报完成...</span>');
+              chrome.runtime.sendMessage({
+                type: 'PIPELINE_SITE_FINISHED',
+                site: 'lagou',
+                count: sessionCount
+              });
+            }
+            break;
+          } else if (chatResult.reason === 'captcha_triggered') {
+            logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【人机验证拦截】请手动完成验证后点击【继续】！</span>`);
+          } else {
+            logHUD(`<span class="skip" style="color:#94a3b8;">[送达未确认] ${company} · ${title} (${chatResult.message || '未响应'})，已安全跳过</span>`);
+            await sleep(600);
+          }
         }
       }
 
@@ -1324,21 +1381,117 @@
     }
   }
 
-  async function handleLagouModal(greetingText) {
-    await sleep(1000);
-    const modalTextarea = document.querySelector('.ant-modal-content textarea, [class*="dialog"] textarea, [class*="modal"] textarea');
-    if (modalTextarea && modalTextarea.offsetParent !== null) {
-      modalTextarea.focus();
-      modalTextarea.value = greetingText;
-      modalTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-      modalTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-      await sleep(600);
+  // ================= 严格送达校验与风控熔断引擎 (拉勾) =================
+  async function executeAndVerifyLagouChat(card, btnChat, greetingText) {
+    function checkLagouCaptcha() {
+      const captcha = document.querySelector('.nc_wrapper, .geetest_holder, [class*="captcha"], [class*="verify-box"], #captcha');
+      if (captcha && (captcha.offsetWidth > 0 || captcha.offsetHeight > 0)) return true;
+      const bodyText = (document.body.innerText || '').slice(0, 3000);
+      return bodyText.includes('请完成安全验证') || bodyText.includes('完成拼图') || bodyText.includes('滑动验证');
+    }
 
-      const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, [class*="dialog"] button.btn-primary');
-      if (confirmBtn) {
-        confirmBtn.click();
-        await sleep(800);
+    function checkLagouLimitDialog() {
+      const modals = document.querySelectorAll('.ant-modal-content, [class*="dialog"], [class*="modal"]');
+      for (const m of modals) {
+        if (m.offsetWidth > 0 && m.offsetHeight > 0) {
+          const txt = m.textContent.trim();
+          if (
+            txt.includes('今日投递次数已达上限') ||
+            txt.includes('投递次数已达上限') ||
+            txt.includes('沟通次数已达上限') ||
+            txt.includes('沟通次数已用完') ||
+            txt.includes('操作过于频繁') ||
+            txt.includes('已达今日上限')
+          ) {
+            const btn = m.querySelector('button, .ant-btn, .close-btn');
+            if (btn) btn.click();
+            return true;
+          }
+        }
       }
+      const toasts = document.querySelectorAll('.ant-message-notice, .message-wrap, .toast, [class*="toast"]');
+      for (const t of toasts) {
+        const txt = t.textContent.trim();
+        if (txt.includes('上限') || txt.includes('过于频繁') || txt.includes('次数已用完')) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    async function handleLagouModalInner() {
+      const modalTextarea = document.querySelector('.ant-modal-content textarea, [class*="dialog"] textarea, [class*="modal"] textarea');
+      if (modalTextarea && modalTextarea.offsetParent !== null) {
+        modalTextarea.focus();
+        modalTextarea.value = greetingText;
+        modalTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+        modalTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(500);
+
+        const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, [class*="dialog"] button.btn-primary');
+        if (confirmBtn) {
+          confirmBtn.click();
+          await sleep(800);
+        }
+      }
+    }
+
+    function checkIsLagouSuccess() {
+      const curTxt = btnChat ? btnChat.textContent.trim() : '';
+      if (curTxt === '继续沟通' || curTxt === '已沟通' || curTxt === '已投递') return true;
+      const cardBtns = card.querySelectorAll('a, button, span');
+      for (const b of cardBtns) {
+        const t = b.textContent.trim();
+        if (t === '继续沟通' || t === '已沟通' || t === '已投递') return true;
+      }
+      const toasts = document.querySelectorAll('.ant-message-success, .ant-message-notice-success, .toast-success');
+      for (const t of toasts) {
+        const txt = t.textContent.trim();
+        if (txt.includes('投递成功') || txt.includes('打招呼成功') || txt.includes('成功') || txt.includes('已发送')) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function dismissStuckModal() {
+      const closeBtn = document.querySelector('.ant-modal-close, [class*="dialog"] .close, .close-btn');
+      if (closeBtn && closeBtn.offsetWidth > 0) closeBtn.click();
+    }
+
+    if (checkLagouCaptcha()) {
+      isPaused = true;
+      return { success: false, reason: 'captcha_triggered', message: '触发人机验证' };
+    }
+
+    btnChat.click();
+    playDoubleChime();
+    await sleep(800);
+
+    if (checkLagouLimitDialog()) {
+      return { success: false, reason: 'limit_reached', message: '拉勾今日投递或沟通已达上限' };
+    }
+
+    await handleLagouModalInner();
+
+    const start = Date.now();
+    let isSuccess = false;
+    while (Date.now() - start < 2500) {
+      if (checkLagouLimitDialog()) {
+        return { success: false, reason: 'limit_reached', message: '拉勾今日投递或沟通已达上限' };
+      }
+      if (checkIsLagouSuccess()) {
+        isSuccess = true;
+        break;
+      }
+      await sleep(300);
+    }
+
+    if (isSuccess) {
+      return { success: true };
+    } else {
+      dismissStuckModal();
+      return { success: false, reason: 'unverified', message: '未收到成功状态改变' };
     }
   }
 

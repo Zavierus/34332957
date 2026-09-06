@@ -49,11 +49,15 @@
           <span style="font-size:11px; color:#94a3b8;">每站目标:</span>
           <select id="pipe-target-select" class="target-select">
             <option value="follow_limit" selected>🔄 跟随设定上限 (30个/站)</option>
-            <option value="10">10 个 / 站</option>
-            <option value="15">15 个 / 站</option>
-            <option value="20">20 个 / 站</option>
             <option value="30">30 个 / 站</option>
             <option value="50">50 个 / 站</option>
+            <option value="60">60 个 / 站</option>
+            <option value="80">80 个 / 站</option>
+            <option value="100">100 个 / 站</option>
+            <option value="150">150 个 / 站</option>
+            <option value="200">200 个 / 站</option>
+            <option value="300">300 个 / 站</option>
+            <option value="999">🚀 999 个 (无限制狂飙)</option>
           </select>
         </div>
       </div>
@@ -283,7 +287,7 @@
         <div class="form-group">
           <label for="cfg-daily-limit">每日安全投递上限</label>
           <div class="input-with-unit">
-            <input type="number" id="cfg-daily-limit" min="5" max="60" value="30">
+            <input type="number" id="cfg-daily-limit" min="5" max="999" value="60">
             <span class="unit">个 / 天</span>
           </div>
         </div>

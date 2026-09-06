@@ -513,7 +513,7 @@
             </div>
             <div class="pipeline-info-row">
               <span id="hud-pipe-site-text" style="color:#e2e8f0; font-weight:700;">【猎聘网】</span>
-              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">本站: <b id="hud-pipe-site-count" style="color:#c084fc;">0</b>/<span id="hud-pipe-site-target">10</span></span>
+              <span id="hud-pipe-counts" style="color:#cbd5e1; font-size:11px;">今日: <b id="hud-pipe-site-today" style="color:#c084fc;">0</b>/<span id="hud-pipe-site-limit">30</span> <span style="color:#94a3b8; font-size:10px;">(本次 <b id="hud-pipe-site-count" style="color:#e9d5ff;">+0</b>/<span id="hud-pipe-site-target">30</span>)</span></span>
             </div>
             <div class="pipeline-bar-wrap">
               <div class="pipeline-bar-fill" id="hud-pipe-bar-fill" style="width: 0%;"></div>
@@ -530,8 +530,11 @@
           </div>
 
           <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">今日已投 / 上限</div>
+            <div class="stat-card" id="btn-quick-adjust-limit" style="cursor: pointer; transition: border-color 0.2s;" title="点击可直接修改今日上限 (5~999)">
+              <div class="stat-label" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>今日已投 / 上限</span>
+                <span style="font-size:10px; color:#c084fc; text-decoration:underline;">✏️改上限</span>
+              </div>
               <div class="stat-val" id="val-today-count">0 <span style="font-size:11px; color:#94a3b8;">/ 30</span></div>
             </div>
             <div class="stat-card">
@@ -681,6 +684,31 @@
       });
     });
 
+    // 原地快捷调节今日投递上限
+    shadowRoot.getElementById('btn-quick-adjust-limit')?.addEventListener('click', () => {
+      const currentLimit = config.dailyLimit || 30;
+      const input = prompt(`⚡【快速调节每日投递上限】\n当前每日安全上限为：${currentLimit} 次\n\n请输入新的每日投递上限 (支持 5 ~ 999 次)：`, currentLimit);
+      if (input !== null) {
+        const newLimit = parseInt(input.trim(), 10);
+        if (!isNaN(newLimit) && newLimit >= 5 && newLimit <= 999) {
+          config.dailyLimit = newLimit;
+          if (pipelineMode && (!pipelineTarget || pipelineTarget === currentLimit)) {
+            pipelineTarget = newLimit;
+          }
+          chrome.storage.local.get(['config'], (res) => {
+            const cfg = res.config || {};
+            cfg.dailyLimit = newLimit;
+            chrome.storage.local.set({ config: cfg }, () => {
+              updateHUD();
+              logHUD(`<span class="success">[上限已更新]</span> 今日安全投递上限已快速调整为 <b>${newLimit}</b> 次！`);
+            });
+          });
+        } else {
+          alert('请输入 5 到 999 之间的有效整数！');
+        }
+      }
+    });
+
     btnToggle.addEventListener('click', () => {
       if (!isRunning) {
         startLiepinCruise();
@@ -768,7 +796,12 @@
 
       if (siteTag) siteTag.textContent = `第 ${curIdx + 1}/${totalSites} 站`;
       if (siteText) siteText.textContent = `【${siteName}】`;
-      if (siteCountEl) siteCountEl.textContent = status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount;
+      const limit = config.dailyLimit || 30;
+      const pipeTodayEl = shadowRoot.getElementById('hud-pipe-site-today');
+      const pipeLimitEl = shadowRoot.getElementById('hud-pipe-site-limit');
+      if (pipeTodayEl) pipeTodayEl.textContent = todayCount;
+      if (pipeLimitEl) pipeLimitEl.textContent = limit;
+      if (siteCountEl) siteCountEl.textContent = `+${status.currentSiteCount !== undefined ? status.currentSiteCount : sessionCount}`;
       if (siteTargetEl) siteTargetEl.textContent = status.perSiteTarget || 30;
 
       const pct = status.overallPercent !== undefined ? status.overallPercent : 0;
@@ -820,9 +853,15 @@
     if (compactToday) compactToday.textContent = `${todayCount}/${limit}`;
     if (compactSess) compactSess.textContent = sessionCount;
 
-    // 同步更新流水线卡片当前站计数
+    // 同步更新流水线卡片今日与本次投递计数
+    const pipeTodayEl = shadowRoot.getElementById('hud-pipe-site-today');
+    const pipeLimitEl = shadowRoot.getElementById('hud-pipe-site-limit');
     const pipeCountEl = shadowRoot.getElementById('hud-pipe-site-count');
-    if (pipeCountEl) pipeCountEl.textContent = sessionCount;
+    const pipeTargetEl = shadowRoot.getElementById('hud-pipe-site-target');
+    if (pipeTodayEl) pipeTodayEl.textContent = todayCount;
+    if (pipeLimitEl) pipeLimitEl.textContent = limit;
+    if (pipeCountEl) pipeCountEl.textContent = `+${sessionCount}`;
+    if (pipeTargetEl) pipeTargetEl.textContent = pipelineTarget || limit;
   }
 
   // ================= 猎聘登录态智能识别 =================
@@ -1113,57 +1152,71 @@
           const noteText = generateDynamicNote(title, matchedTag, company);
           logHUD(`<span class="highlight">[命中高亮词条: ${matchedTag}${screenResult.matchType ? ` · ${screenResult.matchType}` : ''}]</span> ${company} · ${title} (${salary})`);
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(1000);
+          await sleep(Math.floor(Math.random() * 500) + 600);
 
-          applyBtn.click();
-          await sleep(1200);
+          // 严格校验猎聘应聘与真实送达回执
+          const applyResult = await executeAndVerifyLiepinApply(card, applyBtn, noteText);
 
-          const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, .react-modal button.btn-primary');
-          if (confirmBtn) {
-            confirmBtn.click();
-            await sleep(800);
-          }
+          if (applyResult.success) {
+            sessionCount++;
+            todayCount++;
+            updateHUD();
 
-          sessionCount++;
-          todayCount++;
-          updateHUD();
-
-          // 持久化今日统计 (猎聘独立计数)
-          if (chrome.storage && chrome.storage.local) {
-            const today = new Date().toISOString().split('T')[0];
-            const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
-            siteCounts.liepin = todayCount;
-            const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
-            chrome.storage.local.set({
-              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
-            });
-          }
-
-          chrome.runtime.sendMessage({
-            type: 'APPLY_LOG',
-            data: {
-              platform: '猎聘网',
-              company,
-              title,
-              salary,
-              matchedTag,
-              greeting: noteText,
-              status: '已应聘'
+            // 持久化今日统计 (猎聘独立计数)
+            if (chrome.storage && chrome.storage.local) {
+              const today = new Date().toISOString().split('T')[0];
+              const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+              siteCounts.liepin = todayCount;
+              const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+              chrome.storage.local.set({
+                config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
+              });
             }
-          });
 
-          if (pipelineMode) {
             chrome.runtime.sendMessage({
-              type: 'PIPELINE_SITE_PROGRESS',
-              site: 'liepin',
-              count: sessionCount
+              type: 'APPLY_LOG',
+              data: {
+                platform: '猎聘网',
+                company,
+                title,
+                salary,
+                matchedTag,
+                greeting: noteText,
+                status: '已应聘'
+              }
             });
+
+            if (pipelineMode) {
+              chrome.runtime.sendMessage({
+                type: 'PIPELINE_SITE_PROGRESS',
+                site: 'liepin',
+                count: sessionCount,
+                todayCount: todayCount
+              });
+            }
+
+            logHUD(`<span class="success">[真实应聘确认]</span> ${company} · ${title} 应聘成功并记录入库！`);
+
+            const delay = Math.floor(Math.random() * 5000) + 7000;
+            logHUD(`<span class="skip">安全冷却中... 等待 ${(delay / 1000).toFixed(1)} 秒</span>`);
+            await sleep(delay);
+          } else if (applyResult.reason === 'limit_reached') {
+            logHUD(`<span class="highlight" style="color:#ef4444; font-weight:bold;">🛑【平台上限熔断】猎聘网已达今日应聘上限！自动停止巡航。</span>`);
+            if (pipelineMode) {
+              logHUD('<span class="highlight" style="color:#f59e0b;">[流水线转场] 猎聘已满额，自动向全网巡航下一站交接...</span>');
+              chrome.runtime.sendMessage({
+                type: 'PIPELINE_SITE_FINISHED',
+                site: 'liepin',
+                count: sessionCount
+              });
+            }
+            break;
+          } else if (applyResult.reason === 'captcha_triggered') {
+            logHUD(`<span class="highlight" style="color:#f59e0b; font-weight:bold;">⚠️【人机验证拦截】请手动完成验证后点击【继续】！</span>`);
+          } else {
+            logHUD(`<span class="skip" style="color:#94a3b8;">[送达未确认] ${company} · ${title} (${applyResult.message || '未响应'})，已跳过 (不计入投递数)</span>`);
+            await sleep(600);
           }
-
-          logHUD(`<span class="success">[应聘成功]</span> 已记录到报表表格！`);
-
-          const delay = Math.floor(Math.random() * 6000) + 8000;
-          await sleep(delay);
         }
       }
 
@@ -1216,10 +1269,119 @@
         }
         nextPage.click();
         await sleep(3500);
-      } else {
-        logHUD('<span>[翻页结束]</span> 猎聘职位列表已无更多新岗位。');
+      }
+    }
+  }
+
+  // ================= 严格送达校验与风控熔断引擎 (猎聘) =================
+  async function executeAndVerifyLiepinApply(card, applyBtn, noteText) {
+    function checkLiepinCaptcha() {
+      const captcha = document.querySelector('.nc_wrapper, .geetest_holder, [class*="captcha"], [class*="verify-box"]');
+      if (captcha && (captcha.offsetWidth > 0 || captcha.offsetHeight > 0)) return true;
+      const bodyText = (document.body.innerText || '').slice(0, 3000);
+      return bodyText.includes('请完成安全验证') || bodyText.includes('完成拼图') || bodyText.includes('滑动验证');
+    }
+
+    function checkLiepinLimitDialog() {
+      const modals = document.querySelectorAll('.ant-modal-content, .react-modal, .dialog-box');
+      for (const m of modals) {
+        if (m.offsetWidth > 0 && m.offsetHeight > 0) {
+          const txt = m.textContent.trim();
+          if (
+            txt.includes('今日投递次数已达上限') ||
+            txt.includes('投递次数已达上限') ||
+            txt.includes('投递过于频繁') ||
+            txt.includes('操作过于频繁') ||
+            txt.includes('已达今日上限') ||
+            txt.includes('投递已满')
+          ) {
+            const btn = m.querySelector('button, .ant-btn');
+            if (btn) btn.click();
+            return true;
+          }
+        }
+      }
+      const toasts = document.querySelectorAll('.ant-message-notice, .message-wrap, .toast');
+      for (const t of toasts) {
+        const txt = t.textContent.trim();
+        if (txt.includes('上限') || txt.includes('过于频繁') || txt.includes('明天再试')) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    async function handleLiepinModal() {
+      const textarea = document.querySelector('.ant-modal-content textarea, .react-modal textarea');
+      if (textarea && textarea.offsetParent !== null) {
+        textarea.focus();
+        textarea.value = noteText;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(500);
+      }
+      const confirmBtn = document.querySelector('.ant-modal-content button.ant-btn-primary, .react-modal button.btn-primary, .ant-modal-confirm-btns button.ant-btn-primary');
+      if (confirmBtn) {
+        confirmBtn.click();
+        await sleep(800);
+      }
+    }
+
+    function checkIsLiepinSuccess() {
+      const curTxt = applyBtn ? applyBtn.textContent.trim() : '';
+      if (curTxt === '已应聘' || curTxt === '已沟通' || curTxt === '应聘成功') return true;
+      const cardBtns = card.querySelectorAll('button, a, span');
+      for (const b of cardBtns) {
+        const t = b.textContent.trim();
+        if (t === '已应聘' || t === '已沟通' || t === '应聘成功') return true;
+      }
+      const toasts = document.querySelectorAll('.ant-message-success, .ant-message-notice-success, .toast-success');
+      for (const t of toasts) {
+        const txt = t.textContent.trim();
+        if (txt.includes('应聘成功') || txt.includes('投递成功') || txt.includes('打招呼成功') || txt.includes('成功')) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function dismissStuckModal() {
+      const closeBtn = document.querySelector('.ant-modal-close, .react-modal-close, .close-btn');
+      if (closeBtn && closeBtn.offsetWidth > 0) closeBtn.click();
+    }
+
+    if (checkLiepinCaptcha()) {
+      isPaused = true;
+      return { success: false, reason: 'captcha_triggered', message: '触发平台人机验证' };
+    }
+
+    applyBtn.click();
+    await sleep(800);
+
+    if (checkLiepinLimitDialog()) {
+      return { success: false, reason: 'limit_reached', message: '猎聘今日投递次数已达上限' };
+    }
+
+    await handleLiepinModal();
+
+    const start = Date.now();
+    let isSuccess = false;
+    while (Date.now() - start < 2500) {
+      if (checkLiepinLimitDialog()) {
+        return { success: false, reason: 'limit_reached', message: '猎聘今日投递次数已达上限' };
+      }
+      if (checkIsLiepinSuccess()) {
+        isSuccess = true;
         break;
       }
+      await sleep(300);
+    }
+
+    if (isSuccess) {
+      return { success: true };
+    } else {
+      dismissStuckModal();
+      return { success: false, reason: 'unverified', message: '未检测到成功回执' };
     }
   }
 
