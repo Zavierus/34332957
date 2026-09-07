@@ -756,28 +756,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'next_site_triggered' });
     return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
-    // HR 新消息回复系统桌面强提醒与直通路由 (严格遵守设定的冷却周期)
-    chrome.storage.local.get(['config'], (res) => {
+    // HR 新消息回复系统桌面强提醒与直通路由 (严格遵守持久化存储的冷却周期，杜绝多标签并发堆叠)
+    chrome.storage.local.get(['config', 'lastGlobalHRAlertTimestamp'], (res) => {
       const cfg = res.config || {};
+      if (cfg.desktopNotification === false) {
+        sendResponse({ status: 'desktop_notification_disabled' });
+        return;
+      }
+
       const cooldownMins = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0)
         ? Number(cfg.hrAlertCooldownMinutes)
         : 5;
       const cooldownMs = cooldownMins * 60 * 1000;
       const now = Date.now();
+      const lastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
 
-      if (!globalThis.lastGlobalHRAlertTimestamp) {
-        globalThis.lastGlobalHRAlertTimestamp = 0;
-      }
-
-      if (now - globalThis.lastGlobalHRAlertTimestamp < cooldownMs && globalThis.lastGlobalHRAlertTimestamp > 0) {
-        console.log(`[ZIAVER Background] ⏳ HR 提醒处于全局防打扰冷却期 (${cooldownMins}分钟内仅弹一次)，已安全去重`);
+      if (now - lastAlert < cooldownMs && lastAlert > 0) {
+        console.log(`[ZIAVER Background] ⏳ HR 提醒处于全局防打扰冷却期 (${cooldownMins}分钟内仅弹一次)，已持久化拦截去重`);
         sendResponse({ status: 'cooldown_suppressed' });
         return;
       }
 
-      globalThis.lastGlobalHRAlertTimestamp = now;
+      // 立即持久化记录本次提醒触发时间戳
+      chrome.storage.local.set({ lastGlobalHRAlertTimestamp: now });
 
-      const notifId = 'hr_reply_' + Date.now();
+      const notifId = 'hr_reply_singleton';
       const chatUrl = request.chatUrl || (
         request.platform === 'liepin' ? 'https://www.liepin.com/im/' :
         request.platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
@@ -792,14 +795,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.platform === 'liepin') siteTitle = '猎聘网';
       else if (request.platform === 'lagou') siteTitle = '拉勾网';
 
-      chrome.notifications.create(notifId, {
-        type: 'basic',
-        iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-        title: `🔔 ${siteTitle} · 检测到 HR 新回复/私信！`,
-        message: request.text || '有企业 HR 正在与您互动沟通，点击立即直达聊天界面！',
-        priority: 2,
-        requireInteraction: true
+      // 先清除旧通知，确保屏幕右侧永远最多只有 1 个清爽通知，绝不堆叠！
+      chrome.notifications.clear(notifId, () => {
+        chrome.notifications.create(notifId, {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+          title: `🔔 ${siteTitle} · 检测到 HR 新回复/私信！`,
+          message: request.text || '有企业 HR 正在与您互动沟通，点击立即直达聊天界面！',
+          priority: 2,
+          requireInteraction: false // 自动在数秒后优雅隐退，不卡在屏幕边侧阻塞视野
+        });
       });
+
       sendResponse({ status: 'ok' });
     });
     return true;
