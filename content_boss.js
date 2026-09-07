@@ -17,6 +17,18 @@
   let pipelineMode = false;
   let pipelineTarget = 10;
 
+  // 捕获并抑制立即沟通弹出的聊天新标签页/新窗口，彻底防止页面跳入聊天页卡死
+  let lastBossChatOpenedTime = 0;
+  const rawWindowOpen = window.open;
+  window.open = function (url, target, features) {
+    if (isRunning && url && (String(url).includes('/chat') || String(url).includes('/geek/chat') || String(url).includes('zhipin.com/web/geek/chat'))) {
+      console.log('[ZIAVER BOSS] 成功捕获并抑制立即沟通弹出的聊天新标签页:', url);
+      lastBossChatOpenedTime = Date.now();
+      return null;
+    }
+    return rawWindowOpen.apply(this, arguments);
+  };
+
   let activeTags = []; // 当前在后台勾选高亮生效的职业词条
   let config = {
     dailyLimit: 30,
@@ -578,6 +590,10 @@
             <span class="tag-link" id="btn-open-dashboard">打开完整后台管理 ↗</span>
           </div>
 
+          <div style="background: rgba(0,242,254,0.06); border: 1px solid rgba(0,242,254,0.2); border-radius: 6px; padding: 5px 8px; margin-bottom: 6px; font-size: 10px; color: #94a3b8; line-height: 1.4;">
+            <span style="color:#00f2fe; font-weight:600;">🛡️ 防跳盾已激活：</span>自动拦截聊天跳转并确保留在此页连续投递；已开启后台自荐信与聊天输入框双轨送达！
+          </div>
+
           <div class="action-btns">
             <button class="btn btn-primary" id="btn-toggle-run">
               <span>🚀 开启自动投递</span>
@@ -1002,6 +1018,20 @@
     refreshConfig();
     isSkipped = false;
 
+    // 智能路由检测：若当前处于聊天界面，自动重定向至职位检索列表页再开启巡航，坚决杜绝在聊天页卡死
+    if (window.location.pathname.startsWith('/web/geek/chat')) {
+      logHUD('<span class="highlight" style="color:#00f2fe;">[路由自动修正]</span> 检测到当前处于聊天界面，正在自动为您前往职位搜索页开启巡航...');
+      sessionStorage.setItem('ziaver_auto_start_boss_cruise', JSON.stringify({
+        target,
+        isFromPipeline,
+        initialSessionCount
+      }));
+      setTimeout(() => {
+        window.location.href = 'https://www.zhipin.com/web/geek/job?city=101280600';
+      }, 600);
+      return;
+    }
+
     // 智能登录态检测
     if (!checkIsLoggedIn()) {
       if (isFromPipeline) {
@@ -1147,14 +1177,24 @@
         txt.includes('已向BOSS发送消息') ||
         txt.includes('已向对方发送') ||
         txt.includes('设置招呼语') ||
-        (txt.includes('留在此页') && (txt.includes('继续沟通') || txt.includes('发送消息') || txt.includes('您好')))
+        txt.includes('留在此页') ||
+        txt.includes('留在当前页') ||
+        txt.includes('沟通已发起') ||
+        txt.includes('发起聊天') ||
+        txt.includes('打招呼成功') ||
+        (txt.includes('去聊天') && (txt.includes('留在') || txt.includes('发送消息') || txt.includes('您好')))
       ) {
-        // 关键防护：必须点击「留在此页」，坚决严禁点击「继续沟通」（否则会跳转到聊天流中断检索）
+        // 关键防护：必须优先点击「留在此页」，坚决严禁点击「去聊天」或「继续沟通」（否则会跳转到聊天流中断检索）
         let stayBtn = null;
         const allBtns = d.querySelectorAll('button, a, span, .btn');
         for (const b of allBtns) {
           const bTxt = b.textContent.trim();
-          if (bTxt === '留在此页' || bTxt.includes('留在此页')) {
+          if (
+            bTxt === '留在此页' || bTxt.includes('留在此页') ||
+            bTxt === '留在当前页' || bTxt.includes('留在当前') ||
+            bTxt === '我知道了' || bTxt === '知道了' ||
+            (bTxt === '确定' && !bTxt.includes('去聊天'))
+          ) {
             stayBtn = b;
             break;
           }
@@ -1164,8 +1204,8 @@
           stayBtn.click();
           handled = true;
         } else {
-          // 若未找到“留在此页”按钮，点击右上角 ✕ 关闭按钮
-          const closeBtn = d.querySelector('.icon-close, .close, .dialog-close, .close-btn, .iboss-close, [ka*="close"], svg');
+          // 若未找到“留在此页”按钮，点击右上角 ✕ 关闭按钮，绝不点击去聊天
+          const closeBtn = d.querySelector('.icon-close, .close, .dialog-close, .close-btn, .iboss-close, [ka*="close"], svg, button.close');
           if (closeBtn) {
             closeBtn.click();
             handled = true;
@@ -1182,11 +1222,12 @@
       }
     }
 
-    // 2. 兜底扫描全文档文本完全为“留在此页”的按钮
+    // 2. 兜底扫描全文档文本包含“留在此页”或“留在当前页”的按钮
     const fallbackBtns = document.querySelectorAll('button, a, span');
     for (const b of fallbackBtns) {
       if (!b || b.closest('#ziaver-boss-hud')) continue;
-      if (b.textContent.trim() === '留在此页') {
+      const bTxt = b.textContent.trim();
+      if (bTxt === '留在此页' || bTxt.includes('留在此页') || bTxt === '留在当前页') {
         b.click();
         cleanModalMasks();
         return true;
@@ -1574,6 +1615,60 @@
       return false;
     }
 
+    // 4.1 检查并发送抽屉或聊天小窗中的输入框 (确保后台个性化自荐话术真实送达HR)
+    async function handleChatDrawerOrBoxGreeting(text) {
+      if (!text) return false;
+      const selectors = [
+        '.chat-conversation [contenteditable="true"]',
+        '.chat-box [contenteditable="true"]',
+        '.im-chat [contenteditable="true"]',
+        '.geek-chat-dialog [contenteditable="true"]',
+        '.chat-editor [contenteditable="true"]',
+        '.chat-input[contenteditable="true"]',
+        '.chat-conversation textarea',
+        '.chat-box textarea',
+        '.im-chat textarea',
+        '.geek-chat-dialog textarea',
+        '.chat-editor textarea',
+        '.chat-input textarea'
+      ];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        for (const sel of selectors) {
+          const input = document.querySelector(sel);
+          if (input && (input.offsetWidth > 0 || input.offsetHeight > 0)) {
+            logHUD('<span class="highlight">[自荐信发送]</span> 检测到聊天窗口输入框，正在自动键入后台定制自荐信...');
+            input.focus();
+            if (input.isContentEditable || input.getAttribute('contenteditable') === 'true') {
+              input.innerText = text;
+            } else {
+              input.value = text;
+            }
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            await sleep(400);
+
+            const sendBtn = document.querySelector(
+              '.chat-conversation .btn-send, .chat-box .btn-send, .im-chat .btn-send, .geek-chat-dialog .btn-send, ' +
+              '.chat-editor .btn-send, button.btn-send, [ka="chat_send"], button[class*="send"]'
+            );
+            if (sendBtn) {
+              sendBtn.click();
+              logHUD('<span class="success">[自荐信送达]</span> 后台个性化定制自荐话术已成功通过聊天窗口发送！');
+              await sleep(600);
+              return true;
+            } else {
+              input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+              logHUD('<span class="success">[自荐信送达]</span> 后台个性化定制自荐话术已成功回车发送！');
+              await sleep(600);
+              return true;
+            }
+          }
+        }
+        await sleep(250);
+      }
+      return false;
+    }
+
     // 5. 检查是否确认成功送达
     function checkIsDeliverySuccess() {
       // 5.1 核心：若捕获到「已向BOSS发送消息」回执弹窗，点击「留在此页」并直接判定送达成功！
@@ -1631,15 +1726,41 @@
       return { success: false, reason: 'captcha_triggered', message: '触发平台安全滑块验证' };
     }
 
-    // 点击“立即沟通”
-    logHUD('<span class="highlight">[触发沟通]</span> 正在点击【立即沟通】...');
-    btnChat.click();
-    await sleep(600);
+    // 关键防跳盾：杜绝 <a> 标签原生导航跳转至 /web/geek/chat 破坏主检索流
+    const linkEl = btnChat.tagName === 'A' ? btnChat : btnChat.closest('a');
+    if (linkEl) {
+      linkEl.removeAttribute('target');
+      linkEl.setAttribute('data-original-href', linkEl.getAttribute('href') || '');
+      linkEl.setAttribute('href', 'javascript:void(0);');
+    }
+    const preventJumpHandler = (e) => {
+      if (linkEl) e.preventDefault();
+    };
+    btnChat.addEventListener('click', preventJumpHandler, { capture: true, once: true });
 
-    // 优先检查是否秒弹「已向BOSS发送消息」
-    if (handleBossAlreadySentDialog()) {
-      logHUD('<span class="success">[弹窗捕获] 成功捕获「已向BOSS发送消息」！自动点击「留在此页」，清除阻挡遮罩</span>');
-      return { success: true, message: '已向BOSS发送消息弹窗确认送达' };
+    // 记录当前待发自荐信（用于页面应急自愈）
+    try {
+      sessionStorage.setItem('ziaver_pending_chat_greeting', greetingText);
+    } catch (e) {}
+
+    // 触发真实拟人化鼠标事件序列并点击“立即沟通”
+    logHUD('<span class="highlight">[触发沟通]</span> 正在点击【立即沟通】...');
+    ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+      try {
+        btnChat.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {}
+    });
+    try {
+      btnChat.click();
+    } catch (e) {}
+
+    // 极速侦测并自动点击「留在此页」，坚决拦截弹窗跳转
+    for (let t = 0; t < 8; t++) {
+      if (handleBossAlreadySentDialog()) {
+        logHUD('<span class="success">[弹窗捕获] 成功捕获「已向BOSS发送消息」！自动点击「留在此页」，清除阻挡遮罩</span>');
+        break;
+      }
+      await sleep(60);
     }
 
     // 检查是否立刻触发了上限熔断
@@ -1654,8 +1775,11 @@
       return { success: false, reason: 'captcha_triggered', message: '触发平台安全滑块验证' };
     }
 
-    // 处理自定义打招呼 textarea
+    // 处理自定义打招呼 textarea (若平台弹窗展示输入框)
     await handleGreetingTextareaDialog();
+
+    // 检查并发送抽屉或聊天小窗中的输入框 (确保后台个性化自荐话术真实送达HR)
+    await handleChatDrawerOrBoxGreeting(greetingText);
 
     // 处理二次确认弹窗
     await handleSecondaryConfirmDialog();
@@ -1686,9 +1810,11 @@
     }
 
     if (isSuccess) {
+      try { sessionStorage.removeItem('ziaver_pending_chat_greeting'); } catch (e) {}
       cleanModalMasks();
       return { success: true };
     } else {
+      try { sessionStorage.removeItem('ziaver_pending_chat_greeting'); } catch (e) {}
       // 未确认成功：安全关闭可能残留的弹窗，防止遮罩阻挡
       dismissAnyStuckDialog();
       cleanModalMasks();
@@ -2057,6 +2183,58 @@
     });
   }
 
+  // 1. 检查并自动恢复从聊天界面重定向至职位检索页的巡航
+  function checkAndResumeFromChatRedirect() {
+    try {
+      const savedAutoStart = sessionStorage.getItem('ziaver_auto_start_boss_cruise');
+      if (savedAutoStart && window.location.pathname.startsWith('/web/geek/job')) {
+        sessionStorage.removeItem('ziaver_auto_start_boss_cruise');
+        const params = JSON.parse(savedAutoStart);
+        setTimeout(() => {
+          logHUD('<span class="success">[自动续航]</span> 已成功回到职位检索页，正在无缝启动巡航！');
+          startAutopilot(params.target, params.isFromPipeline, params.initialSessionCount);
+        }, 1200);
+      }
+    } catch (e) {}
+  }
+
+  // 2. 聊天界面应急自荐信补发与自动返回机制 (兜底方案)
+  async function checkAndHandleChatPageRescue() {
+    if (!window.location.pathname.startsWith('/web/geek/chat')) return;
+    try {
+      const pendingGreeting = sessionStorage.getItem('ziaver_pending_chat_greeting');
+      if (pendingGreeting) {
+        sessionStorage.removeItem('ziaver_pending_chat_greeting');
+        console.log('[ZIAVER BOSS] 兜底捕获：检测到未发送的后台自荐信，正在聊天页自动键入补发...', pendingGreeting.slice(0, 30));
+        await sleep(1500);
+        const chatInput = document.querySelector(
+          '.chat-conversation [contenteditable="true"], .chat-box [contenteditable="true"], .im-chat [contenteditable="true"], ' +
+          '.chat-editor [contenteditable="true"], .chat-input[contenteditable="true"], textarea.chat-input, textarea'
+        );
+        if (chatInput) {
+          chatInput.focus();
+          if (chatInput.isContentEditable || chatInput.getAttribute('contenteditable') === 'true') {
+            chatInput.innerText = pendingGreeting;
+          } else {
+            chatInput.value = pendingGreeting;
+          }
+          chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+          chatInput.dispatchEvent(new Event('change', { bubbles: true }));
+          await sleep(500);
+          const sendBtn = document.querySelector('.btn-send, button[ka="chat_send"], button[class*="send"]');
+          if (sendBtn) {
+            sendBtn.click();
+          } else {
+            chatInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          }
+          await sleep(800);
+          console.log('[ZIAVER BOSS] 聊天页自荐信已成功送达！正在自动返回职位列表页继续巡航...');
+          window.location.href = 'https://www.zhipin.com/web/geek/job?city=101280600';
+        }
+      }
+    } catch (e) {}
+  }
+
   if (location.hostname.includes('zhipin.com')) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
@@ -2065,6 +2243,8 @@
           startHRReplyWatcher();
           checkAndResumePipeline();
           initChatQuickReplies();
+          checkAndResumeFromChatRedirect();
+          checkAndHandleChatPageRescue();
         });
       });
     } else {
@@ -2073,6 +2253,8 @@
         startHRReplyWatcher();
         checkAndResumePipeline();
         initChatQuickReplies();
+        checkAndResumeFromChatRedirect();
+        checkAndHandleChatPageRescue();
       });
     }
   }

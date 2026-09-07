@@ -19,6 +19,18 @@
   let currentTagIndex = 0;
   let pipelineStatusCache = null;
 
+  // 捕获并抑制立即沟通弹出的聊天新标签页/新窗口，彻底防止页面跳入聊天页卡死
+  let lastLagouChatOpenedTime = 0;
+  const rawWindowOpen = window.open;
+  window.open = function (url, target, features) {
+    if (isRunning && url && (String(url).includes('/chat') || String(url).includes('/im') || String(url).includes('lagou.com/im'))) {
+      console.log('[ZIAVER 拉勾] 成功捕获并抑制立即沟通弹出的聊天新标签页:', url);
+      lastLagouChatOpenedTime = Date.now();
+      return null;
+    }
+    return rawWindowOpen.apply(this, arguments);
+  };
+
   let config = {
     dailyLimit: 30,
     minDelaySec: 9,
@@ -1515,7 +1527,26 @@
       return { success: false, reason: 'captcha_triggered', message: '触发人机验证' };
     }
 
-    btnChat.click();
+    // 关键防跳盾：杜绝 <a> 标签原生导航跳转破坏巡航
+    const linkEl = btnChat.tagName === 'A' ? btnChat : btnChat.closest('a');
+    if (linkEl) {
+      linkEl.removeAttribute('target');
+      linkEl.setAttribute('data-original-href', linkEl.getAttribute('href') || '');
+      linkEl.setAttribute('href', 'javascript:void(0);');
+    }
+    const preventJump = (e) => {
+      if (linkEl) e.preventDefault();
+    };
+    btnChat.addEventListener('click', preventJump, { capture: true, once: true });
+
+    ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+      try {
+        btnChat.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {}
+    });
+    try {
+      btnChat.click();
+    } catch (e) {}
     playDoubleChime();
     await sleep(800);
 

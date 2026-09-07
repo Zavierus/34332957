@@ -1656,6 +1656,19 @@
       try {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       } catch (e) {}
+
+      // 关键防跳盾：杜绝 <a> 标签原生导航跳转至 /im/ 或新标签页破坏巡航
+      const linkEl = el.tagName === 'A' ? el : el.closest('a');
+      if (linkEl) {
+        linkEl.removeAttribute('target');
+        linkEl.setAttribute('data-original-href', linkEl.getAttribute('href') || '');
+        linkEl.setAttribute('href', 'javascript:void(0);');
+      }
+      const preventJump = (e) => {
+        if (linkEl) e.preventDefault();
+      };
+      el.addEventListener('click', preventJump, { capture: true, once: true });
+
       ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(evtName => {
         try {
           el.dispatchEvent(new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window }));
@@ -1759,6 +1772,28 @@
           triggerSafeClick(btn);
           await sleep(600);
           break;
+        }
+      }
+
+      // 5. 检查是否展开了聊天侧栏/抽屉输入框 (补充发送个性化自荐信)
+      const imInput = document.querySelector('.im-chat [contenteditable="true"], .chat-conversation [contenteditable="true"], .chat-editor textarea, textarea.im-editor-input, [class*="chat"] textarea');
+      if (imInput && (imInput.offsetWidth > 0 || imInput.offsetHeight > 0)) {
+        imInput.focus();
+        if (imInput.isContentEditable || imInput.getAttribute('contenteditable') === 'true') {
+          imInput.innerText = noteText;
+        } else {
+          imInput.value = noteText;
+        }
+        imInput.dispatchEvent(new Event('input', { bubbles: true }));
+        imInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(350);
+        const sendBtn = document.querySelector('.im-chat .btn-send, .chat-conversation .btn-send, button.im-send-btn, button[class*="send"]');
+        if (sendBtn) {
+          triggerSafeClick(sendBtn);
+          await sleep(500);
+        } else {
+          imInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+          await sleep(500);
         }
       }
     }
