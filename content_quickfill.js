@@ -11,6 +11,7 @@
   let applicantProfile = {};
   let lastTargetInput = null;
   let isDrawerOpen = false;
+  let isDrawerPinned = false;
   let searchQuery = '';
   let currentDrawerTab = 'structured'; // 'structured' | 'raw'
 
@@ -330,7 +331,7 @@
       .quickfill-drawer {
         position: fixed;
         top: 0;
-        right: -450px;
+        right: -520px;
         width: 420px;
         max-width: 90vw;
         height: 100vh;
@@ -346,7 +347,59 @@
         pointer-events: auto;
       }
       .quickfill-drawer.open {
-        right: 0;
+        right: 0 !important;
+      }
+      .quickfill-drawer.pinned {
+        border-left: 2px solid #00f2fe;
+        box-shadow: -10px 0 40px rgba(0, 242, 254, 0.25), -4px 0 16px rgba(0, 0, 0, 0.8);
+      }
+      .quickfill-drawer.no-anim {
+        transition: none !important;
+      }
+
+      /* 拖拽调节宽度手柄 */
+      .drawer-resizer {
+        position: absolute;
+        top: 0;
+        left: -4px;
+        width: 8px;
+        height: 100%;
+        cursor: col-resize;
+        z-index: 10;
+        background: transparent;
+        transition: background 0.15s;
+      }
+      .drawer-resizer:hover, .drawer-resizer.resizing {
+        background: rgba(0, 242, 254, 0.4);
+      }
+
+      /* 固定常驻 Pin 按钮 */
+      .drawer-pin-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 4px 9px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.18s;
+        white-space: nowrap;
+      }
+      .drawer-pin-btn:hover {
+        background: rgba(0, 242, 254, 0.15);
+        border-color: #00f2fe;
+        color: #00f2fe;
+      }
+      .drawer-pin-btn.active {
+        background: linear-gradient(135deg, rgba(0, 242, 254, 0.25) 0%, rgba(168, 85, 247, 0.25) 100%);
+        border-color: #00f2fe;
+        color: #00f2fe;
+        box-shadow: 0 0 10px rgba(0, 242, 254, 0.35);
+        font-weight: 700;
       }
 
       /* 抽屉顶部 */
@@ -357,6 +410,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 8px;
       }
       .drawer-title-box {
         display: flex;
@@ -665,13 +719,17 @@
 
       <!-- 抽屉主体 (浮动Dock，不阻挡网页点击) -->
       <div class="quickfill-drawer" id="quickfill-drawer">
+        <!-- 拖拽调节宽度手柄 -->
+        <div class="drawer-resizer" id="drawer-resizer" title="按住左右拖动调节面板宽度"></div>
+
         <div class="drawer-header">
           <div class="drawer-title-box">
             <span class="drawer-title">📋 简历网申速填库</span>
             <span class="drawer-tag" id="depot-summary-tag">PRO</span>
           </div>
-          <div style="display:flex; align-items:center; gap:6px;">
-            <button class="drawer-close-btn" id="btn-collapse-drawer" title="收起面板" style="font-size:11.5px; padding:4px 8px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border-radius:6px;">收起 ⇥</button>
+          <div style="display:flex; align-items:center; gap:5px;">
+            <button class="drawer-pin-btn" id="btn-pin-drawer" title="固定常驻模式：开启后切换网页、翻页或刷新页面均保持展开">📌 固定常驻</button>
+            <button class="drawer-close-btn" id="btn-collapse-drawer" title="收起面板" style="font-size:11.5px; padding:4px 7px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border-radius:6px;">收起 ⇥</button>
             <button class="drawer-close-btn" id="btn-close-drawer" title="关闭面板">✕</button>
           </div>
         </div>
@@ -1193,35 +1251,142 @@
     }
   }
 
-  // 11. 绑定抽屉交互控制事件 (无模态浮动Dock，支持连续点选填表)
+  // 11. 绑定抽屉交互控制事件 (无模态浮动Dock，支持固定常驻与连续点选填表)
   function bindDrawerEvents() {
     const pill = shadowRoot.getElementById('btn-toggle-drawer');
     const drawer = shadowRoot.getElementById('quickfill-drawer');
+    const btnPin = shadowRoot.getElementById('btn-pin-drawer');
     const btnCollapse = shadowRoot.getElementById('btn-collapse-drawer');
     const btnClose = shadowRoot.getElementById('btn-close-drawer');
     const searchInput = shadowRoot.getElementById('quickfill-search-input');
     const btnOpenDash = shadowRoot.getElementById('btn-open-depot-settings');
+    const resizer = shadowRoot.getElementById('drawer-resizer');
 
-    const openDrawer = () => {
+    const updatePinButtonState = () => {
+      if (!btnPin) return;
+      if (isDrawerPinned) {
+        btnPin.classList.add('active');
+        btnPin.innerHTML = '📌 已固定常驻';
+        btnPin.title = '当前为【已固定常驻】模式：切换网页、翻页或刷新页面均保持展开。点击可取消固定。';
+        if (drawer) drawer.classList.add('pinned');
+      } else {
+        btnPin.classList.remove('active');
+        btnPin.innerHTML = '📌 固定常驻';
+        btnPin.title = '点击开启【固定常驻】模式：切换网页、翻页或刷新页面均保持展开在屏幕右侧。';
+        if (drawer) drawer.classList.remove('pinned');
+      }
+    };
+
+    const openDrawer = (isUserExplicit = false) => {
       isDrawerOpen = true;
-      if (drawer) drawer.classList.add('open');
+      // 用户主动点开时，默认直接固定住 (满足用户需求: "点开了以后直接固定住")
+      if (isUserExplicit) {
+        isDrawerPinned = true;
+        chrome.storage.local.set({ quickfillDrawerPinned: true });
+        showToast('📌 面板已固定常驻 (换网页/刷新不关闭)');
+      }
+      if (drawer) {
+        drawer.classList.add('open');
+      }
+      if (pill) {
+        pill.style.opacity = '0';
+        pill.style.pointerEvents = 'none';
+      }
+      updatePinButtonState();
       updateTargetIndicator();
-      if (searchInput) searchInput.focus();
+      if (isUserExplicit && searchInput) {
+        setTimeout(() => searchInput.focus(), 150);
+      }
     };
 
     const closeDrawer = () => {
       isDrawerOpen = false;
-      if (drawer) drawer.classList.remove('open');
+      isDrawerPinned = false;
+      chrome.storage.local.set({ quickfillDrawerPinned: false });
+      if (drawer) {
+        drawer.classList.remove('open');
+        drawer.classList.remove('pinned');
+      }
+      if (pill) {
+        pill.style.opacity = '1';
+        pill.style.pointerEvents = 'auto';
+      }
+      updatePinButtonState();
+      showToast('✓ 面板已收起');
     };
 
     const toggleDrawer = () => {
       if (isDrawerOpen) closeDrawer();
-      else openDrawer();
+      else openDrawer(true);
     };
 
     if (pill) pill.addEventListener('click', toggleDrawer);
     if (btnCollapse) btnCollapse.addEventListener('click', closeDrawer);
     if (btnClose) btnClose.addEventListener('click', closeDrawer);
+
+    if (btnPin) {
+      btnPin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        isDrawerPinned = !isDrawerPinned;
+        chrome.storage.local.set({ quickfillDrawerPinned: isDrawerPinned });
+        updatePinButtonState();
+        if (isDrawerPinned) {
+          showToast('📌 面板已固定常驻 (换网页/刷新不关闭)');
+        } else {
+          showToast('📍 已取消固定常驻 (下次需手动点开)');
+        }
+      });
+    }
+
+    // 拖拽左侧边缘调整抽屉宽度
+    if (resizer && drawer) {
+      let isResizing = false;
+      let startX = 0;
+      let startWidth = 420;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = drawer.getBoundingClientRect().width;
+        drawer.classList.add('no-anim');
+        resizer.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const dx = startX - e.clientX;
+        const newWidth = Math.max(340, Math.min(800, startWidth + dx));
+        drawer.style.width = `${newWidth}px`;
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isResizing) {
+          isResizing = false;
+          drawer.classList.remove('no-anim');
+          resizer.classList.remove('resizing');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          const finalWidth = parseInt(drawer.style.width, 10);
+          if (finalWidth) {
+            chrome.storage.local.set({ quickfillDrawerWidth: finalWidth });
+          }
+        }
+      });
+    }
+
+    // 初始化恢复用户自定义宽度与固定常驻状态
+    chrome.storage.local.get(['quickfillDrawerPinned', 'quickfillDrawerWidth'], (res) => {
+      if (res && res.quickfillDrawerWidth && drawer) {
+        drawer.style.width = `${res.quickfillDrawerWidth}px`;
+      }
+      if (res && res.quickfillDrawerPinned) {
+        isDrawerPinned = true;
+        openDrawer(false);
+      }
+    });
 
     // 抽屉双模切换 Tab
     const tabStructured = shadowRoot.getElementById('drawer-tab-structured');
@@ -1277,7 +1442,7 @@
     });
     window.addEventListener('JOBCRUISE_OPEN_QUICKFILL', () => {
       if (!container) createQuickFillUI();
-      openDrawer();
+      openDrawer(true);
     });
 
     // 贴边把手支持鼠标按住垂直拖动
