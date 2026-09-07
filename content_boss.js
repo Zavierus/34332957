@@ -306,19 +306,52 @@
     };
   }
 
-  // ================= Web Audio 提示音 =================
-  function playDoubleChime() {
+  // ================= Web Audio 提示音与音频上下文预解锁 =================
+  let sharedAudioCtx = null;
+  function getOrCreateAudioContext() {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      
+      if (!AudioCtx) return null;
+      if (!sharedAudioCtx) {
+        sharedAudioCtx = new AudioCtx();
+      }
+      if (sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume().catch(() => {});
+      }
+      return sharedAudioCtx;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 页面初次交互时自动激活音频上下文（击破 Chrome 自动播放拦截）
+  const unlockAudio = () => {
+    try {
+      const ctx = getOrCreateAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+    } catch (e) {}
+  };
+  window.addEventListener('click', unlockAudio, { passive: true });
+  window.addEventListener('keydown', unlockAudio, { passive: true });
+  window.addEventListener('touchstart', unlockAudio, { passive: true });
+
+  async function playDoubleChime() {
+    try {
+      const ctx = getOrCreateAudioContext();
+      if (!ctx) return;
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      if (ctx.state === 'suspended') return;
+
       const playTone = (freq, start, duration) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
-        gain.gain.setValueAtTime(0.2, ctx.currentTime + start);
+        gain.gain.setValueAtTime(0.28, ctx.currentTime + start);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
         osc.connect(gain);
         gain.connect(ctx.destination);
@@ -326,11 +359,138 @@
         osc.stop(ctx.currentTime + start + duration);
       };
 
-      playTone(587.33, 0, 0.18);
-      playTone(880.00, 0.2, 0.35);
+      // 清脆双音叮咚 (587.33Hz -> 880Hz)
+      playTone(587.33, 0, 0.20);
+      playTone(880.00, 0.22, 0.38);
     } catch (e) {
-      console.warn(e);
+      console.warn('[Audio Alert Warning]', e);
     }
+  }
+
+  // ================= 浏览器标签页交替闪烁 =================
+  let titleFlashInterval = null;
+  let originalDocTitle = document.title;
+  function startTitleFlashing(alertTitle = '【🔔 HR来新消息了!】') {
+    if (titleFlashInterval) clearInterval(titleFlashInterval);
+    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR')) {
+      originalDocTitle = 'BOSS直聘';
+    }
+    let flag = true;
+    let count = 0;
+    titleFlashInterval = setInterval(() => {
+      document.title = flag ? alertTitle : originalDocTitle;
+      flag = !flag;
+      count++;
+      if (count > 20) { // 约 16 秒后停止闪烁
+        clearInterval(titleFlashInterval);
+        titleFlashInterval = null;
+        document.title = originalDocTitle;
+      }
+    }, 800);
+
+    const onFocus = () => {
+      if (titleFlashInterval) {
+        clearInterval(titleFlashInterval);
+        titleFlashInterval = null;
+        document.title = originalDocTitle;
+      }
+      window.removeEventListener('focus', onFocus);
+    };
+    window.addEventListener('focus', onFocus);
+  }
+
+  // ================= 页面内高可见度浮动 Toast 弹窗 =================
+  function showHRReplyToast(info = {}) {
+    let toast = document.getElementById('ziaver-hr-reply-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'ziaver-hr-reply-toast';
+      toast.style.cssText = `
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        z-index: 2147483647;
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+        border: 1.5px solid #00f2fe;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(0, 242, 254, 0.4);
+        border-radius: 12px;
+        padding: 14px 18px;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 320px;
+        max-width: 440px;
+        animation: ziaverSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        cursor: pointer;
+      `;
+      const styleTag = document.createElement('style');
+      styleTag.textContent = `
+        @keyframes ziaverSlideIn {
+          from { transform: translateX(110%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes ziaverPulse {
+          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(0,242,254,0.6)); }
+          50% { transform: scale(1.1); filter: drop-shadow(0 0 16px rgba(0,242,254,0.95)); }
+        }
+      `;
+      document.head.appendChild(styleTag);
+      document.body.appendChild(toast);
+    }
+
+    const unreadCount = info.count || 1;
+    const title = info.title || 'BOSS 直聘 · HR 新回复';
+    const desc = info.desc || `检测到企业 HR 正在与您互动，请及时跟进沟通！`;
+    const chatUrl = info.chatUrl || 'https://www.zhipin.com/web/geek/chat';
+
+    toast.innerHTML = `
+      <div style="font-size: 26px; line-height: 1; animation: ziaverPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="flex: 1;">
+        <div style="font-size: 13.5px; font-weight: 700; color: #00f2fe; display: flex; align-items: center; justify-content: space-between;">
+          <span>${title}</span>
+          <span style="font-size: 11px; background: rgba(0,242,254,0.2); color:#38bdf8; padding: 2px 6px; border-radius: 10px; font-weight:600;">${unreadCount} 条新消息</span>
+        </div>
+        <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px; line-height: 1.4;">${desc}</div>
+      </div>
+      <button id="ziaver-toast-goto-btn" style="
+        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+        border: none;
+        border-radius: 6px;
+        color: #0f172a;
+        font-weight: 700;
+        font-size: 11.5px;
+        padding: 6px 12px;
+        cursor: pointer;
+        white-space: nowrap;
+        box-shadow: 0 4px 12px rgba(0, 242, 254, 0.3);
+      ">查看 ↗</button>
+    `;
+
+    toast.onclick = () => {
+      window.open(chatUrl, '_blank');
+      toast.remove();
+    };
+
+    const btn = toast.querySelector('#ziaver-toast-goto-btn');
+    if (btn) {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        window.open(chatUrl, '_blank');
+        toast.remove();
+      };
+    }
+
+    if (toast._timer) clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => {
+      if (toast && toast.parentNode) {
+        toast.style.transition = 'opacity 0.5s, transform 0.5s';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        setTimeout(() => toast.remove(), 500);
+      }
+    }, 8500);
   }
 
   function getRandomDelayMs() {
@@ -1087,34 +1247,162 @@
     if (cityEl) cityEl.textContent = config.targetCity || '深圳';
   }
 
-  // ================= HR 回复未读监听 =================
-  function startHRReplyWatcher() {
-    setInterval(() => {
-      const badgeElements = document.querySelectorAll(
-        '.nav-item-message .badge, .nav-item-message span.count, [class*="unread-num"], [class*="badge-count"], .header-nav-message span.badge'
-      );
+  // ================= HR 回复与私信多维强提醒引擎 =================
+  let lastFriendMsgCount = -1;
+  let lastTitleHasMessage = false;
 
-      let currentUnread = 0;
-      badgeElements.forEach(el => {
-        const text = el.textContent.trim();
-        const num = parseInt(text, 10);
-        if (!isNaN(num) && num > 0) currentUnread += num;
+  function startHRReplyWatcher() {
+    // 1. 标题变动监听 (MutationObserver 极速感知)
+    try {
+      const titleEl = document.querySelector('title');
+      if (titleEl) {
+        const titleObs = new MutationObserver(() => {
+          checkTitleForHRMessage();
+        });
+        titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true });
+      }
+    } catch (e) {}
+
+    // 2. 周期性全方位巡检 (顶栏Badge + 纯红点 + 聊天页气泡 + 标题)
+    setInterval(() => {
+      checkAllHRMessageSources();
+    }, 2500);
+  }
+
+  function checkTitleForHRMessage() {
+    const title = document.title || '';
+    const hasMsg = /【.*?新消息.*?】|【\d+条|\(\d+\)\s*BOSS|【有新沟通】/i.test(title);
+    if (hasMsg && !lastTitleHasMessage) {
+      lastTitleHasMessage = true;
+      dispatchHRReplyNotification({
+        title: 'BOSS 直聘 · HR 发来新消息！',
+        desc: '系统检测到网页标题出现新消息动态提示，HR 正在期待您的回复～',
+        count: 1
+      });
+    } else if (!hasMsg) {
+      lastTitleHasMessage = false;
+    }
+  }
+
+  function checkAllHRMessageSources() {
+    let detectedUnread = 0;
+    let hasRedDot = false;
+
+    // A. 顶栏消息气泡与红点深度扫描
+    const headerMsgLinks = document.querySelectorAll(
+      'a[ka*="header-message"], a[ka*="header-chat"], a[href*="/web/geek/chat"], a[href*="/chat"], .nav-item-message, .header-message, .header-nav-message'
+    );
+
+    headerMsgLinks.forEach(link => {
+      // 查找子代中的各类可能徽标
+      const badges = link.querySelectorAll(
+        '.nav-chat-num, .badge, .header-chat-count, .msg-count, .badge-count, [class*="chat-num"], [class*="msg-num"], [class*="unread-num"], [class*="unread"], [class*="badge"], .red-dot, .red-point, i.dot, span.dot'
+      );
+      badges.forEach(b => {
+        if (b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none') {
+          const txt = b.textContent.trim();
+          const num = parseInt(txt, 10);
+          if (!isNaN(num) && num > 0) {
+            detectedUnread = Math.max(detectedUnread, num);
+          } else {
+            // 无数字红点（例如圆点标识）
+            hasRedDot = true;
+          }
+        }
       });
 
-      if (currentUnread > lastUnreadCount) {
-        console.log(`[ZIAVER Autopilot] BOSS检测到 HR 新回复！未读增量: ${currentUnread - lastUnreadCount}`);
-        if (config.audioAlert) playDoubleChime();
-        if (config.desktopNotification) {
-          chrome.runtime.sendMessage({
-            type: 'HR_REPLY_ALERT',
-            text: `BOSS直聘有新的 HR 沟通回复 (${currentUnread} 条未读)，请及时跟进！`
-          });
-        }
-        logHUD(`<span class="success" style="font-weight: bold;">🔔 检测到 HR 新回复！请查看顶栏私信。</span>`);
+      // 文本正则检测例如 "消息(3)" 或 "沟通 2"
+      const textMatch = (link.textContent || '').match(/[\(（](\d+)[\)）]/);
+      if (textMatch) {
+        const n = parseInt(textMatch[1], 10);
+        if (!isNaN(n) && n > 0) detectedUnread = Math.max(detectedUnread, n);
       }
+    });
 
-      lastUnreadCount = currentUnread;
-    }, 4000);
+    // 兜底独立全局未读元素扫描
+    const globalBadges = document.querySelectorAll(
+      '.nav-item-message .badge, .nav-item-message span.count, [class*="unread-num"], [class*="badge-count"], .header-nav-message span.badge, .nav-chat-num'
+    );
+    globalBadges.forEach(el => {
+      const num = parseInt(el.textContent.trim(), 10);
+      if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
+    });
+
+    // B. 聊天页面内部深度扫描 (/web/geek/chat)
+    let inChatNewMessage = false;
+    if (window.location.pathname.startsWith('/web/geek/chat')) {
+      // 1. 左侧联系人列表中的未读红点/数字
+      const chatUserListBadges = document.querySelectorAll(
+        '.user-list .unread, .user-list .badge, .chat-conversation .unread-num, [class*="unread-count"], [class*="badge-num"], [class*="chat-item"] [class*="unread"]'
+      );
+      chatUserListBadges.forEach(el => {
+        if (el.offsetWidth > 0 || el.offsetHeight > 0) {
+          const num = parseInt(el.textContent.trim(), 10);
+          if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
+          else hasRedDot = true;
+        }
+      });
+
+      // 2. 当前打开对话框中的对方最新回复气泡
+      const friendMsgs = document.querySelectorAll(
+        '.chat-conversation .item-friend, .chat-message-list .item-friend, [class*="item-friend"], [class*="message-item"]:not(.item-myself), [class*="friend-message"], [class*="item-boss"]'
+      );
+      const currentFriendCount = friendMsgs.length;
+      if (lastFriendMsgCount !== -1 && currentFriendCount > lastFriendMsgCount) {
+        inChatNewMessage = true;
+      }
+      lastFriendMsgCount = currentFriendCount;
+    }
+
+    // C. 标题检查兜底
+    checkTitleForHRMessage();
+
+    // D. 判定是否触发强提醒
+    const effectiveUnread = detectedUnread > 0 ? detectedUnread : (hasRedDot ? 1 : 0);
+    const hasIncreasedUnread = effectiveUnread > lastUnreadCount;
+
+    if (hasIncreasedUnread || inChatNewMessage) {
+      const delta = hasIncreasedUnread ? (effectiveUnread - lastUnreadCount) : 1;
+      console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到 HR 新回复/私信！未读数: ${effectiveUnread}, 增量: ${delta}, 聊天内新气泡: ${inChatNewMessage}`);
+      
+      dispatchHRReplyNotification({
+        title: '🔔 BOSS 直聘 · HR 新回复/私信！',
+        desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${effectiveUnread} 条未读)，请及时跟进！`,
+        count: effectiveUnread || 1
+      });
+    }
+
+    lastUnreadCount = effectiveUnread;
+  }
+
+  function dispatchHRReplyNotification(info = {}) {
+    // 1. 穿透式清脆提示音
+    if (config.audioAlert !== false) {
+      playDoubleChime();
+    }
+
+    // 2. 页面内高可见度浮动 Toast (带呼吸灯与直达跳转)
+    showHRReplyToast({
+      title: info.title || 'BOSS 直聘 · HR 新回复',
+      desc: info.desc || '检测到企业 HR 正在与您互动，请及时跟进！',
+      count: info.count || 1,
+      chatUrl: 'https://www.zhipin.com/web/geek/chat'
+    });
+
+    // 3. 浏览器标签页交替闪烁
+    startTitleFlashing('【🔔 HR来新消息了!】');
+
+    // 4. 系统级桌面弹窗通知
+    if (config.desktopNotification !== false) {
+      chrome.runtime.sendMessage({
+        type: 'HR_REPLY_ALERT',
+        platform: 'boss',
+        chatUrl: 'https://www.zhipin.com/web/geek/chat',
+        text: info.desc || `BOSS直聘有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
+      });
+    }
+
+    logHUD(`<span class="success" style="font-weight: bold;">🔔 检测到 HR 新回复！请查看顶栏私信或聊天界面。</span>`);
   }
 
   // ================= 登录状态智能识别 =================

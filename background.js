@@ -754,12 +754,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'next_site_triggered' });
     return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
-    // HR 新消息回复系统桌面强提醒
-    chrome.notifications.create('hr_reply_' + Date.now(), {
+    // HR 新消息回复系统桌面强提醒与直通路由
+    const notifId = 'hr_reply_' + Date.now();
+    const chatUrl = request.chatUrl || (
+      request.platform === 'liepin' ? 'https://www.liepin.com/im/' :
+      request.platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
+      'https://www.zhipin.com/web/geek/chat'
+    );
+    if (!globalThis.notifChatTargetMap) {
+      globalThis.notifChatTargetMap = new Map();
+    }
+    globalThis.notifChatTargetMap.set(notifId, chatUrl);
+
+    let siteTitle = 'BOSS 直聘';
+    if (request.platform === 'liepin') siteTitle = '猎聘网';
+    else if (request.platform === 'lagou') siteTitle = '拉勾网';
+
+    chrome.notifications.create(notifId, {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-      title: '🔔 BOSS 直聘 · 检测到 HR 新回复！',
-      message: request.text || '有企业 HR 正在与您互动，请切换回浏览器及时跟进！',
+      title: `🔔 ${siteTitle} · 检测到 HR 新回复/私信！`,
+      message: request.text || '有企业 HR 正在与您互动沟通，点击立即直达聊天界面！',
       priority: 2,
       requireInteraction: true
     });
@@ -849,12 +864,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// 点击桌面通知时，区分日常求职情报还是普通切换
+// 点击桌面通知时，精准区分日常求职情报、HR回复直接跳转与普通巡航切换
 chrome.notifications.onClicked.addListener((notifId) => {
   if (notifId && notifId.startsWith('daily_job_digest_')) {
     chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html#daily-digest') });
     return;
   }
+
+  if (notifId && notifId.startsWith('hr_reply_')) {
+    const targetUrl = (globalThis.notifChatTargetMap && globalThis.notifChatTargetMap.get(notifId)) || 'https://www.zhipin.com/web/geek/chat';
+    if (globalThis.notifChatTargetMap) globalThis.notifChatTargetMap.delete(notifId);
+
+    chrome.tabs.query({}, (tabs) => {
+      let existingTab = null;
+      if (targetUrl.includes('zhipin.com')) {
+        existingTab = tabs.find(t => t.url && t.url.includes('zhipin.com/web/geek/chat')) || tabs.find(t => t.url && t.url.includes('zhipin.com'));
+      } else if (targetUrl.includes('liepin.com')) {
+        existingTab = tabs.find(t => t.url && t.url.includes('liepin.com/im')) || tabs.find(t => t.url && t.url.includes('liepin.com'));
+      } else if (targetUrl.includes('lagou.com')) {
+        existingTab = tabs.find(t => t.url && (t.url.includes('lagou.com/im') || t.url.includes('lagou.com/message'))) || tabs.find(t => t.url && t.url.includes('lagou.com'));
+      }
+
+      if (existingTab) {
+        chrome.windows.update(existingTab.windowId, { focused: true });
+        chrome.tabs.update(existingTab.id, { active: true, url: targetUrl });
+      } else {
+        chrome.tabs.create({ url: targetUrl });
+      }
+    });
+    return;
+  }
+
   chrome.tabs.query({ url: ['*://*.zhipin.com/*', '*://*.liepin.com/*', '*://*.lagou.com/*'] }, (tabs) => {
     if (tabs.length > 0) {
       chrome.windows.update(tabs[0].windowId, { focused: true });

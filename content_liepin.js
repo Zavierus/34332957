@@ -527,6 +527,317 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  // ================= Web Audio 提示音与音频上下文预解锁 (猎聘网) =================
+  let sharedAudioCtx = null;
+  function getOrCreateAudioContext() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      if (!sharedAudioCtx) {
+        sharedAudioCtx = new AudioCtx();
+      }
+      if (sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume().catch(() => {});
+      }
+      return sharedAudioCtx;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  const unlockAudio = () => {
+    try {
+      const ctx = getOrCreateAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+    } catch (e) {}
+  };
+  window.addEventListener('click', unlockAudio, { passive: true });
+  window.addEventListener('keydown', unlockAudio, { passive: true });
+  window.addEventListener('touchstart', unlockAudio, { passive: true });
+
+  async function playDoubleChime() {
+    try {
+      const ctx = getOrCreateAudioContext();
+      if (!ctx) return;
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      if (ctx.state === 'suspended') return;
+
+      const playTone = (freq, start, duration) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+        gain.gain.setValueAtTime(0.28, ctx.currentTime + start);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + duration);
+      };
+
+      playTone(587.33, 0, 0.20);
+      playTone(880.00, 0.22, 0.38);
+    } catch (e) {
+      console.warn('[Liepin Audio Alert Warning]', e);
+    }
+  }
+
+  // ================= 浏览器标签页交替闪烁 =================
+  let titleFlashInterval = null;
+  let originalDocTitle = document.title;
+  function startTitleFlashing(alertTitle = '【🔔 猎聘HR来新消息了!】') {
+    if (titleFlashInterval) clearInterval(titleFlashInterval);
+    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR')) {
+      originalDocTitle = '猎聘网';
+    }
+    let flag = true;
+    let count = 0;
+    titleFlashInterval = setInterval(() => {
+      document.title = flag ? alertTitle : originalDocTitle;
+      flag = !flag;
+      count++;
+      if (count > 20) {
+        clearInterval(titleFlashInterval);
+        titleFlashInterval = null;
+        document.title = originalDocTitle;
+      }
+    }, 800);
+
+    const onFocus = () => {
+      if (titleFlashInterval) {
+        clearInterval(titleFlashInterval);
+        titleFlashInterval = null;
+        document.title = originalDocTitle;
+      }
+      window.removeEventListener('focus', onFocus);
+    };
+    window.addEventListener('focus', onFocus);
+  }
+
+  // ================= 猎聘专属高可见度 Toast 弹窗 =================
+  function showLiepinHRReplyToast(info = {}) {
+    let toast = document.getElementById('ziaver-liepin-hr-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'ziaver-liepin-hr-toast';
+      toast.style.cssText = `
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        z-index: 2147483647;
+        background: linear-gradient(135deg, #1e102f 0%, #2e1065 100%);
+        border: 1.5px solid #a855f7;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(168, 85, 247, 0.4);
+        border-radius: 12px;
+        padding: 14px 18px;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 320px;
+        max-width: 440px;
+        animation: ziaverLiepinSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        cursor: pointer;
+      `;
+      const styleTag = document.createElement('style');
+      styleTag.textContent = `
+        @keyframes ziaverLiepinSlideIn {
+          from { transform: translateX(110%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes ziaverLiepinPulse {
+          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(168,85,247,0.6)); }
+          50% { transform: scale(1.1); filter: drop-shadow(0 0 16px rgba(168,85,247,0.95)); }
+        }
+      `;
+      document.head.appendChild(styleTag);
+      document.body.appendChild(toast);
+    }
+
+    const unreadCount = info.count || 1;
+    const title = info.title || '猎聘网 · HR 新回复';
+    const desc = info.desc || `检测到猎聘企业 HR 正在与您互动沟通，请及时跟进！`;
+    const chatUrl = info.chatUrl || 'https://www.liepin.com/im/';
+
+    toast.innerHTML = `
+      <div style="font-size: 26px; line-height: 1; animation: ziaverLiepinPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="flex: 1;">
+        <div style="font-size: 13.5px; font-weight: 700; color: #c084fc; display: flex; align-items: center; justify-content: space-between;">
+          <span>${title}</span>
+          <span style="font-size: 11px; background: rgba(168,85,247,0.25); color:#e9d5ff; padding: 2px 6px; border-radius: 10px; font-weight:600;">${unreadCount} 条新消息</span>
+        </div>
+        <div style="font-size: 12px; color: #e2e8f0; margin-top: 4px; line-height: 1.4;">${desc}</div>
+      </div>
+      <button id="ziaver-liepin-toast-btn" style="
+        background: linear-gradient(135deg, #a855f7 0%, #c084fc 100%);
+        border: none;
+        border-radius: 6px;
+        color: #fff;
+        font-weight: 700;
+        font-size: 11.5px;
+        padding: 6px 12px;
+        cursor: pointer;
+        white-space: nowrap;
+        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+      ">查看 ↗</button>
+    `;
+
+    toast.onclick = () => {
+      window.open(chatUrl, '_blank');
+      toast.remove();
+    };
+
+    const btn = toast.querySelector('#ziaver-liepin-toast-btn');
+    if (btn) {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        window.open(chatUrl, '_blank');
+        toast.remove();
+      };
+    }
+
+    if (toast._timer) clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => {
+      if (toast && toast.parentNode) {
+        toast.style.transition = 'opacity 0.5s, transform 0.5s';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        setTimeout(() => toast.remove(), 500);
+      }
+    }, 8500);
+  }
+
+  // ================= HR 回复与私信多维强提醒引擎 (猎聘网) =================
+  let lastLiepinUnreadCount = 0;
+  let lastLiepinFriendMsgCount = -1;
+  let lastLiepinTitleHasMessage = false;
+
+  function startHRReplyWatcher() {
+    try {
+      const titleEl = document.querySelector('title');
+      if (titleEl) {
+        const titleObs = new MutationObserver(() => {
+          checkLiepinTitleForHR();
+        });
+        titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true });
+      }
+    } catch (e) {}
+
+    setInterval(() => {
+      checkAllLiepinHRMessageSources();
+    }, 2500);
+  }
+
+  function checkLiepinTitleForHR() {
+    const title = document.title || '';
+    const hasMsg = /【.*?新消息.*?】|【\d+条|\(\d+\)\s*猎聘/i.test(title);
+    if (hasMsg && !lastLiepinTitleHasMessage) {
+      lastLiepinTitleHasMessage = true;
+      dispatchLiepinHRReplyNotification({
+        title: '🔔 猎聘网 · HR 发来新消息！',
+        desc: '系统检测到网页标题出现新消息动态提示，猎头或HR正在期待您的回复～',
+        count: 1
+      });
+    } else if (!hasMsg) {
+      lastLiepinTitleHasMessage = false;
+    }
+  }
+
+  function checkAllLiepinHRMessageSources() {
+    let detectedUnread = 0;
+    let hasRedDot = false;
+
+    // A. 顶栏消息气泡扫描
+    const headerMsgLinks = document.querySelectorAll(
+      'a[href*="/im/"], a[href*="/chat/"], [data-nick="header-im"], .header-im, .header-message'
+    );
+    headerMsgLinks.forEach(link => {
+      const badges = link.querySelectorAll(
+        '.header-im-count, .im-badge, [class*="unread-count"], [class*="badge"], [class*="red-dot"], span.dot, i.dot'
+      );
+      badges.forEach(b => {
+        if (b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none') {
+          const txt = b.textContent.trim();
+          const num = parseInt(txt, 10);
+          if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
+          else hasRedDot = true;
+        }
+      });
+      const textMatch = (link.textContent || '').match(/[\(（](\d+)[\)）]/);
+      if (textMatch) {
+        const n = parseInt(textMatch[1], 10);
+        if (!isNaN(n) && n > 0) detectedUnread = Math.max(detectedUnread, n);
+      }
+    });
+
+    // B. 猎聘聊天内页扫描 (/im/)
+    let inChatNewMessage = false;
+    if (window.location.pathname.includes('/im/') || window.location.pathname.includes('/chat/')) {
+      const chatUserBadges = document.querySelectorAll(
+        '[class*="conversation"] [class*="unread"], [class*="conversation"] [class*="badge"], .im-list [class*="badge"]'
+      );
+      chatUserBadges.forEach(el => {
+        if (el.offsetWidth > 0 || el.offsetHeight > 0) {
+          const num = parseInt(el.textContent.trim(), 10);
+          if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
+          else hasRedDot = true;
+        }
+      });
+
+      const friendMsgs = document.querySelectorAll(
+        '[class*="msg-item"][class*="friend"], [class*="chat-message"][class*="left"], [class*="item-friend"], .msg-left'
+      );
+      const curCount = friendMsgs.length;
+      if (lastLiepinFriendMsgCount !== -1 && curCount > lastLiepinFriendMsgCount) {
+        inChatNewMessage = true;
+      }
+      lastLiepinFriendMsgCount = curCount;
+    }
+
+    checkLiepinTitleForHR();
+
+    const effectiveUnread = detectedUnread > 0 ? detectedUnread : (hasRedDot ? 1 : 0);
+    const hasIncreased = effectiveUnread > lastLiepinUnreadCount;
+
+    if (hasIncreased || inChatNewMessage) {
+      console.log(`[ZIAVER Liepin] 🔔 侦测到猎聘 HR 新回复/私信！未读数: ${effectiveUnread}`);
+      dispatchLiepinHRReplyNotification({
+        title: '🔔 猎聘网 · HR 新回复/私信！',
+        desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${effectiveUnread} 条未读)，请及时跟进！`,
+        count: effectiveUnread || 1
+      });
+    }
+
+    lastLiepinUnreadCount = effectiveUnread;
+  }
+
+  function dispatchLiepinHRReplyNotification(info = {}) {
+    if (config.audioAlert !== false) playDoubleChime();
+    showLiepinHRReplyToast({
+      title: info.title || '猎聘网 · HR 新回复',
+      desc: info.desc || '检测到企业 HR 正在与您互动，请及时跟进！',
+      count: info.count || 1,
+      chatUrl: 'https://www.liepin.com/im/'
+    });
+    startTitleFlashing('【🔔 猎聘HR来新消息了!】');
+    if (config.desktopNotification !== false) {
+      chrome.runtime.sendMessage({
+        type: 'HR_REPLY_ALERT',
+        platform: 'liepin',
+        chatUrl: 'https://www.liepin.com/im/',
+        text: info.desc || `猎聘网有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
+      });
+    }
+    if (typeof logHUD === 'function') {
+      logHUD(`<span class="success" style="font-weight: bold;">🔔 检测到猎聘 HR 新回复！请查看消息中心。</span>`);
+    }
+  }
+
   // ================= Shadow DOM HUD =================
   let hudContainer = null;
   let shadowRoot = null;
@@ -2372,6 +2683,7 @@
       document.addEventListener('DOMContentLoaded', () => {
         refreshConfig(() => {
           createHUD();
+          startHRReplyWatcher();
           checkAndResumePipeline();
           initChatQuickReplies();
         });
@@ -2379,6 +2691,7 @@
     } else {
       refreshConfig(() => {
         createHUD();
+        startHRReplyWatcher();
         checkAndResumePipeline();
         initChatQuickReplies();
       });
