@@ -623,31 +623,32 @@
     window.addEventListener('focus', onFocus);
   }
 
-  // ================= 猎聘专属高可见度 Toast 弹窗 =================
+  // ================= 页面内高可见度浮动 Toast 弹窗 (3.5s轻量淡出，支持悬停暂停与✕立即关闭) =================
   function showLiepinHRReplyToast(info = {}) {
-    let toast = document.getElementById('ziaver-liepin-hr-toast');
+    let toast = document.getElementById('ziaver-liepin-reply-toast');
     if (!toast) {
       toast = document.createElement('div');
-      toast.id = 'ziaver-liepin-hr-toast';
+      toast.id = 'ziaver-liepin-reply-toast';
       toast.style.cssText = `
         position: fixed;
         top: 24px;
         right: 24px;
         z-index: 2147483647;
-        background: linear-gradient(135deg, #1e102f 0%, #2e1065 100%);
-        border: 1.5px solid #a855f7;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(168, 85, 247, 0.4);
+        background: linear-gradient(135deg, #0f172a 0%, #2e1065 100%);
+        border: 1.5px solid #c084fc;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(168, 85, 247, 0.35);
         border-radius: 12px;
-        padding: 14px 18px;
+        padding: 12px 16px;
         color: #fff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
         display: flex;
         align-items: center;
-        gap: 14px;
-        min-width: 320px;
-        max-width: 440px;
-        animation: ziaverLiepinSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        gap: 12px;
+        min-width: 300px;
+        max-width: 420px;
+        animation: ziaverLiepinSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         cursor: pointer;
+        user-select: none;
       `;
       const styleTag = document.createElement('style');
       styleTag.textContent = `
@@ -670,31 +671,56 @@
     const chatUrl = info.chatUrl || 'https://www.liepin.com/im/';
 
     toast.innerHTML = `
-      <div style="font-size: 26px; line-height: 1; animation: ziaverLiepinPulse 2s infinite ease-in-out;">🔔</div>
-      <div style="flex: 1;">
-        <div style="font-size: 13.5px; font-weight: 700; color: #c084fc; display: flex; align-items: center; justify-content: space-between;">
-          <span>${title}</span>
-          <span style="font-size: 11px; background: rgba(168,85,247,0.25); color:#e9d5ff; padding: 2px 6px; border-radius: 10px; font-weight:600;">${unreadCount} 条新消息</span>
+      <div style="font-size: 24px; line-height: 1; animation: ziaverLiepinPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="flex: 1; overflow: hidden;">
+        <div style="font-size: 13px; font-weight: 700; color: #c084fc; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span>
+          <span style="font-size: 10.5px; background: rgba(168,85,247,0.25); color:#e9d5ff; padding: 2px 6px; border-radius: 10px; font-weight:600; white-space: nowrap;">${unreadCount} 条未读</span>
         </div>
-        <div style="font-size: 12px; color: #e2e8f0; margin-top: 4px; line-height: 1.4;">${desc}</div>
+        <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${desc}</div>
       </div>
-      <button id="ziaver-liepin-toast-btn" style="
-        background: linear-gradient(135deg, #a855f7 0%, #c084fc 100%);
-        border: none;
-        border-radius: 6px;
-        color: #fff;
-        font-weight: 700;
-        font-size: 11.5px;
-        padding: 6px 12px;
-        cursor: pointer;
-        white-space: nowrap;
-        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
-      ">查看 ↗</button>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="ziaver-liepin-toast-btn" style="
+          background: linear-gradient(135deg, #a855f7 0%, #c084fc 100%);
+          border: none;
+          border-radius: 6px;
+          color: #fff;
+          font-weight: 700;
+          font-size: 11px;
+          padding: 5px 10px;
+          cursor: pointer;
+          white-space: nowrap;
+          box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+        ">查看 ↗</button>
+        <button id="ziaver-liepin-close-btn" style="
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 6px;
+          color: #94a3b8;
+          font-size: 12px;
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.15s;
+        " title="关闭通知">✕</button>
+      </div>
     `;
+
+    const closeToast = () => {
+      if (toast && toast.parentNode) {
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 300);
+      }
+    };
 
     toast.onclick = () => {
       window.open(chatUrl, '_blank');
-      toast.remove();
+      closeToast();
     };
 
     const btn = toast.querySelector('#ziaver-liepin-toast-btn');
@@ -702,28 +728,104 @@
       btn.onclick = (e) => {
         e.stopPropagation();
         window.open(chatUrl, '_blank');
-        toast.remove();
+        closeToast();
       };
     }
 
-    if (toast._timer) clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => {
-      if (toast && toast.parentNode) {
-        toast.style.transition = 'opacity 0.5s, transform 0.5s';
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-20px)';
-        setTimeout(() => toast.remove(), 500);
-      }
-    }, 8500);
+    const btnClose = toast.querySelector('#ziaver-liepin-close-btn');
+    if (btnClose) {
+      btnClose.onclick = (e) => {
+        e.stopPropagation();
+        closeToast();
+      };
+    }
+
+    const startDismissTimer = (delay = 3500) => {
+      if (toast._timer) clearTimeout(toast._timer);
+      toast._timer = setTimeout(closeToast, delay);
+    };
+
+    toast.onmouseenter = () => {
+      if (toast._timer) clearTimeout(toast._timer);
+    };
+
+    toast.onmouseleave = () => {
+      startDismissTimer(1800);
+    };
+
+    startDismissTimer(3500);
   }
 
-  // ================= HR 回复与私信多维强提醒引擎 (猎聘网 - 严格未读、防误报、防循环) =================
+  // ================= HR 回复与私信多维强提醒引擎 (猎聘网 - 严格未读、防误报、防循环、深度过滤) =================
   let lastLiepinUnreadCount = 0;
   let lastLiepinFriendMsgCount = -1;
   let lastLiepinAlertTimestamp = 0;
   let isLiepinWatcherInitialized = false;
+  let liepinWatcherInitTimestamp = Date.now();
+
+  const LP_SYSTEM_BLACKLIST = [
+    '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+    '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
+    '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
+    '面试邀请', '点击预览', '收到你的', '不合适', '查看简历', '猎聘小秘书',
+    '系统通知', '职位推荐', '安全提醒', '温馨提示'
+  ];
+
+  function isLiepinSystemText(text) {
+    if (!text) return true;
+    const clean = String(text).trim();
+    if (clean.length === 0) return true;
+    return LP_SYSTEM_BLACKLIST.some(kw => clean.includes(kw));
+  }
+
+  function checkLiepinChatLastBubbleIsRealHR() {
+    if (!window.location.pathname.includes('/im/') && !window.location.pathname.includes('/chat/')) return true;
+    const chatContainer = document.querySelector('[class*="chat-message-list"], [class*="im-message-list"], [class*="msg-list"]');
+    if (!chatContainer) return true;
+
+    const allMsgItems = chatContainer.querySelectorAll('[class*="msg-item"], [class*="chat-message"], [class*="message-item"]');
+    if (allMsgItems.length === 0) return false;
+
+    const lastItem = allMsgItems[allMsgItems.length - 1];
+    if (!lastItem) return false;
+
+    const cls = (lastItem.className || '').toLowerCase();
+    if (cls.includes('right') || cls.includes('myself') || cls.includes('self') || cls.includes('me')) return false;
+    if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('card') || cls.includes('status')) return false;
+
+    const text = (lastItem.textContent || '').trim();
+    if (isLiepinSystemText(text)) return false;
+
+    return true;
+  }
+
+  function checkLiepinSidebarUnreadIsRealHR() {
+    if (!window.location.pathname.includes('/im/') && !window.location.pathname.includes('/chat/')) return true;
+    const unreadItems = document.querySelectorAll(
+      '[class*="conversation"]:has([class*="unread"]), [class*="conversation"]:has([class*="badge"]), .im-list li:has([class*="badge"])'
+    );
+    if (unreadItems.length > 0) {
+      let hasReal = false;
+      unreadItems.forEach(item => {
+        const preview = item.querySelector('[class*="last-msg"], [class*="preview"], [class*="text"], p');
+        const text = preview ? preview.textContent.trim() : item.textContent.trim();
+        if (!isLiepinSystemText(text)) hasReal = true;
+      });
+      return hasReal;
+    }
+
+    const firstItem = document.querySelector('[class*="conversation-item"], .im-list li');
+    if (firstItem) {
+      const preview = firstItem.querySelector('[class*="last-msg"], [class*="preview"], [class*="text"], p');
+      const text = preview ? preview.textContent.trim() : '';
+      if (text && isLiepinSystemText(text)) return false;
+    }
+
+    return true;
+  }
 
   function startHRReplyWatcher() {
+    liepinWatcherInitTimestamp = Date.now();
     try {
       const titleEl = document.querySelector('title');
       if (titleEl) {
@@ -746,10 +848,17 @@
     const title = document.title || '';
     if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
 
+    if (Date.now() - liepinWatcherInitTimestamp < 4000) return;
+
     const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*猎聘/);
     if (m) {
       const count = parseInt(m[1], 10);
       if (count > 0 && isLiepinWatcherInitialized && count > lastLiepinUnreadCount) {
+        if (!checkLiepinChatLastBubbleIsRealHR() || !checkLiepinSidebarUnreadIsRealHR()) {
+          lastLiepinUnreadCount = count;
+          return;
+        }
+
         if (Date.now() - lastLiepinAlertTimestamp > 12000) {
           lastLiepinAlertTimestamp = Date.now();
           dispatchLiepinHRReplyNotification({
@@ -801,11 +910,6 @@
         }
       });
 
-      const SYSTEM_MSG_BLACKLIST_LP = [
-        '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-        '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝',
-        '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示'
-      ];
       const allCandidatesLP = document.querySelectorAll(
         '[class*="msg-item"][class*="friend"], [class*="chat-message"][class*="left"], [class*="item-friend"], .msg-left'
       );
@@ -814,19 +918,20 @@
         const cls = (el.className || '').toLowerCase();
         if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
         const txt = (el.textContent || '').trim();
-        if (txt.length === 0) return;
-        if (SYSTEM_MSG_BLACKLIST_LP.some(kw => txt.includes(kw))) return;
+        if (txt.length === 0 || isLiepinSystemText(txt)) return;
         realCountLP++;
       });
       const curCount = realCountLP;
       if (isLiepinWatcherInitialized && lastLiepinFriendMsgCount > 0 && curCount > lastLiepinFriendMsgCount) {
-        inChatNewMessage = true;
+        if (checkLiepinChatLastBubbleIsRealHR()) {
+          inChatNewMessage = true;
+        }
       }
       lastLiepinFriendMsgCount = curCount;
     }
 
-    // 首次扫描基准化：首屏坚决不弹窗打扰！
-    if (!isLiepinWatcherInitialized) {
+    // 首次扫描基准化或前 4 秒稳态期：首屏坚决不弹窗打扰！
+    if (!isLiepinWatcherInitialized || (Date.now() - liepinWatcherInitTimestamp < 4000)) {
       lastLiepinUnreadCount = detectedUnread;
       isLiepinWatcherInitialized = true;
       return;
@@ -835,38 +940,23 @@
     const hasIncreased = detectedUnread > lastLiepinUnreadCount;
     const now = Date.now();
 
-    // 二次验证：扫描侧边栏预览过滤系统消息
-    const LP_SYS_KW = [
-      '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-      '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
-      '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
-      '面试邀请', '点击预览', '收到你的', '不合适', '查看简历'
-    ];
-    let lpSystemOnly = false;
-    if (hasIncreased) {
-      const lpPreviews = document.querySelectorAll(
-        '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], [class*="conversation"] [class*="text"], [class*="session"] [class*="msg"]'
-      );
-      if (lpPreviews.length > 0) {
-        let allSys = true, chk = 0;
-        lpPreviews.forEach(el => {
-          if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-            const t = (el.textContent || '').trim();
-            if (t.length > 0) { chk++; if (!LP_SYS_KW.some(kw => t.includes(kw))) allSys = false; }
-          }
-        });
-        if (chk > 0 && allSys) { lpSystemOnly = true; console.log('[ZIAVER Liepin] ⏭ 未读增量被二次验证拦截：系统消息，跳过'); }
+    if (hasIncreased || inChatNewMessage) {
+      const isRealHR = checkLiepinChatLastBubbleIsRealHR() && checkLiepinSidebarUnreadIsRealHR();
+      if (!isRealHR) {
+        console.log('[ZIAVER Liepin] ⏭ 未读增量被深度二次验证拦截（命中系统消息），静默跳过');
+        lastLiepinUnreadCount = detectedUnread;
+        return;
       }
-    }
 
-    if ((hasIncreased || inChatNewMessage) && !lpSystemOnly && (now - lastLiepinAlertTimestamp > 10000)) {
-      lastLiepinAlertTimestamp = now;
-      console.log(`[ZIAVER Liepin] 🔔 侦测到真实的猎聘 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLiepinUnreadCount}`);
-      dispatchLiepinHRReplyNotification({
-        title: '🔔 猎聘网 · HR 新回复/私信！',
-        desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
-        count: detectedUnread || 1
-      });
+      if (now - lastLiepinAlertTimestamp > 10000) {
+        lastLiepinAlertTimestamp = now;
+        console.log(`[ZIAVER Liepin] 🔔 侦测到真实的猎聘 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLiepinUnreadCount}`);
+        dispatchLiepinHRReplyNotification({
+          title: '🔔 猎聘网 · HR 新回复/私信！',
+          desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
+          count: detectedUnread || 1
+        });
+      }
     }
 
     lastLiepinUnreadCount = detectedUnread;

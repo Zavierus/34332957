@@ -404,7 +404,7 @@
     window.addEventListener('focus', onFocus);
   }
 
-  // ================= 页面内高可见度浮动 Toast 弹窗 =================
+  // ================= 页面内高可见度浮动 Toast 弹窗 (3.5s轻量淡出，支持悬停暂停与✕立即关闭) =================
   function showHRReplyToast(info = {}) {
     let toast = document.getElementById('ziaver-hr-reply-toast');
     if (!toast) {
@@ -419,16 +419,17 @@
         border: 1.5px solid #00f2fe;
         box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(0, 242, 254, 0.4);
         border-radius: 12px;
-        padding: 14px 18px;
+        padding: 12px 16px;
         color: #fff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
         display: flex;
         align-items: center;
-        gap: 14px;
-        min-width: 320px;
-        max-width: 440px;
-        animation: ziaverSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        gap: 12px;
+        min-width: 300px;
+        max-width: 420px;
+        animation: ziaverSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         cursor: pointer;
+        user-select: none;
       `;
       const styleTag = document.createElement('style');
       styleTag.textContent = `
@@ -451,51 +452,90 @@
     const chatUrl = info.chatUrl || 'https://www.zhipin.com/web/geek/chat';
 
     toast.innerHTML = `
-      <div style="font-size: 26px; line-height: 1; animation: ziaverPulse 2s infinite ease-in-out;">🔔</div>
-      <div style="flex: 1;">
-        <div style="font-size: 13.5px; font-weight: 700; color: #00f2fe; display: flex; align-items: center; justify-content: space-between;">
-          <span>${title}</span>
-          <span style="font-size: 11px; background: rgba(0,242,254,0.2); color:#38bdf8; padding: 2px 6px; border-radius: 10px; font-weight:600;">${unreadCount} 条新消息</span>
+      <div style="font-size: 24px; line-height: 1; animation: ziaverPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="flex: 1; overflow: hidden;">
+        <div style="font-size: 13px; font-weight: 700; color: #00f2fe; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span>
+          <span style="font-size: 10.5px; background: rgba(0,242,254,0.2); color:#38bdf8; padding: 2px 6px; border-radius: 10px; font-weight:600; white-space: nowrap;">${unreadCount} 条未读</span>
         </div>
-        <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px; line-height: 1.4;">${desc}</div>
+        <div style="font-size: 11.5px; color: #cbd5e1; margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${desc}</div>
       </div>
-      <button id="ziaver-toast-goto-btn" style="
-        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-        border: none;
-        border-radius: 6px;
-        color: #0f172a;
-        font-weight: 700;
-        font-size: 11.5px;
-        padding: 6px 12px;
-        cursor: pointer;
-        white-space: nowrap;
-        box-shadow: 0 4px 12px rgba(0, 242, 254, 0.3);
-      ">查看 ↗</button>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="ziaver-toast-goto-btn" style="
+          background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+          border: none;
+          border-radius: 6px;
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 11px;
+          padding: 5px 10px;
+          cursor: pointer;
+          white-space: nowrap;
+          box-shadow: 0 4px 12px rgba(0, 242, 254, 0.3);
+        ">查看 ↗</button>
+        <button id="ziaver-toast-close-btn" style="
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 6px;
+          color: #94a3b8;
+          font-size: 12px;
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.15s;
+        " title="关闭通知">✕</button>
+      </div>
     `;
+
+    const closeToast = () => {
+      if (toast && toast.parentNode) {
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 300);
+      }
+    };
 
     toast.onclick = () => {
       window.open(chatUrl, '_blank');
-      toast.remove();
+      closeToast();
     };
 
-    const btn = toast.querySelector('#ziaver-toast-goto-btn');
-    if (btn) {
-      btn.onclick = (e) => {
+    const btnGoto = toast.querySelector('#ziaver-toast-goto-btn');
+    if (btnGoto) {
+      btnGoto.onclick = (e) => {
         e.stopPropagation();
         window.open(chatUrl, '_blank');
-        toast.remove();
+        closeToast();
       };
     }
 
-    if (toast._timer) clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => {
-      if (toast && toast.parentNode) {
-        toast.style.transition = 'opacity 0.5s, transform 0.5s';
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-20px)';
-        setTimeout(() => toast.remove(), 500);
-      }
-    }, 8500);
+    const btnClose = toast.querySelector('#ziaver-toast-close-btn');
+    if (btnClose) {
+      btnClose.onclick = (e) => {
+        e.stopPropagation();
+        closeToast();
+      };
+    }
+
+    // 自动 3.5 秒轻量淡出，悬停暂停
+    const startDismissTimer = (delay = 3500) => {
+      if (toast._timer) clearTimeout(toast._timer);
+      toast._timer = setTimeout(closeToast, delay);
+    };
+
+    toast.onmouseenter = () => {
+      if (toast._timer) clearTimeout(toast._timer);
+    };
+
+    toast.onmouseleave = () => {
+      startDismissTimer(1800);
+    };
+
+    startDismissTimer(3500);
   }
 
   function getRandomDelayMs() {
@@ -1252,12 +1292,97 @@
     if (cityEl) cityEl.textContent = config.targetCity || '深圳';
   }
 
-  // ================= HR 回复与私信多维强提醒引擎 (严格未读、防误报、防循环) =================
+  // ================= HR 回复与私信多维强提醒引擎 (严格未读、防误报、防循环、精准系统消息过滤) =================
   let lastFriendMsgCount = -1;
   let lastAlertTimestamp = 0;
   let isWatcherInitialized = false;
+  let watcherInitTimestamp = Date.now();
+
+  const SYSTEM_REPLY_BLACKLIST = [
+    '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+    '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
+    '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
+    '面试邀请', '点击预览', '收到你的', '不合适', '查看简历', '牛人已同意',
+    '附件已送达', '直聘小秘书', '安全中心', '平台提示', '直聘助手', '职位已停招',
+    '以下是系统', '温馨提示', '安全提示', '沟通记录'
+  ];
+
+  function isSystemMessageText(text) {
+    if (!text) return true;
+    const clean = String(text).trim();
+    if (clean.length === 0) return true;
+    return SYSTEM_REPLY_BLACKLIST.some(kw => clean.includes(kw));
+  }
+
+  // 深度检查当前聊天会话窗口内最后一条气泡是否是真实的 HR 回复
+  function checkCurrentChatLastBubbleIsRealHR() {
+    if (!window.location.pathname.startsWith('/web/geek/chat')) return true;
+    const chatContainer = document.querySelector('.chat-conversation, .chat-message-list, [class*="message-list"]');
+    if (!chatContainer) return true;
+
+    const allMsgItems = chatContainer.querySelectorAll('[class*="item-"], [class*="message-item"], [class*="chat-item"]');
+    if (allMsgItems.length === 0) return false;
+
+    const lastItem = allMsgItems[allMsgItems.length - 1];
+    if (!lastItem) return false;
+
+    // 1. 如果最后一条消息是自己发的 (item-myself / self / item-right) -> 绝不报警
+    const cls = (lastItem.className || '').toLowerCase();
+    if (cls.includes('myself') || cls.includes('self') || cls.includes('item-right') || cls.includes('me')) {
+      return false;
+    }
+
+    // 2. 如果最后一条消息是系统提示/状态卡片/简历卡片 -> 绝不报警
+    if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('status') || cls.includes('card') || cls.includes('resume')) {
+      return false;
+    }
+
+    // 3. 检查文本内容是否命中系统消息黑名单
+    const text = (lastItem.textContent || '').trim();
+    if (isSystemMessageText(text)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // 检查左侧会话列表变动或有未读标记项的最新消息预览
+  function checkSidebarUnreadIsRealHR() {
+    if (!window.location.pathname.startsWith('/web/geek/chat')) return true;
+
+    // 找到所有带有 unread / badge 标记的联系人 item
+    const unreadUserItems = document.querySelectorAll(
+      '.user-list li:has(.unread), .user-list li:has(.badge), [class*="conversation-item"]:has([class*="unread"]), [class*="chat-item"]:has([class*="badge"])'
+    );
+
+    if (unreadUserItems.length > 0) {
+      let hasRealHRUnread = false;
+      unreadUserItems.forEach(item => {
+        const preview = item.querySelector('[class*="last-msg"], [class*="msg-preview"], [class*="text"], p');
+        const text = preview ? preview.textContent.trim() : item.textContent.trim();
+        if (!isSystemMessageText(text)) {
+          hasRealHRUnread = true;
+        }
+      });
+      return hasRealHRUnread;
+    }
+
+    // 检查列表第一项（最新发生变动项）
+    const firstUserItem = document.querySelector('.user-list li, [class*="conversation-item"], [class*="chat-item"]');
+    if (firstUserItem) {
+      const preview = firstUserItem.querySelector('[class*="last-msg"], [class*="msg-preview"], [class*="text"], p');
+      const text = preview ? preview.textContent.trim() : '';
+      if (text && isSystemMessageText(text)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
 
   function startHRReplyWatcher() {
+    watcherInitTimestamp = Date.now();
+
     // 1. 标题变动监听 (MutationObserver 极速感知)
     try {
       const titleEl = document.querySelector('title');
@@ -1271,7 +1396,7 @@
       }
     } catch (e) {}
 
-    // 2. 周期性巡检：首屏仅采集基准，后续仅在真实新未读增量时提醒
+    // 2. 周期性巡检：首屏稳态建立基准，后续仅在真实新未读增量时提醒
     setInterval(() => {
       checkAllHRMessageSources();
     }, 2800);
@@ -1282,34 +1407,20 @@
     const title = document.title || '';
     if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
 
+    // 页面加载前 4 秒处于稳态基准期，不触发弹窗
+    if (Date.now() - watcherInitTimestamp < 4000) return;
+
     // 必须匹配带有真实未读数字的标题，例如 "【1条新消息】" 或 "(2) BOSS直聘"
     const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*BOSS/);
     if (m) {
       const count = parseInt(m[1], 10);
       if (count > 0 && isWatcherInitialized && count > lastUnreadCount) {
-        // 二次验证：如果在聊天页面，扫描侧边栏预览确认不是系统消息
-        if (window.location.pathname.startsWith('/web/geek/chat')) {
-          const TITLE_SYS_KW = [
-            '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-            '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
-            '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
-            '面试邀请', '点击预览', '收到你的', '不合适', '查看简历'
-          ];
-          const previews = document.querySelectorAll(
-            '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], .chat-item .text, [class*="conversation-item"] p'
-          );
-          let allSys = true, checked = 0;
-          previews.forEach(el => {
-            if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-              const t = (el.textContent || '').trim();
-              if (t.length > 0) { checked++; if (!TITLE_SYS_KW.some(kw => t.includes(kw))) allSys = false; }
-            }
-          });
-          if (checked > 0 && allSys) {
-            lastUnreadCount = count;
-            return; // 系统消息导致的标题变化，跳过
-          }
+        // 二次深度验证：如果最新消息是系统消息或来自自己，坚决不触发
+        if (!checkCurrentChatLastBubbleIsRealHR() || !checkSidebarUnreadIsRealHR()) {
+          lastUnreadCount = count;
+          return;
         }
+
         if (Date.now() - lastAlertTimestamp > 12000) {
           lastAlertTimestamp = Date.now();
           dispatchHRReplyNotification({
@@ -1380,94 +1491,57 @@
         }
       });
 
-      // 2. 当前对话框实时新气泡：仅在已有对话已初始化基准值后，且对方气泡数量增加时触发
-      //    【关键】排除系统消息：附件简历请求、对方已同意、交换联系方式、简历已投递等
-      const SYSTEM_MSG_BLACKLIST = [
-        '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-        '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝',
-        '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示'
-      ];
+      // 2. 当前对话框实时新气泡：必须排除系统消息气泡
       const allCandidates = document.querySelectorAll(
         '.chat-conversation .item-friend, .chat-message-list .item-friend, [class*="item-friend"], [class*="message-item"]:not(.item-myself):not([class*="system"]):not([class*="tip"]):not([class*="notice"]):not([class*="event"]):not([class*="alert"]), [class*="friend-message"], [class*="item-boss"]'
       );
-      // 过滤掉系统/通知类气泡：class 含 system/tip/notice/event 或文本命中黑名单
       let realFriendCount = 0;
       allCandidates.forEach(el => {
         const cls = (el.className || '').toLowerCase();
         if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
         const txt = (el.textContent || '').trim();
-        if (txt.length === 0) return;
-        if (SYSTEM_MSG_BLACKLIST.some(kw => txt.includes(kw))) return;
+        if (txt.length === 0 || isSystemMessageText(txt)) return;
         realFriendCount++;
       });
       if (isWatcherInitialized && lastFriendMsgCount > 0 && realFriendCount > lastFriendMsgCount) {
-        inChatNewMessage = true;
+        // 必须确认最后一条气泡也是对方发的真实内容
+        if (checkCurrentChatLastBubbleIsRealHR()) {
+          inChatNewMessage = true;
+        }
       }
       lastFriendMsgCount = realFriendCount;
     }
 
-    // 首次扫描：仅初始化基准值，首屏坚决不弹窗打扰！
-    if (!isWatcherInitialized) {
+    // 首次扫描或前 4 秒稳态期：仅初始化基准值，首屏坚决不弹窗打扰！
+    if (!isWatcherInitialized || (Date.now() - watcherInitTimestamp < 4000)) {
       lastUnreadCount = detectedUnread;
       isWatcherInitialized = true;
       return;
     }
 
-    // 只有当未读数真正产生增量，或者当前会话收到对方新气泡时，才触发强提醒
+    // 只有当未读数真正产生增量，或者当前会话收到对方新气泡时，才做深度二次验证
     const hasIncreasedUnread = detectedUnread > lastUnreadCount;
     const now = Date.now();
 
-    // 【关键】二次验证：扫描侧边栏/页面内最新消息预览，过滤系统消息导致的假未读增量
-    const SYSTEM_PREVIEW_KEYWORDS = [
-      '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-      '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
-      '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示',
-      '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
-      '面试邀请', '不合适', '查看简历', '收到你的'
-    ];
-
-    let isSystemMsgOnly = false;
-    if (hasIncreasedUnread) {
-      // 扫描聊天侧边栏最新消息预览文本
-      const previewEls = document.querySelectorAll(
-        '.chat-conversation .last-msg, .user-list .msg-text, .user-list .last-message, ' +
-        '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], ' +
-        '[class*="chat-item"] [class*="text"], [class*="session"] [class*="msg"], ' +
-        '.chat-list-item .msg, .chat-item .text, [class*="conversation-item"] p'
-      );
-      if (previewEls.length > 0) {
-        // 收集所有可见的、有未读标记的联系人的最新消息预览
-        let allPreviewsAreSystem = true;
-        let checkedCount = 0;
-        previewEls.forEach(el => {
-          if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-            const prevText = (el.textContent || '').trim();
-            if (prevText.length > 0) {
-              checkedCount++;
-              const isSystem = SYSTEM_PREVIEW_KEYWORDS.some(kw => prevText.includes(kw));
-              if (!isSystem) {
-                allPreviewsAreSystem = false;
-              }
-            }
-          }
-        });
-        // 如果检查了预览文本且全部命中系统关键词 → 抑制通知
-        if (checkedCount > 0 && allPreviewsAreSystem) {
-          isSystemMsgOnly = true;
-          console.log(`[ZIAVER Autopilot] ⏭ BOSS 未读增量被二次验证拦截：所有最新预览均为系统消息，跳过通知`);
-        }
+    if (hasIncreasedUnread || inChatNewMessage) {
+      // 深度二次校验：如果最新消息是系统消息，直接拦截！
+      const isRealHR = checkCurrentChatLastBubbleIsRealHR() && checkSidebarUnreadIsRealHR();
+      if (!isRealHR) {
+        console.log(`[ZIAVER Autopilot] ⏭ BOSS 未读增量被深度二次验证拦截（命中系统消息/简历状态），静默跳过`);
+        lastUnreadCount = detectedUnread;
+        return;
       }
-    }
 
-    if ((hasIncreasedUnread || inChatNewMessage) && !isSystemMsgOnly && (now - lastAlertTimestamp > 10000)) {
-      lastAlertTimestamp = now;
-      console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
+      if (now - lastAlertTimestamp > 10000) {
+        lastAlertTimestamp = now;
+        console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
 
-      dispatchHRReplyNotification({
-        title: '🔔 BOSS 直聘 · HR 新回复/私信！',
-        desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${detectedUnread} 条未读)，请及时跟进！`,
-        count: detectedUnread || 1
-      });
+        dispatchHRReplyNotification({
+          title: '🔔 BOSS 直聘 · HR 新回复/私信！',
+          desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${detectedUnread} 条未读)，请及时跟进！`,
+          count: detectedUnread || 1
+        });
+      }
     }
 
     lastUnreadCount = detectedUnread;

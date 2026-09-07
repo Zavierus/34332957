@@ -466,20 +466,21 @@
         top: 24px;
         right: 24px;
         z-index: 2147483647;
-        background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+        background: linear-gradient(135deg, #0f172a 0%, #064e3b 100%);
         border: 1.5px solid #10b981;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(16, 185, 129, 0.4);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(16, 185, 129, 0.35);
         border-radius: 12px;
-        padding: 14px 18px;
+        padding: 12px 16px;
         color: #fff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
         display: flex;
         align-items: center;
-        gap: 14px;
-        min-width: 320px;
-        max-width: 440px;
-        animation: ziaverLagouSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        gap: 12px;
+        min-width: 300px;
+        max-width: 420px;
+        animation: ziaverLagouSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         cursor: pointer;
+        user-select: none;
       `;
       const styleTag = document.createElement('style');
       styleTag.textContent = `
@@ -502,31 +503,56 @@
     const chatUrl = info.chatUrl || 'https://easy.lagou.com/im/chat.htm';
 
     toast.innerHTML = `
-      <div style="font-size: 26px; line-height: 1; animation: ziaverLagouPulse 2s infinite ease-in-out;">🔔</div>
-      <div style="flex: 1;">
-        <div style="font-size: 13.5px; font-weight: 700; color: #34d399; display: flex; align-items: center; justify-content: space-between;">
-          <span>${title}</span>
-          <span style="font-size: 11px; background: rgba(16,185,129,0.25); color:#a7f3d0; padding: 2px 6px; border-radius: 10px; font-weight:600;">${unreadCount} 条新消息</span>
+      <div style="font-size: 24px; line-height: 1; animation: ziaverLagouPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="flex: 1; overflow: hidden;">
+        <div style="font-size: 13px; font-weight: 700; color: #34d399; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span>
+          <span style="font-size: 10.5px; background: rgba(16,185,129,0.25); color:#a7f3d0; padding: 2px 6px; border-radius: 10px; font-weight:600; white-space: nowrap;">${unreadCount} 条未读</span>
         </div>
-        <div style="font-size: 12px; color: #e2e8f0; margin-top: 4px; line-height: 1.4;">${desc}</div>
+        <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${desc}</div>
       </div>
-      <button id="ziaver-lagou-toast-btn" style="
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        border: none;
-        border-radius: 6px;
-        color: #fff;
-        font-weight: 700;
-        font-size: 11.5px;
-        padding: 6px 12px;
-        cursor: pointer;
-        white-space: nowrap;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-      ">查看 ↗</button>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="ziaver-lagou-toast-btn" style="
+          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+          border: none;
+          border-radius: 6px;
+          color: #fff;
+          font-weight: 700;
+          font-size: 11px;
+          padding: 5px 10px;
+          cursor: pointer;
+          white-space: nowrap;
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        ">查看 ↗</button>
+        <button id="ziaver-lagou-close-btn" style="
+          background: rgba(255, 255, 255, 0.1);
+          border: none;
+          border-radius: 6px;
+          color: #94a3b8;
+          font-size: 12px;
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.15s;
+        " title="关闭通知">✕</button>
+      </div>
     `;
+
+    const closeToast = () => {
+      if (toast && toast.parentNode) {
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 300);
+      }
+    };
 
     toast.onclick = () => {
       window.open(chatUrl, '_blank');
-      toast.remove();
+      closeToast();
     };
 
     const btn = toast.querySelector('#ziaver-lagou-toast-btn');
@@ -534,28 +560,104 @@
       btn.onclick = (e) => {
         e.stopPropagation();
         window.open(chatUrl, '_blank');
-        toast.remove();
+        closeToast();
       };
     }
 
-    if (toast._timer) clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => {
-      if (toast && toast.parentNode) {
-        toast.style.transition = 'opacity 0.5s, transform 0.5s';
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-20px)';
-        setTimeout(() => toast.remove(), 500);
-      }
-    }, 8500);
+    const btnClose = toast.querySelector('#ziaver-lagou-close-btn');
+    if (btnClose) {
+      btnClose.onclick = (e) => {
+        e.stopPropagation();
+        closeToast();
+      };
+    }
+
+    const startDismissTimer = (delay = 3500) => {
+      if (toast._timer) clearTimeout(toast._timer);
+      toast._timer = setTimeout(closeToast, delay);
+    };
+
+    toast.onmouseenter = () => {
+      if (toast._timer) clearTimeout(toast._timer);
+    };
+
+    toast.onmouseleave = () => {
+      startDismissTimer(1800);
+    };
+
+    startDismissTimer(3500);
   }
 
-  // ================= HR 回复与私信多维强提醒引擎 (拉勾网 - 严格未读、防误报、防循环) =================
+  // ================= HR 回复与私信多维强提醒引擎 (拉勾网 - 严格未读、防误报、防循环、深度过滤) =================
   let lastLagouUnreadCount = 0;
   let lastLagouFriendMsgCount = -1;
   let lastLagouAlertTimestamp = 0;
   let isLagouWatcherInitialized = false;
+  let lagouWatcherInitTimestamp = Date.now();
+
+  const LG_SYSTEM_BLACKLIST = [
+    '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+    '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
+    '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
+    '面试邀请', '点击预览', '收到你的', '不合适', '查看简历', '拉勾小秘书',
+    '系统通知', '职位推荐', '安全提醒', '温馨提示'
+  ];
+
+  function isLagouSystemText(text) {
+    if (!text) return true;
+    const clean = String(text).trim();
+    if (clean.length === 0) return true;
+    return LG_SYSTEM_BLACKLIST.some(kw => clean.includes(kw));
+  }
+
+  function checkLagouChatLastBubbleIsRealHR() {
+    if (!window.location.pathname.includes('/im/') && !window.location.pathname.includes('/message/')) return true;
+    const chatContainer = document.querySelector('[class*="chat-message-list"], [class*="message-list"], [class*="msg-container"]');
+    if (!chatContainer) return true;
+
+    const allMsgItems = chatContainer.querySelectorAll('[class*="msg-item"], [class*="chat-item"], [class*="message-item"]');
+    if (allMsgItems.length === 0) return false;
+
+    const lastItem = allMsgItems[allMsgItems.length - 1];
+    if (!lastItem) return false;
+
+    const cls = (lastItem.className || '').toLowerCase();
+    if (cls.includes('right') || cls.includes('myself') || cls.includes('self') || cls.includes('me')) return false;
+    if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('card') || cls.includes('status')) return false;
+
+    const text = (lastItem.textContent || '').trim();
+    if (isLagouSystemText(text)) return false;
+
+    return true;
+  }
+
+  function checkLagouSidebarUnreadIsRealHR() {
+    if (!window.location.pathname.includes('/im/') && !window.location.pathname.includes('/message/')) return true;
+    const unreadItems = document.querySelectorAll(
+      '.chat-list li:has([class*="unread"]), .chat-list li:has([class*="badge"]), [class*="session-item"]:has([class*="unread"])'
+    );
+    if (unreadItems.length > 0) {
+      let hasReal = false;
+      unreadItems.forEach(item => {
+        const preview = item.querySelector('[class*="last-msg"], [class*="msg-preview"], [class*="text"], p');
+        const text = preview ? preview.textContent.trim() : item.textContent.trim();
+        if (!isLagouSystemText(text)) hasReal = true;
+      });
+      return hasReal;
+    }
+
+    const firstItem = document.querySelector('.chat-list li, [class*="session-item"]');
+    if (firstItem) {
+      const preview = firstItem.querySelector('[class*="last-msg"], [class*="msg-preview"], [class*="text"], p');
+      const text = preview ? preview.textContent.trim() : '';
+      if (text && isLagouSystemText(text)) return false;
+    }
+
+    return true;
+  }
 
   function startHRReplyWatcher() {
+    lagouWatcherInitTimestamp = Date.now();
     try {
       const titleEl = document.querySelector('title');
       if (titleEl) {
@@ -578,10 +680,17 @@
     const title = document.title || '';
     if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
 
+    if (Date.now() - lagouWatcherInitTimestamp < 4000) return;
+
     const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*拉勾/);
     if (m) {
       const count = parseInt(m[1], 10);
       if (count > 0 && isLagouWatcherInitialized && count > lastLagouUnreadCount) {
+        if (!checkLagouChatLastBubbleIsRealHR() || !checkLagouSidebarUnreadIsRealHR()) {
+          lastLagouUnreadCount = count;
+          return;
+        }
+
         if (Date.now() - lastLagouAlertTimestamp > 12000) {
           lastLagouAlertTimestamp = Date.now();
           dispatchLagouHRReplyNotification({
@@ -633,11 +742,6 @@
         }
       });
 
-      const SYSTEM_MSG_BLACKLIST_LG = [
-        '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-        '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝',
-        '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示'
-      ];
       const allCandidatesLG = document.querySelectorAll(
         '[class*="item-left"], [class*="friend"], [class*="other-message"], .msg-item-left'
       );
@@ -646,19 +750,20 @@
         const cls = (el.className || '').toLowerCase();
         if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
         const txt = (el.textContent || '').trim();
-        if (txt.length === 0) return;
-        if (SYSTEM_MSG_BLACKLIST_LG.some(kw => txt.includes(kw))) return;
+        if (txt.length === 0 || isLagouSystemText(txt)) return;
         realCountLG++;
       });
       const curCount = realCountLG;
       if (isLagouWatcherInitialized && lastLagouFriendMsgCount > 0 && curCount > lastLagouFriendMsgCount) {
-        inChatNewMessage = true;
+        if (checkLagouChatLastBubbleIsRealHR()) {
+          inChatNewMessage = true;
+        }
       }
       lastLagouFriendMsgCount = curCount;
     }
 
-    // 首次扫描基准化：首屏坚决不弹窗打扰！
-    if (!isLagouWatcherInitialized) {
+    // 首次扫描基准化或前 4 秒稳态期：首屏坚决不弹窗打扰！
+    if (!isLagouWatcherInitialized || (Date.now() - lagouWatcherInitTimestamp < 4000)) {
       lastLagouUnreadCount = detectedUnread;
       isLagouWatcherInitialized = true;
       return;
@@ -667,38 +772,23 @@
     const hasIncreased = detectedUnread > lastLagouUnreadCount;
     const now = Date.now();
 
-    // 二次验证：扫描侧边栏预览过滤系统消息
-    const LG_SYS_KW = [
-      '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-      '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
-      '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
-      '面试邀请', '点击预览', '收到你的', '不合适', '查看简历'
-    ];
-    let lgSystemOnly = false;
-    if (hasIncreased) {
-      const lgPreviews = document.querySelectorAll(
-        '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], [class*="chat-item"] [class*="text"], [class*="session"] [class*="msg"]'
-      );
-      if (lgPreviews.length > 0) {
-        let allSys = true, chk = 0;
-        lgPreviews.forEach(el => {
-          if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-            const t = (el.textContent || '').trim();
-            if (t.length > 0) { chk++; if (!LG_SYS_KW.some(kw => t.includes(kw))) allSys = false; }
-          }
-        });
-        if (chk > 0 && allSys) { lgSystemOnly = true; console.log('[ZIAVER Lagou] ⏭ 未读增量被二次验证拦截：系统消息，跳过'); }
+    if (hasIncreased || inChatNewMessage) {
+      const isRealHR = checkLagouChatLastBubbleIsRealHR() && checkLagouSidebarUnreadIsRealHR();
+      if (!isRealHR) {
+        console.log('[ZIAVER Lagou] ⏭ 未读增量被深度二次验证拦截（命中系统消息），静默跳过');
+        lastLagouUnreadCount = detectedUnread;
+        return;
       }
-    }
 
-    if ((hasIncreased || inChatNewMessage) && !lgSystemOnly && (now - lastLagouAlertTimestamp > 10000)) {
-      lastLagouAlertTimestamp = now;
-      console.log(`[ZIAVER Lagou] 🔔 侦测到真实的拉勾 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLagouUnreadCount}`);
-      dispatchLagouHRReplyNotification({
-        title: '🔔 拉勾网 · HR 新回复/私信！',
-        desc: inChatNewMessage ? '拉勾 HR 正在对话窗口中发来新消息！' : `有拉勾 HR 正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
-        count: detectedUnread || 1
-      });
+      if (now - lastLagouAlertTimestamp > 10000) {
+        lastLagouAlertTimestamp = now;
+        console.log(`[ZIAVER Lagou] 🔔 侦测到真实的拉勾 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLagouUnreadCount}`);
+        dispatchLagouHRReplyNotification({
+          title: '🔔 拉勾网 · HR 新回复/私信！',
+          desc: inChatNewMessage ? '拉勾 HR 正在对话窗口中发来新消息！' : `有拉勾 HR 正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
+          count: detectedUnread || 1
+        });
+      }
     }
 
     lastLagouUnreadCount = detectedUnread;

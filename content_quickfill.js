@@ -14,6 +14,71 @@
   let searchQuery = '';
   let currentDrawerTab = 'structured'; // 'structured' | 'raw'
 
+  // 1. 智能招聘与网申页面识别引擎 (杜绝在百度/B站/知乎/电商等通用网页乱弹)
+  function shouldEnableQuickFill() {
+    try {
+      const host = window.location.hostname.toLowerCase();
+      const path = window.location.pathname.toLowerCase();
+      const href = window.location.href.toLowerCase();
+
+      // A. 明确属于纯非招聘的通用网站黑名单 (搜索/视频/社交/电商/开发社区等)
+      const NON_JOB_HOSTS = [
+        'baidu.com', 'google.com', 'bing.com', 'sogou.com',
+        'bilibili.com', 'youtube.com', 'weibo.com', 'zhihu.com',
+        'twitter.com', 'x.com', 'github.com', 'gitee.com',
+        'taobao.com', 'jd.com', 'tmall.com', 'pinduoduo.com',
+        'douyin.com', 'kuaishou.com', 'xiaohongshu.com',
+        'v2ex.com', 'juejin.cn', 'csdn.net', 'stackoverflow.com',
+        'segmentfault.com', 'cnblogs.com', '163.com/news', 'qq.com/news'
+      ];
+      const isPureNonJobHost = NON_JOB_HOSTS.some(bh => host.endsWith(bh) || host === bh);
+      const hasJobKeywordInUrl = /campus|career|jobs?|recruit|zhaopin|hire|talent|intern|graduate|hr\./i.test(href);
+
+      // 如果是通用站点且 URL 没有明确的招聘/校招子路径，直接禁用
+      if (isPureNonJobHost && !hasJobKeywordInUrl) {
+        return false;
+      }
+
+      // B. 明确的招聘与网申平台白名单
+      const RECRUITMENT_WHITELISTS = [
+        'zhipin.com', 'liepin.com', 'lagou.com', '51job.com', 'zhaopin.com',
+        'nowcoder.com', 'niuke.com', 'shixiseng.com', 'yingjiesheng.com',
+        'guopin.com', 'maimai.cn', 'kanzhun.com', 'chinahr.com', 'dajie.com',
+        'beisen.com', 'mokahr.com', 'dayee.com', 'zhiye.com', '24talk.cn',
+        'italent.cn', 'knx.com.cn', 'hodesoft.com', 'hotjob.cn', 'moka.com',
+        'tencent.com', 'bytedance.com', 'toutiao.com', '163.com', 'mihoyo.com',
+        'dji.com', 'insta360.com', 'meituan.com', 'alibaba.com', 'alipay.com',
+        'huawei.com', 'oppo.com', 'vivo.com', 'xiaomi.com'
+      ];
+
+      if (RECRUITMENT_WHITELISTS.some(wh => host.includes(wh))) {
+        return true;
+      }
+
+      // C. URL 包含校招/网申特征关键词
+      if (hasJobKeywordInUrl) {
+        return true;
+      }
+
+      // D. 表单特征检测：页面中如果包含两个以上典型的求职网申输入框特征
+      const inputs = document.querySelectorAll('input, textarea');
+      let jobFieldHits = 0;
+      const JOB_FIELD_REG = /姓名|学历|院校|学校|专业|手机|电话|邮箱|工作经历|项目经验|期望职位|简历|求职|自我评价/i;
+      for (let i = 0; i < Math.min(inputs.length, 25); i++) {
+        const el = inputs[i];
+        const ph = el.getAttribute('placeholder') || '';
+        const name = el.getAttribute('name') || '';
+        const aria = el.getAttribute('aria-label') || '';
+        if (JOB_FIELD_REG.test(ph) || JOB_FIELD_REG.test(name) || JOB_FIELD_REG.test(aria)) {
+          jobFieldHits++;
+        }
+      }
+      if (jobFieldHits >= 2) return true;
+    } catch (e) {}
+
+    return false;
+  }
+
   // 1. 初始化读取本地存储
   function loadDepotData(callback) {
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
@@ -261,39 +326,24 @@
         box-shadow: 0 0 6px #10b981;
       }
 
-      /* 抽屉背部微暗遮罩 */
-      .quickfill-backdrop {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0, 0, 0, 0.25);
-        z-index: 2147483646;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.25s ease;
-      }
-      .quickfill-backdrop.open {
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      /* 滑动抽屉主体 */
+      /* 滑动抽屉主体 (无阻断浮动侧边栏，不遮挡左侧网页点击) */
       .quickfill-drawer {
         position: fixed;
         top: 0;
         right: -450px;
-        width: 430px;
-        max-width: 95vw;
+        width: 420px;
+        max-width: 90vw;
         height: 100vh;
         z-index: 2147483647;
-        background: #0b0f19;
-        border-left: 1px solid rgba(0, 242, 254, 0.3);
-        box-shadow: -10px 0 36px rgba(0, 0, 0, 0.7);
+        background: rgba(11, 15, 25, 0.96);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border-left: 1px solid rgba(0, 242, 254, 0.35);
+        box-shadow: -8px 0 32px rgba(0, 0, 0, 0.65);
         display: flex;
         flex-direction: column;
         transition: right 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        pointer-events: auto;
       }
       .quickfill-drawer.open {
         right: 0;
@@ -603,7 +653,7 @@
 
     shadowRoot.appendChild(style);
 
-    // 抽屉 DOM 骨架
+    // 抽屉 DOM 骨架 (无阻断浮动侧边栏)
     const uiWrap = document.createElement('div');
     uiWrap.innerHTML = `
       <!-- 边缘手柄 -->
@@ -613,17 +663,17 @@
         <span class="pill-badge"></span>
       </div>
 
-      <!-- 背景遮罩 -->
-      <div class="quickfill-backdrop" id="quickfill-backdrop"></div>
-
-      <!-- 抽屉主体 -->
+      <!-- 抽屉主体 (浮动Dock，不阻挡网页点击) -->
       <div class="quickfill-drawer" id="quickfill-drawer">
         <div class="drawer-header">
           <div class="drawer-title-box">
             <span class="drawer-title">📋 简历网申速填库</span>
             <span class="drawer-tag" id="depot-summary-tag">PRO</span>
           </div>
-          <button class="drawer-close-btn" id="btn-close-drawer">✕</button>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="drawer-close-btn" id="btn-collapse-drawer" title="收起面板" style="font-size:11.5px; padding:4px 8px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border-radius:6px;">收起 ⇥</button>
+            <button class="drawer-close-btn" id="btn-close-drawer" title="关闭面板">✕</button>
+          </div>
         </div>
 
         <!-- 焦点输入框指示器 -->
@@ -654,7 +704,7 @@
         <!-- 底部栏 -->
         <div class="drawer-footer">
           <button class="btn-open-dash" id="btn-open-depot-settings">⚙️ 上传新简历 / 重新解析 ↗</button>
-          <span style="color:#64748b; font-size:10px;">支持纯复制与填入</span>
+          <span style="color:#64748b; font-size:10px;">支持连续点选填表</span>
         </div>
 
         <!-- 浮动通知 Toast -->
@@ -1143,27 +1193,25 @@
     }
   }
 
-  // 11. 绑定抽屉交互控制事件
+  // 11. 绑定抽屉交互控制事件 (无模态浮动Dock，支持连续点选填表)
   function bindDrawerEvents() {
     const pill = shadowRoot.getElementById('btn-toggle-drawer');
     const drawer = shadowRoot.getElementById('quickfill-drawer');
-    const backdrop = shadowRoot.getElementById('quickfill-backdrop');
+    const btnCollapse = shadowRoot.getElementById('btn-collapse-drawer');
     const btnClose = shadowRoot.getElementById('btn-close-drawer');
     const searchInput = shadowRoot.getElementById('quickfill-search-input');
     const btnOpenDash = shadowRoot.getElementById('btn-open-depot-settings');
 
     const openDrawer = () => {
       isDrawerOpen = true;
-      drawer.classList.add('open');
-      backdrop.classList.add('open');
+      if (drawer) drawer.classList.add('open');
       updateTargetIndicator();
       if (searchInput) searchInput.focus();
     };
 
     const closeDrawer = () => {
       isDrawerOpen = false;
-      drawer.classList.remove('open');
-      backdrop.classList.remove('open');
+      if (drawer) drawer.classList.remove('open');
     };
 
     const toggleDrawer = () => {
@@ -1172,8 +1220,8 @@
     };
 
     if (pill) pill.addEventListener('click', toggleDrawer);
+    if (btnCollapse) btnCollapse.addEventListener('click', closeDrawer);
     if (btnClose) btnClose.addEventListener('click', closeDrawer);
-    if (backdrop) backdrop.addEventListener('click', closeDrawer);
 
     // 抽屉双模切换 Tab
     const tabStructured = shadowRoot.getElementById('drawer-tab-structured');
@@ -1222,41 +1270,64 @@
       });
     }
 
-    // 外部自定义事件唤起
-    window.addEventListener('JOBCRUISE_TOGGLE_QUICKFILL', toggleDrawer);
-    window.addEventListener('JOBCRUISE_OPEN_QUICKFILL', openDrawer);
+    // 外部自定义事件唤起 (支持 Popup / 快捷键在任何网页主动唤起)
+    window.addEventListener('JOBCRUISE_TOGGLE_QUICKFILL', () => {
+      if (!container) createQuickFillUI();
+      toggleDrawer();
+    });
+    window.addEventListener('JOBCRUISE_OPEN_QUICKFILL', () => {
+      if (!container) createQuickFillUI();
+      openDrawer();
+    });
 
     // 贴边把手支持鼠标按住垂直拖动
-    let isDragging = false;
-    let startY = 0;
-    let initialTop = 0;
+    if (pill) {
+      let isDragging = false;
+      let startY = 0;
+      let initialTop = 0;
 
-    pill.addEventListener('mousedown', (e) => {
-      isDragging = true;
-      startY = e.clientY;
-      initialTop = pill.getBoundingClientRect().top;
-      e.preventDefault();
-    });
+      pill.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startY = e.clientY;
+        initialTop = pill.getBoundingClientRect().top;
+        e.preventDefault();
+      });
 
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      const dy = e.clientY - startY;
-      const newTop = Math.max(60, Math.min(window.innerHeight - 60, initialTop + dy));
-      pill.style.top = `${newTop}px`;
-      pill.style.transform = 'none';
-    });
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dy = e.clientY - startY;
+        const newTop = Math.max(60, Math.min(window.innerHeight - 60, initialTop + dy));
+        pill.style.top = `${newTop}px`;
+        pill.style.transform = 'none';
+      });
 
-    window.addEventListener('mouseup', () => {
-      isDragging = false;
-    });
+      window.addEventListener('mouseup', () => {
+        isDragging = false;
+      });
+    }
   }
 
-  // 12. 页面加载完成后注入
+  // 12. 页面加载完成后智能按需注入
   loadDepotData(() => {
+    const initOrListen = () => {
+      if (shouldEnableQuickFill()) {
+        createQuickFillUI();
+      } else {
+        // 非招聘页面默认静默，但依然监听主动唤起事件
+        window.addEventListener('JOBCRUISE_OPEN_QUICKFILL', () => {
+          if (!container) createQuickFillUI();
+          if (shadowRoot) {
+            const drawer = shadowRoot.getElementById('quickfill-drawer');
+            if (drawer) drawer.classList.add('open');
+          }
+        });
+      }
+    };
+
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', createQuickFillUI);
+      document.addEventListener('DOMContentLoaded', initOrListen);
     } else {
-      createQuickFillUI();
+      initOrListen();
     }
   });
 })();
