@@ -59,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputMinDelay = document.getElementById('cfg-min-delay');
   const inputMaxDelay = document.getElementById('cfg-max-delay');
   const inputMinSalary = document.getElementById('cfg-min-salary');
+  const inputHrCooldown = document.getElementById('cfg-hr-cooldown');
   const inputBlacklist = document.getElementById('cfg-blacklist');
   const inputTargetCity = document.getElementById('cfg-target-city');
   const inputStrictCity = document.getElementById('cfg-strict-city');
@@ -110,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (config.minDelaySec !== undefined) inputMinDelay.value = config.minDelaySec;
     if (config.maxDelaySec !== undefined) inputMaxDelay.value = config.maxDelaySec;
     if (config.minSalaryK !== undefined) inputMinSalary.value = config.minSalaryK;
+    if (inputHrCooldown) inputHrCooldown.value = (config.hrAlertCooldownMinutes !== undefined && Number(config.hrAlertCooldownMinutes) > 0) ? config.hrAlertCooldownMinutes : 5;
     if (config.blacklistKeywords !== undefined) {
       inputBlacklist.value = config.blacklistKeywords;
     } else {
@@ -155,6 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
       minDelaySec: parseInt(inputMinDelay.value, 10) || 9,
       maxDelaySec: parseInt(inputMaxDelay.value, 10) || 15,
       minSalaryK: parseInt(inputMinSalary.value, 10) || 9,
+      hrAlertCooldownMinutes: parseInt(inputHrCooldown ? inputHrCooldown.value : '5', 10) || 5,
       blacklistKeywords: inputBlacklist.value.trim()
     };
 

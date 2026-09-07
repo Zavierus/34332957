@@ -566,6 +566,15 @@
                   <div style="font-size:11px; color:#94a3b8;">点击通知可直接自动切回招聘对话窗口</div>
                 </div>
               </label>
+
+              <div class="form-field" style="margin-top: 14px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                <label for="set-hr-cooldown" style="color: #c084fc; font-weight: 700;">⏳ HR回复弹窗提醒冷却周期 (防频繁打扰)</label>
+                <div class="input-unit" style="max-width: 220px; margin-top: 6px;">
+                  <input type="number" id="set-hr-cooldown" min="1" max="60" value="5">
+                  <span class="unit">分钟</span>
+                </div>
+                <div class="form-tip">设定时间内无论收到多少条 HR 消息/私信，仅弹窗提醒一次 (默认: 5 分钟，支持后台随时调整)。</div>
+              </div>
             </div>
 
             <div style="margin-top: 24px;">

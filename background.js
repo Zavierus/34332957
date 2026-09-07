@@ -124,6 +124,7 @@ function initOrUpdateStorage() {
       enableCampus2024Protection: true,
       audioAlert: true,
       desktopNotification: true,
+      hrAlertCooldownMinutes: 5,
       blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,培训生',
       enableDynamicGreeting: true,
       useCustomGreeting: true,
@@ -144,6 +145,7 @@ function initOrUpdateStorage() {
       if (mergedConfig.strictCityFilter === undefined) mergedConfig.strictCityFilter = true;
       if (mergedConfig.gradYear === undefined) mergedConfig.gradYear = '2024';
       if (mergedConfig.enableCampus2024Protection === undefined) mergedConfig.enableCampus2024Protection = true;
+      if (mergedConfig.hrAlertCooldownMinutes === undefined) mergedConfig.hrAlertCooldownMinutes = 5;
       if (mergedConfig.lastActiveDate !== today) {
         console.log(`[ZIAVER Autopilot] 存储初始化检测到新的一天: 上次活跃「${mergedConfig.lastActiveDate || '无'}」-> 今日「${today}」，执行清零`);
         mergedConfig.lastActiveDate = today;
@@ -754,31 +756,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'next_site_triggered' });
     return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
-    // HR 新消息回复系统桌面强提醒与直通路由
-    const notifId = 'hr_reply_' + Date.now();
-    const chatUrl = request.chatUrl || (
-      request.platform === 'liepin' ? 'https://www.liepin.com/im/' :
-      request.platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
-      'https://www.zhipin.com/web/geek/chat'
-    );
-    if (!globalThis.notifChatTargetMap) {
-      globalThis.notifChatTargetMap = new Map();
-    }
-    globalThis.notifChatTargetMap.set(notifId, chatUrl);
+    // HR 新消息回复系统桌面强提醒与直通路由 (严格遵守设定的冷却周期)
+    chrome.storage.local.get(['config'], (res) => {
+      const cfg = res.config || {};
+      const cooldownMins = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0)
+        ? Number(cfg.hrAlertCooldownMinutes)
+        : 5;
+      const cooldownMs = cooldownMins * 60 * 1000;
+      const now = Date.now();
 
-    let siteTitle = 'BOSS 直聘';
-    if (request.platform === 'liepin') siteTitle = '猎聘网';
-    else if (request.platform === 'lagou') siteTitle = '拉勾网';
+      if (!globalThis.lastGlobalHRAlertTimestamp) {
+        globalThis.lastGlobalHRAlertTimestamp = 0;
+      }
 
-    chrome.notifications.create(notifId, {
-      type: 'basic',
-      iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-      title: `🔔 ${siteTitle} · 检测到 HR 新回复/私信！`,
-      message: request.text || '有企业 HR 正在与您互动沟通，点击立即直达聊天界面！',
-      priority: 2,
-      requireInteraction: true
+      if (now - globalThis.lastGlobalHRAlertTimestamp < cooldownMs && globalThis.lastGlobalHRAlertTimestamp > 0) {
+        console.log(`[ZIAVER Background] ⏳ HR 提醒处于全局防打扰冷却期 (${cooldownMins}分钟内仅弹一次)，已安全去重`);
+        sendResponse({ status: 'cooldown_suppressed' });
+        return;
+      }
+
+      globalThis.lastGlobalHRAlertTimestamp = now;
+
+      const notifId = 'hr_reply_' + Date.now();
+      const chatUrl = request.chatUrl || (
+        request.platform === 'liepin' ? 'https://www.liepin.com/im/' :
+        request.platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
+        'https://www.zhipin.com/web/geek/chat'
+      );
+      if (!globalThis.notifChatTargetMap) {
+        globalThis.notifChatTargetMap = new Map();
+      }
+      globalThis.notifChatTargetMap.set(notifId, chatUrl);
+
+      let siteTitle = 'BOSS 直聘';
+      if (request.platform === 'liepin') siteTitle = '猎聘网';
+      else if (request.platform === 'lagou') siteTitle = '拉勾网';
+
+      chrome.notifications.create(notifId, {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+        title: `🔔 ${siteTitle} · 检测到 HR 新回复/私信！`,
+        message: request.text || '有企业 HR 正在与您互动沟通，点击立即直达聊天界面！',
+        priority: 2,
+        requireInteraction: true
+      });
+      sendResponse({ status: 'ok' });
     });
-    sendResponse({ status: 'ok' });
+    return true;
   } else if (request.type === 'APPLY_LOG') {
     // 写入投递记录表格
     chrome.storage.local.get(['config', 'applyLog'], (res) => {

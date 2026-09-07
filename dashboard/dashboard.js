@@ -330,6 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cfg.blacklistKeywords !== undefined) document.getElementById('set-blacklist').value = cfg.blacklistKeywords;
     if (cfg.audioAlert !== undefined) document.getElementById('set-audio-alert').checked = cfg.audioAlert;
     if (cfg.desktopNotification !== undefined) document.getElementById('set-desktop-notif').checked = cfg.desktopNotification;
+    if (document.getElementById('set-hr-cooldown')) {
+      document.getElementById('set-hr-cooldown').value = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0) ? cfg.hrAlertCooldownMinutes : 5;
+    }
     
     // 话术设置
     const greetingBox = document.getElementById('set-custom-greeting');
@@ -399,6 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
       blacklistKeywords: document.getElementById('set-blacklist').value.trim(),
       audioAlert: document.getElementById('set-audio-alert').checked,
       desktopNotification: document.getElementById('set-desktop-notif').checked,
+      hrAlertCooldownMinutes: parseInt(document.getElementById('set-hr-cooldown')?.value, 10) || 5,
       customGreetingTemplate: greetingVal,
       useCustomGreeting: useCustomVal,
       portfolioUrl: document.getElementById('prof-portfolio')?.value.trim() || ''

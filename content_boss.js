@@ -1402,6 +1402,11 @@
     }, 2800);
   }
 
+  function getHRAlertCooldownMs() {
+    const mins = (config && config.hrAlertCooldownMinutes) ? Number(config.hrAlertCooldownMinutes) : 5;
+    return Math.max(1, mins) * 60 * 1000;
+  }
+
   function checkTitleForHRMessage() {
     if (isSelfFlashingTitle) return;
     const title = document.title || '';
@@ -1421,13 +1426,17 @@
           return;
         }
 
-        if (Date.now() - lastAlertTimestamp > 12000) {
-          lastAlertTimestamp = Date.now();
+        const now = Date.now();
+        const cooldownMs = getHRAlertCooldownMs();
+        if (now - lastAlertTimestamp > cooldownMs) {
+          lastAlertTimestamp = now;
           dispatchHRReplyNotification({
             title: '🔔 BOSS 直聘 · HR 新回复/私信！',
             desc: `有企业 HR 正在期待您的回复 (${count} 条未读)，请及时跟进！`,
             count
           });
+        } else {
+          console.log(`[ZIAVER Autopilot] ⏳ BOSS 处于防打扰冷却期 (${(config.hrAlertCooldownMinutes || 5)}分钟内仅提醒一次)，静默同步基准`);
         }
         lastUnreadCount = count;
       }
@@ -1532,7 +1541,8 @@
         return;
       }
 
-      if (now - lastAlertTimestamp > 10000) {
+      const cooldownMs = getHRAlertCooldownMs();
+      if (now - lastAlertTimestamp > cooldownMs) {
         lastAlertTimestamp = now;
         console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
 
@@ -1541,6 +1551,8 @@
           desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${detectedUnread} 条未读)，请及时跟进！`,
           count: detectedUnread || 1
         });
+      } else {
+        console.log(`[ZIAVER Autopilot] ⏳ BOSS 处于防打扰冷却期 (${(config.hrAlertCooldownMinutes || 5)}分钟内仅提醒一次)，静默更新未读数`);
       }
     }
 
