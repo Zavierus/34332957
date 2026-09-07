@@ -13,7 +13,11 @@
   let isDrawerOpen = false;
   let isDrawerPinned = false;
   let searchQuery = '';
-  let currentDrawerTab = 'structured'; // 'structured' | 'raw'
+  let currentDrawerTab = 'form-match'; // 'form-match' | 'structured' | 'raw'
+  let selectedWorkIndex = 0;
+  let selectedProjectIndex = 0;
+  let currentScannedPageFields = [];
+  let formObserver = null;
 
   // 1. 智能招聘与网申页面识别引擎 (杜绝在百度/B站/知乎/电商等通用网页乱弹)
   function shouldEnableQuickFill() {
@@ -176,8 +180,32 @@
     if (!element) return false;
     try {
       element.focus();
-      const isTextarea = element.tagName === 'TEXTAREA';
-      const isInput = element.tagName === 'INPUT';
+      const tag = element.tagName;
+      const isTextarea = tag === 'TEXTAREA';
+      const isInput = tag === 'INPUT';
+      const isSelect = tag === 'SELECT';
+
+      // 0. 支持原生 <select> 下拉选项匹配
+      if (isSelect && element.options) {
+        const valStr = String(value).trim().toLowerCase();
+        let matchedIndex = -1;
+        for (let i = 0; i < element.options.length; i++) {
+          const opt = element.options[i];
+          const optText = (opt.text || opt.innerText || '').trim().toLowerCase();
+          const optVal = (opt.value || '').trim().toLowerCase();
+          if (optText === valStr || optVal === valStr || optText.includes(valStr) || valStr.includes(optText)) {
+            matchedIndex = i;
+            break;
+          }
+        }
+        if (matchedIndex !== -1) {
+          element.selectedIndex = matchedIndex;
+          element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+          element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+          element.dispatchEvent(new Event('blur', { bubbles: true }));
+          return true;
+        }
+      }
 
       // 1. 标准表单输入框 (Bypass React/Vue 原生 Setter)
       if (isTextarea || isInput) {
@@ -190,6 +218,7 @@
         element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
         element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
         element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+        element.dispatchEvent(new Event('blur', { bubbles: true }));
         return true;
       }
 
@@ -264,6 +293,413 @@
       console.error('[JobCruise QuickFill] 复制失败:', e);
     }
     document.body.removeChild(ta);
+  }
+
+  // ================= 4.1 智能网页输入项提取与简历材料自动对齐引擎 =================
+  function updateFormMatchTabBadge() {
+    if (!shadowRoot) return;
+    const badge = shadowRoot.getElementById('form-match-tab-count');
+    if (badge) {
+      const count = currentScannedPageFields.length;
+      badge.textContent = count > 0 ? `${count}` : '0';
+      badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+  }
+
+  function extractFieldMetadata(el) {
+    if (!el) return { label: '', isRequired: false, section: '📝 表单输入项' };
+    let itemLabels = [];
+    let isRequired = false;
+
+    if (el.required || el.getAttribute('aria-required') === 'true') {
+      isRequired = true;
+    }
+
+    // 1. <label for="..."> 或最近父级 <label>
+    if (el.id) {
+      try {
+        const explicitLabel = document.querySelector(`label[for="${el.id}"]`);
+        if (explicitLabel) {
+          const lt = (explicitLabel.innerText || explicitLabel.textContent || '').trim();
+          if (lt.includes('*')) isRequired = true;
+          if (lt) itemLabels.push(lt);
+        }
+      } catch (e) {}
+    }
+    const parentLabel = el.closest && el.closest('label');
+    if (parentLabel) {
+      const plt = (parentLabel.innerText || parentLabel.textContent || '').trim();
+      if (plt.includes('*')) isRequired = true;
+      if (plt && !itemLabels.includes(plt)) itemLabels.push(plt);
+    }
+
+    // 向上遍历祖先容器寻找表单项标题与章节标题 (适配各类常见UI库及大厂ATS/北森/Moka/大易等)
+    let parent = el.parentElement;
+    let depth = 0;
+    let detectedSection = '';
+    let foundDomLabel = itemLabels.length > 0;
+
+    while (parent && depth < 8 && parent !== document.body) {
+      // 检查必填 class
+      if (parent.classList && (
+        parent.classList.contains('is-required') ||
+        parent.classList.contains('ant-form-item-required') ||
+        parent.classList.contains('required')
+      )) {
+        isRequired = true;
+      }
+
+      // 优先从直接表单项容器层 (depth <= 2) 提取专属 DOM Label (包含必填 *)，切忌向顶层大容器泛化查询造成兄弟串扰
+      if (!foundDomLabel && depth <= 2) {
+        const labelEls = parent.querySelectorAll('label, .ant-form-item-label, .el-form-item__label, .form-item-label, .form-label, .item-label, .control-label, .field-label, .form-title, .title-text, dt, th');
+        labelEls.forEach(le => {
+          const t = (le.innerText || le.textContent || '').trim();
+          if (t.includes('*')) isRequired = true;
+          if (t && t.length < 50 && !itemLabels.includes(t)) {
+            itemLabels.push(t);
+            foundDomLabel = true;
+          }
+        });
+
+        // 同级前驱兄弟节点
+        let prev = parent.previousElementSibling || el.previousElementSibling;
+        if (prev) {
+          const pt = (prev.innerText || prev.textContent || '').trim();
+          if (pt.includes('*')) isRequired = true;
+          if (pt && pt.length < 40 && !itemLabels.includes(pt)) {
+            itemLabels.push(pt);
+            foundDomLabel = true;
+          }
+        }
+      }
+
+      // 探测 Section 区域标题 (如 个人信息, 求职意向, 工作经历, 教育背景, 项目经历)
+      if (!detectedSection) {
+        const headings = parent.querySelectorAll('h1, h2, h3, h4, .section-title, .card-title, .ant-card-head-title, .group-title, .group-header, .form-group-title, .module-title, legend');
+        headings.forEach(h => {
+          const ht = (h.innerText || h.textContent || '').trim();
+          if (/个人信息|基本信息|基本资料/i.test(ht)) detectedSection = '👤 个人信息';
+          else if (/求职意向|期望|意向/i.test(ht)) detectedSection = '🎯 求职意向';
+          else if (/工作经历|工作经验|实习经历|工作实战|工作履历/i.test(ht)) detectedSection = '💼 工作经历';
+          else if (/教育背景|教育经历|在校/i.test(ht)) detectedSection = '🎓 教育背景';
+          else if (/项目经历|项目经验|核心项目/i.test(ht)) detectedSection = '🚀 项目经历';
+          else if (/自我评价|个人优势|自我介绍/i.test(ht)) detectedSection = '🌟 自我评价';
+        });
+      }
+
+      parent = parent.parentElement;
+      depth++;
+    }
+
+    // 2. 元素自身显式属性作为次要备选
+    const ph = el.getAttribute('placeholder');
+    const aria = el.getAttribute('aria-label');
+    const title = el.getAttribute('title');
+    const name = el.getAttribute('name');
+    const id = el.getAttribute('id');
+    const dataLabel = el.getAttribute('data-label') || el.getAttribute('data-field') || el.getAttribute('data-placeholder');
+
+    if (ph && !itemLabels.includes(ph)) itemLabels.push(ph);
+    if (aria && !itemLabels.includes(aria)) itemLabels.push(aria);
+    if (title && !itemLabels.includes(title)) itemLabels.push(title);
+    if (name && !itemLabels.includes(name)) itemLabels.push(name);
+    if (id && !itemLabels.includes(id)) itemLabels.push(id);
+    if (dataLabel && !itemLabels.includes(dataLabel)) itemLabels.push(dataLabel);
+
+    const cleanLabel = itemLabels.join(' ').replace(/[\*\:：\s\r\n\t]+/g, ' ').trim();
+    return {
+      label: cleanLabel,
+      isRequired,
+      section: detectedSection || '📝 表单信息'
+    };
+  }
+
+  function classifyAndMatchInput(el, fieldMeta) {
+    const labelText = typeof fieldMeta === 'string' ? fieldMeta : (fieldMeta.label || '');
+    const section = typeof fieldMeta === 'object' ? (fieldMeta.section || '') : '';
+    const text = (labelText + ' ' + section).toLowerCase();
+
+    const depot = resumeDepot || {};
+    const prof = applicantProfile || {};
+    const basic = depot.basicInfo || {};
+    const works = depot.workExperiences || [];
+    const projects = depot.projects || [];
+    const edu = (depot.education && depot.education[0]) || {};
+
+    // 活跃工作/项目经历
+    const activeWork = works[selectedWorkIndex] || works[0] || {};
+    const activeProj = projects[selectedProjectIndex] || projects[0] || {};
+
+    // 1. 姓名
+    if (/姓名|真实姓名|候选人|申请人|your\s*name|^name$/i.test(text) && !/项目|学校|公司|岗位|职位|职务|微信号|紧急|联系人/i.test(text)) {
+      const val = basic.name || prof.name || '王泽源';
+      return { category: '👤 个人信息', icon: '👤', fieldName: '姓名', value: val, key: 'name' };
+    }
+
+    // 2. 手机号码
+    if (/手机|电话|联系方式|phone|mobile|tel/i.test(text) && !/紧急|推荐/i.test(text)) {
+      const val = basic.phone || prof.phone || '15339169128';
+      return { category: '👤 个人信息', icon: '📱', fieldName: '手机号码', value: val, key: 'phone' };
+    }
+
+    // 3. 电子邮箱
+    if (/邮箱|邮件|email|mail/i.test(text)) {
+      const val = basic.email || prof.email || '939431931@qq.com';
+      return { category: '👤 个人信息', icon: '📧', fieldName: '电子邮箱', value: val, key: 'email' };
+    }
+
+    // 4. 性别
+    if (/性别|gender|sex/i.test(text)) {
+      const val = prof.gender || '男';
+      return { category: '👤 个人信息', icon: '🚻', fieldName: '性别', value: val, key: 'gender' };
+    }
+
+    // 5. 出生日期 / 年龄
+    if (/出生日期|出生年月|出生时间|生日|birthday|birth|dob/i.test(text) || (/年龄|^age$/i.test(text) && !/年限/i.test(text))) {
+      const isPureAge = /年龄|^age$/i.test(text) && !/出生/i.test(text);
+      let val = '';
+      if (isPureAge) {
+        val = prof.age || (prof.gradYear ? `${2026 - (parseInt(prof.gradYear, 10) - 22)}岁` : '22岁');
+      } else {
+        val = prof.birthDate || (prof.gradYear ? `${parseInt(prof.gradYear, 10) - 22}-09-01` : '2002-09-01');
+      }
+      return { category: '👤 个人信息', icon: '🎂', fieldName: '出生日期 (年龄)', value: val, key: 'birthDate' };
+    }
+
+    // 6. 工作经验年限
+    if (/工作经验|工作年限|从业年限|经验年限|experience\s*year/i.test(text)) {
+      const val = prof.workYears || '2 年';
+      return { category: '👤 个人信息', icon: '⏳', fieldName: '工作经验年限', value: val, key: 'workYears' };
+    }
+
+    // 7. 最高学历 / 学历层次
+    if (/最高学历|学历层次|文化程度|^学历$|^degree$/i.test(text) && !/学校|院校|专业/i.test(text)) {
+      const val = prof.degree || edu.degree || '本科';
+      return { category: '👤 个人信息', icon: '📜', fieldName: '最高学历', value: val, key: 'degree' };
+    }
+
+    // 8. 所在地 / 现居地
+    if (/所在地|现居地|居住地|现居住|现住址|现居|^城市$|^location$/i.test(text) && !/期望|意向|院校/i.test(text)) {
+      const val = prof.city || basic.city || '广东深圳';
+      return { category: '👤 个人信息', icon: '📍', fieldName: '所在地', value: val, key: 'city' };
+    }
+
+    // 9. 最近公司 / 上家单位
+    if (/最近公司|上一家|上家单位|现任公司|就任企业|当前公司|last\s*company|current\s*company/i.test(text)) {
+      const val = (works[0] && works[0].company) || '北京抖音信息服务有限公司';
+      return { category: '👤 个人信息', icon: '🏢', fieldName: '最近公司', value: val, key: 'recentCompany' };
+    }
+
+    // 10. 籍贯 / 生源地
+    if (/籍贯|生源地|出生地|native/i.test(text)) {
+      const val = prof.nativePlace || '广东深圳';
+      return { category: '👤 个人信息', icon: '🏡', fieldName: '籍贯', value: val, key: 'nativePlace' };
+    }
+
+    // 11. 政治面貌
+    if (/政治面貌|politics/i.test(text)) {
+      const val = prof.politics || '共青团员';
+      return { category: '👤 个人信息', icon: '🚩', fieldName: '政治面貌', value: val, key: 'politics' };
+    }
+
+    // 12. 微信号
+    if (/微信|wechat|wx/i.test(text) && !/紧急/i.test(text)) {
+      const val = prof.wechat || basic.phone || prof.phone || '15339169128';
+      return { category: '👤 个人信息', icon: '💬', fieldName: '微信号', value: val, key: 'wechat' };
+    }
+
+    // 13. 当前薪资
+    if (/当前薪资|目前薪资|现薪|current\s*salary/i.test(text)) {
+      const val = prof.currentSalary || '面议';
+      return { category: '🎯 求职意向', icon: '💳', fieldName: '当前薪资', value: val, key: 'currentSalary' };
+    }
+
+    // 14. 期望薪资
+    if (/期望薪资|期望月薪|目标薪资|期望薪酬|薪资要求|expected\s*salary|target\s*salary/i.test(text) || (/salary|薪资|月薪/i.test(text) && !/当前|现/i.test(text))) {
+      const val = prof.targetSalary || '10-20K';
+      return { category: '🎯 求职意向', icon: '💰', fieldName: '期望薪资', value: val, key: 'targetSalary' };
+    }
+
+    // 15. 期望城市
+    if (/期望城市|意向城市|期望地点|意向地点|工作城市|目标城市|target\s*city/i.test(text)) {
+      const val = prof.targetCity || prof.city || basic.city || '深圳';
+      return { category: '🎯 求职意向', icon: '🌆', fieldName: '期望城市', value: val, key: 'targetCity' };
+    }
+
+    // 16. 求职状态 / 到岗时间
+    if (/求职状态|到岗时间|入职时间|job\s*status/i.test(text)) {
+      const val = prof.jobStatus || '离职-随时到岗';
+      return { category: '🎯 求职意向', icon: '⏱️', fieldName: '求职状态', value: val, key: 'jobStatus' };
+    }
+
+    // 17. 期望岗位 / 目标职位
+    if (/期望职位|目标岗位|意向岗位|求职意向|target\s*role/i.test(text) && !/工作经历/i.test(section)) {
+      const val = prof.targetRole || basic.targetRole || '电商与达人运营专家';
+      return { category: '🎯 求职意向', icon: '🎯', fieldName: '期望职位', value: val, key: 'targetRole' };
+    }
+
+    // 18. 工作经历相关字段匹配 (上下文或字段明确指向工作)
+    const isWorkContext = /工作经历|工作经验|实习经历|工作实战/i.test(section) || /工作/i.test(text);
+
+    // 工作经历: 起止时间
+    if (isWorkContext && /起止时间|在职时间|工作时间|时间段|period/i.test(labelText)) {
+      const val = activeWork.period || '2025.03 - 2025.09';
+      return { category: '💼 工作经历', icon: '📅', fieldName: '工作起止时间', value: val, key: 'workPeriod' };
+    }
+
+    // 工作经历: 公司名称
+    if (isWorkContext && /公司名称|单位名称|企业名称|^公司$|company/i.test(labelText)) {
+      const val = activeWork.company || '北京抖音信息服务有限公司';
+      return { category: '💼 工作经历', icon: '🏢', fieldName: '公司名称', value: val, key: 'company' };
+    }
+
+    // 工作经历: 职位名称
+    if (isWorkContext && /职位名称|岗位名称|担任职位|职务|^职位$|^岗位$|role|title/i.test(labelText)) {
+      const val = activeWork.role || '运营/核心业务专家';
+      return { category: '💼 工作经历', icon: '💼', fieldName: '职位名称', value: val, key: 'role' };
+    }
+
+    // 工作经历: 工作职责 / 业绩 / 经历描述
+    if (isWorkContext && /职责|描述|内容|业绩|工作内容|工作职责|工作业绩|duty|responsibilit|achievement/i.test(labelText)) {
+      const descPart = activeWork.desc || '';
+      const achPart = (activeWork.achievements || []).map(a => '• ' + a).join('\n');
+      const val = descPart ? (achPart ? `${descPart}\n\n【核心量化业绩】:\n${achPart}` : descPart) : achPart;
+      return { category: '💼 工作经历', icon: '📝', fieldName: '工作职责/业绩', value: val, key: 'workDesc' };
+    }
+
+    // 19. 教育背景相关字段匹配
+    const isEduContext = /教育背景|教育经历|学习经历|学历/i.test(section) || /教育|学历|学校|院校/i.test(text);
+
+    // 毕业院校
+    if (/院校|学校|毕业学校|毕业院校|school|university|college/i.test(text) && !/专业/i.test(text)) {
+      const val = edu.school || basic.school || prof.school || '深圳大学';
+      return { category: '🎓 教育背景', icon: '🎓', fieldName: '毕业院校', value: val, key: 'school' };
+    }
+
+    // 专业名称
+    if (/专业|major|所学专业/i.test(text)) {
+      const val = edu.major || prof.major || '数字媒体 / 运营策划';
+      return { category: '🎓 教育背景', icon: '📚', fieldName: '所学专业', value: val, key: 'major' };
+    }
+
+    // 毕业年份 / 届别
+    if (/毕业时间|毕业年份|届别|毕业年月|graduation/i.test(text)) {
+      const val = prof.gradYear || '2024';
+      return { category: '🎓 教育背景', icon: '📅', fieldName: '毕业年份/届别', value: val, key: 'gradYear' };
+    }
+
+    // 教育起止时间
+    if (isEduContext && /起止时间|在校时间|时间/i.test(labelText)) {
+      const val = edu.period || '2020.09 - 2024.06';
+      return { category: '🎓 教育背景', icon: '📅', fieldName: '教育起止时间', value: val, key: 'eduPeriod' };
+    }
+
+    // 20. 项目经验
+    const isProjContext = /项目经历|项目经验|核心项目/i.test(section) || /项目/i.test(text);
+    if (isProjContext && /项目名称|项目名|project\s*name/i.test(labelText)) {
+      const val = activeProj.name || '全域电商大促节点战役操盘';
+      return { category: '🚀 项目经历', icon: '🚀', fieldName: '项目名称', value: val, key: 'projectName' };
+    }
+    if (isProjContext && /角色|职务|role/i.test(labelText)) {
+      const val = activeProj.role || '项目总控';
+      return { category: '🚀 项目经历', icon: '💼', fieldName: '项目角色', value: val, key: 'projectRole' };
+    }
+    if (isProjContext && /描述|内容|背景|职责|成果|业绩/i.test(labelText)) {
+      const val = activeProj.desc ? `【职责】: ${activeProj.desc}\n【成果】: ${activeProj.results}` : (activeProj.results || '');
+      return { category: '🚀 项目经历', icon: '📋', fieldName: '项目描述与成果', value: val, key: 'projectDesc' };
+    }
+
+    // 21. 作品集 / 个人链接
+    if (/作品集|portfolio|链接|主页|个人网站|url|github/i.test(text)) {
+      const val = basic.portfolioUrl || prof.portfolioUrl || '';
+      return { category: '🔗 作品与成果', icon: '🔗', fieldName: '作品集链接', value: val, key: 'portfolio' };
+    }
+
+    // 22. 自我评价 / 个人优势 / 自荐
+    if (/自我评价|个人总结|自荐|个人优势|自我介绍|自评|summary|about\s*me|intro/i.test(text)) {
+      const val = depot.selfIntro?.full || depot.selfIntro?.short || (depot.advantages || []).join('\n');
+      return { category: '🌟 自我评价', icon: '🌟', fieldName: '自我评价与优势', value: val, key: 'selfIntro' };
+    }
+
+    // 23. 专业技能
+    if (/技能|专业技能|擅长|工具|软件|skills?|technolog/i.test(text)) {
+      const val = (depot.skills || []).join(', ');
+      return { category: '🛠️ 专业技能', icon: '🛠️', fieldName: '专业技能清单', value: val, key: 'skills' };
+    }
+
+    // 24. 兴趣爱好
+    if (/爱好|兴趣|特长|hobb/i.test(text)) {
+      const val = (depot.hobbies || []).join(', ');
+      return { category: '🎨 兴趣爱好', icon: '🎨', fieldName: '兴趣特长', value: val, key: 'hobbies' };
+    }
+
+    // 通用兜底
+    const cleanLabel = (labelText || '表单输入项').slice(0, 20).trim();
+    const fallbackVal = depot.selfIntro?.short || (depot.advantages && depot.advantages[0]) || '';
+    return { category: '📝 其他输入项', icon: '📝', fieldName: cleanLabel, value: fallbackVal, key: 'generic' };
+  }
+
+  function scanCurrentPageInputs() {
+    const selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="image"]):not([type="reset"]), textarea, select, [contenteditable="true"], [role="textbox"], [g_editable="true"]';
+    const allEls = document.querySelectorAll(selector);
+    const scanned = [];
+
+    allEls.forEach((el, index) => {
+      // 排除插件自身元素与离屏隐藏元素
+      if (el.closest && el.closest('#jobcruise-quickfill-root')) return;
+      if (el.disabled || el.readOnly) return;
+
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+      if (rect.width === 0 && rect.height === 0) return;
+
+      // 排除顶部导航栏的全局搜索框
+      const inHeader = el.closest('header, nav, .header, .nav, .search-bar, .top-bar');
+      const isSearchOnly = (el.type === 'search' || /search/i.test(el.name || el.id || '')) && inHeader;
+      if (isSearchOnly) return;
+
+      const meta = extractFieldMetadata(el);
+      const match = classifyAndMatchInput(el, meta);
+      const currentVal = el.value !== undefined ? String(el.value).trim() : (el.innerText || el.textContent || '').trim();
+
+      scanned.push({
+        id: `page_field_${index}`,
+        element: el,
+        labelText: meta.label || match.fieldName,
+        isRequired: meta.isRequired,
+        section: meta.section,
+        matched: match,
+        currentValue: currentVal,
+        isFilled: !!currentVal
+      });
+    });
+
+    currentScannedPageFields = scanned;
+    updateFormMatchTabBadge();
+    return scanned;
+  }
+
+  function fillAndHighlightElement(element, value) {
+    if (!element) return false;
+    const success = fillNativeInput(element, value);
+    if (success) {
+      try {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const origOutline = element.style.outline;
+        const origBoxShadow = element.style.boxShadow;
+        const origTransition = element.style.transition;
+        element.style.transition = 'all 0.25s ease-in-out';
+        element.style.outline = '2px solid #00f2fe';
+        element.style.boxShadow = '0 0 16px rgba(0, 242, 254, 0.7)';
+        setTimeout(() => {
+          element.style.outline = origOutline;
+          element.style.boxShadow = origBoxShadow;
+          element.style.transition = origTransition;
+        }, 1200);
+      } catch (e) {}
+    }
+    return success;
   }
 
   // 5. 创建 Shadow DOM 悬浮抽屉容器
@@ -743,10 +1179,13 @@
           <span style="opacity: 0.8; font-size: 10px;">点击即填</span>
         </div>
 
-        <!-- 双模视图切换 Tab -->
-        <div class="drawer-mode-tabs" style="display:flex; background:#0f172a; border-bottom:1px solid rgba(255,255,255,0.08); padding:0 12px; gap:8px;">
-          <button type="button" class="drawer-mode-tab active" id="drawer-tab-structured" style="flex:1; padding:8px 0; background:transparent; border:none; color:#00f2fe; border-bottom:2px solid #00f2fe; font-size:12px; font-weight:700; cursor:pointer;">⚡ 智能分类库</button>
-          <button type="button" class="drawer-mode-tab" id="drawer-tab-raw" style="flex:1; padding:8px 0; background:transparent; border:none; color:#94a3b8; border-bottom:2px solid transparent; font-size:12px; font-weight:600; cursor:pointer;">📝 原始分段直达</button>
+        <!-- 三模视图切换 Tab -->
+        <div class="drawer-mode-tabs" style="display:flex; background:#0f172a; border-bottom:1px solid rgba(255,255,255,0.08); padding:0 8px; gap:4px;">
+          <button type="button" class="drawer-mode-tab active" id="drawer-tab-form-match" style="flex:1.25; padding:8px 4px; background:transparent; border:none; color:#00f2fe; border-bottom:2px solid #00f2fe; font-size:11.5px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:4px; white-space:nowrap;">
+            🎯 网页表单实时对照 <span class="tab-badge" id="form-match-tab-count" style="display:none; background:#10b981; color:#0b0f19; font-size:9.5px; font-weight:800; padding:1px 5px; border-radius:10px;">0</span>
+          </button>
+          <button type="button" class="drawer-mode-tab" id="drawer-tab-structured" style="flex:1; padding:8px 4px; background:transparent; border:none; color:#94a3b8; border-bottom:2px solid transparent; font-size:11.5px; font-weight:600; cursor:pointer; white-space:nowrap;">⚡ 智能分类库</button>
+          <button type="button" class="drawer-mode-tab" id="drawer-tab-raw" style="flex:1; padding:8px 4px; background:transparent; border:none; color:#94a3b8; border-bottom:2px solid transparent; font-size:11.5px; font-weight:600; cursor:pointer; white-space:nowrap;">📝 原始分段直达</button>
         </div>
 
         <!-- 快速搜索框 -->
@@ -833,6 +1272,312 @@
     });
   }
 
+  // 8.1 渲染网页输入项实时对照视图 (DOM 输入项嗅探与简历材料 1 对 1 精准映射)
+  function renderFormMatchTabContent(containerEl, summaryTag, q) {
+    const fields = scanCurrentPageInputs();
+    const depot = resumeDepot || {};
+    const works = depot.workExperiences || [];
+    const projects = depot.projects || [];
+
+    const matchedCount = fields.filter(f => f.matched && f.matched.value).length;
+    if (summaryTag) {
+      summaryTag.textContent = `${fields.length}表单项 · ${matchedCount}匹配`;
+    }
+
+    // 搜索过滤
+    const filteredFields = fields.filter(f => {
+      if (!q) return true;
+      return (f.labelText || '').toLowerCase().includes(q) ||
+             (f.section || '').toLowerCase().includes(q) ||
+             (f.matched?.fieldName || '').toLowerCase().includes(q) ||
+             String(f.matched?.value || '').toLowerCase().includes(q);
+    });
+
+    if (fields.length === 0) {
+      containerEl.innerHTML = `
+        <div style="padding:40px 16px; text-align:center; color:#94a3b8;">
+          <div style="font-size:36px; margin-bottom:12px;">🔍</div>
+          <div style="font-size:13px; font-weight:700; color:#e2e8f0; margin-bottom:6px;">当前网页暂未探测到可填写的表单输入项</div>
+          <div style="font-size:11.5px; color:#64748b; line-height:1.5; margin-bottom:16px;">
+            请确认已打开招聘网申页面或注册登记表单。<br>如果页面刚完成加载或刚刚点击了新增按钮，可尝试重新嗅探。
+          </div>
+          <div style="display:flex; justify-content:center; gap:8px;">
+            <button class="action-mini-btn primary" id="btn-empty-rescan" style="padding:6px 14px; font-size:12px;">🔄 重新嗅探页面输入项</button>
+            <button class="action-mini-btn" id="btn-goto-structured" style="padding:6px 14px; font-size:12px;">⚡ 切换到分类库</button>
+          </div>
+        </div>
+      `;
+      const btnRescan = containerEl.querySelector('#btn-empty-rescan');
+      if (btnRescan) {
+        btnRescan.onclick = () => {
+          scanCurrentPageInputs();
+          renderDrawerContent();
+          showToast(`🔄 嗅探完成，共找到 ${currentScannedPageFields.length} 个表单项！`);
+        };
+      }
+      const btnGo = containerEl.querySelector('#btn-goto-structured');
+      if (btnGo) {
+        btnGo.onclick = () => {
+          const tabStructured = shadowRoot.getElementById('drawer-tab-structured');
+          if (tabStructured) tabStructured.click();
+        };
+      }
+      return;
+    }
+
+    // 顶部操作统计栏
+    const topBar = document.createElement('div');
+    topBar.style.cssText = `
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%);
+      border: 1px solid rgba(0, 242, 254, 0.25);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    `;
+
+    const matchRate = Math.round((matchedCount / fields.length) * 100);
+    topBar.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="font-size:13px; font-weight:700; color:#00f2fe;">🎯 网页表单实时对齐</span>
+          <span style="font-size:10.5px; background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:10px; font-weight:600;">匹配率 ${matchRate}%</span>
+        </div>
+        <button class="action-mini-btn" id="btn-rescan-page-fields" title="重新遍历页面 DOM 嗅探最新表单项" style="font-size:11px; padding:3px 8px;">
+          🔄 重新嗅探
+        </button>
+      </div>
+      <div style="font-size:11px; color:#94a3b8; display:flex; justify-content:space-between; align-items:center;">
+        <span>共识别到 <b style="color:#fff;">${fields.length}</b> 个输入项，已精准匹配 <b style="color:#a7f3d0;">${matchedCount}</b> 项简历材料</span>
+      </div>
+      <button class="action-mini-btn primary" id="btn-fill-all-matched" style="width:100%; padding:8px 12px; justify-content:center; font-size:12px; font-weight:700; background:linear-gradient(135deg, #10b981 0%, #00f2fe 100%); color:#0b0f19; border:none; border-radius:6px; box-shadow:0 2px 10px rgba(0,242,254,0.3); cursor:pointer;">
+        🚀 一键顺滑填入所有已匹配字段 (${matchedCount} 项)
+      </button>
+    `;
+    containerEl.appendChild(topBar);
+
+    // 绑定重新嗅探与一键填入
+    const btnRescan = topBar.querySelector('#btn-rescan-page-fields');
+    if (btnRescan) {
+      btnRescan.onclick = () => {
+        scanCurrentPageInputs();
+        renderDrawerContent();
+        showToast(`🔄 重新嗅探完成，共找到 ${currentScannedPageFields.length} 个表单项！`);
+      };
+    }
+
+    const btnFillAll = topBar.querySelector('#btn-fill-all-matched');
+    if (btnFillAll) {
+      btnFillAll.onclick = async () => {
+        btnFillAll.disabled = true;
+        btnFillAll.innerHTML = '⏳ 正在拟人化顺滑填入中...';
+        const targets = currentScannedPageFields.filter(f => f.matched && f.matched.value && f.element && document.body.contains(f.element));
+        let filledCount = 0;
+        for (const item of targets) {
+          const ok = fillAndHighlightElement(item.element, item.matched.value);
+          if (ok) {
+            filledCount++;
+            item.isFilled = true;
+            item.currentValue = item.matched.value;
+          }
+          await new Promise(r => setTimeout(r, 120));
+        }
+        showToast(`🎉 成功填入 ${filledCount} 个匹配字段！`);
+        btnFillAll.disabled = false;
+        btnFillAll.innerHTML = `🚀 一键顺滑填入所有已匹配字段 (${matchedCount} 项)`;
+        renderDrawerContent();
+      };
+    }
+
+    // 按 Section 分组
+    const sectionsMap = new Map();
+    filteredFields.forEach(f => {
+      const sec = f.section || '📝 表单信息';
+      if (!sectionsMap.has(sec)) sectionsMap.set(sec, []);
+      sectionsMap.get(sec).push(f);
+    });
+
+    sectionsMap.forEach((items, secTitle) => {
+      const secEl = document.createElement('div');
+      secEl.className = 'category-section';
+      secEl.style.marginBottom = '12px';
+
+      const isWorkSec = /工作经历|工作经验|实习/i.test(secTitle);
+      const isProjSec = /项目经历|项目经验/i.test(secTitle);
+
+      let switcherHtml = '';
+      if (isWorkSec && works.length > 1) {
+        switcherHtml = `
+          <div style="display:flex; align-items:center; gap:4px; margin-left:auto; margin-right:8px;">
+            <span style="font-size:10px; color:#94a3b8;">选定第</span>
+            <select class="exp-switch-select" id="work-exp-picker" style="background:#0b0f19; border:1px solid rgba(0,242,254,0.3); color:#00f2fe; border-radius:4px; font-size:10.5px; padding:2px 4px; outline:none; cursor:pointer;">
+              ${works.map((w, idx) => `
+                <option value="${idx}" ${idx === selectedWorkIndex ? 'selected' : ''}>${idx + 1}段: ${escapeHtml(w.company?.slice(0, 10))} (${escapeHtml(w.period?.slice(0, 7))})</option>
+              `).join('')}
+            </select>
+          </div>
+        `;
+      } else if (isProjSec && projects.length > 1) {
+        switcherHtml = `
+          <div style="display:flex; align-items:center; gap:4px; margin-left:auto; margin-right:8px;">
+            <span style="font-size:10px; color:#94a3b8;">选定第</span>
+            <select class="exp-switch-select" id="proj-exp-picker" style="background:#0b0f19; border:1px solid rgba(192,132,252,0.3); color:#c084fc; border-radius:4px; font-size:10.5px; padding:2px 4px; outline:none; cursor:pointer;">
+              ${projects.map((p, idx) => `
+                <option value="${idx}" ${idx === selectedProjectIndex ? 'selected' : ''}>${idx + 1}个: ${escapeHtml(p.name?.slice(0, 10))}</option>
+              `).join('')}
+            </select>
+          </div>
+        `;
+      }
+
+      secEl.innerHTML = `
+        <div class="category-header">
+          <span class="category-title">${secTitle}</span>
+          <div style="display:flex; align-items:center;">
+            ${switcherHtml}
+            <span class="category-count">${items.length} 项</span>
+          </div>
+        </div>
+        <div class="category-body" style="display:flex; flex-direction:column; gap:8px;"></div>
+      `;
+
+      // 绑定经历切换器事件
+      const workSelect = secEl.querySelector('#work-exp-picker');
+      if (workSelect) {
+        workSelect.onchange = (e) => {
+          e.stopPropagation();
+          selectedWorkIndex = parseInt(e.target.value, 10) || 0;
+          scanCurrentPageInputs();
+          renderDrawerContent();
+          showToast(`✓ 已切换为第 ${selectedWorkIndex + 1} 段工作经历材料`);
+        };
+      }
+
+      const projSelect = secEl.querySelector('#proj-exp-picker');
+      if (projSelect) {
+        projSelect.onchange = (e) => {
+          e.stopPropagation();
+          selectedProjectIndex = parseInt(e.target.value, 10) || 0;
+          scanCurrentPageInputs();
+          renderDrawerContent();
+          showToast(`✓ 已切换为第 ${selectedProjectIndex + 1} 个项目材料`);
+        };
+      }
+
+      const bodyEl = secEl.querySelector('.category-body');
+
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'fill-item-card';
+        card.style.position = 'relative';
+
+        const hasVal = !!item.matched?.value;
+        const valText = item.matched?.value || '';
+        const curWebVal = item.currentValue;
+
+        card.innerHTML = `
+          <div class="item-top-row">
+            <div style="display:flex; align-items:center; gap:5px; max-width:65%; overflow:hidden;">
+              <span class="item-title" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(item.labelText)}">
+                ${escapeHtml(item.labelText)}
+              </span>
+              ${item.isRequired ? '<span style="color:#f43f5e; font-weight:700; font-size:13px;" title="必填字段">*</span>' : ''}
+            </div>
+            <div>
+              ${curWebVal ? `
+                <span style="font-size:10px; background:rgba(16,185,129,0.15); color:#34d399; padding:1px 6px; border-radius:10px;" title="网页当前值: ${escapeHtml(curWebVal)}">
+                  🟢 网页已填: ${escapeHtml(curWebVal.slice(0, 8))}${curWebVal.length > 8 ? '...' : ''}
+                </span>
+              ` : `
+                <span style="font-size:10px; background:rgba(56,189,248,0.12); color:#38bdf8; padding:1px 6px; border-radius:10px;">
+                  ⚡ 待填入
+                </span>
+              `}
+            </div>
+          </div>
+          <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:6px 8px; margin:4px 0; font-size:11.5px; color:${hasVal ? '#a7f3d0' : '#64748b'}; line-height:1.45; max-height:85px; overflow-y:auto; white-space:pre-wrap;">${hasVal ? escapeHtml(valText) : '（未找到对应的简历匹配项，可手动点选或复制）'}</div>
+          <div class="item-actions" style="margin-top:6px;">
+            ${hasVal ? `
+              <button class="action-mini-btn primary btn-fill-single" data-idx="${item.id}">✨ 填入此项</button>
+              <button class="action-mini-btn btn-copy-single" data-text="${encodeURIComponent(valText)}">📋 复制</button>
+            ` : ''}
+            <button class="action-mini-btn btn-locate-single" data-idx="${item.id}">🎯 定位输入框</button>
+          </div>
+        `;
+
+        // 鼠标悬浮在卡片上，网页对应元素青色发光高亮联动
+        card.addEventListener('mouseenter', () => {
+          if (item.element && document.body.contains(item.element)) {
+            item.element.__origOutline = item.element.style.outline;
+            item.element.__origBoxShadow = item.element.style.boxShadow;
+            item.element.__origTransition = item.element.style.transition;
+            item.element.style.transition = 'box-shadow 0.2s ease, outline 0.2s ease';
+            item.element.style.outline = '2px solid #00f2fe';
+            item.element.style.boxShadow = '0 0 16px rgba(0, 242, 254, 0.85)';
+          }
+        });
+        card.addEventListener('mouseleave', () => {
+          if (item.element && document.body.contains(item.element)) {
+            item.element.style.outline = item.element.__origOutline || '';
+            item.element.style.boxShadow = item.element.__origBoxShadow || '';
+            item.element.style.transition = item.element.__origTransition || '';
+          }
+        });
+
+        // 绑定单项填入
+        const btnFill = card.querySelector('.btn-fill-single');
+        if (btnFill) {
+          btnFill.onclick = (e) => {
+            e.stopPropagation();
+            if (item.element && valText) {
+              const ok = fillAndHighlightElement(item.element, valText);
+              if (ok) {
+                item.isFilled = true;
+                item.currentValue = valText;
+                showToast(`✨ 已成功填入「${item.labelText}」！`);
+                renderDrawerContent();
+              }
+            }
+          };
+        }
+
+        // 绑定复制
+        const btnCopy = card.querySelector('.btn-copy-single');
+        if (btnCopy) {
+          btnCopy.onclick = (e) => {
+            e.stopPropagation();
+            copyToClipboard(valText, () => {
+              showToast(`📋 已复制「${item.labelText}」材料内容！`);
+            });
+          };
+        }
+
+        // 绑定定位
+        const btnLocate = card.querySelector('.btn-locate-single');
+        if (btnLocate) {
+          btnLocate.onclick = (e) => {
+            e.stopPropagation();
+            if (item.element && document.body.contains(item.element)) {
+              item.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              item.element.focus();
+              const origOutline = item.element.style.outline;
+              item.element.style.outline = '2px solid #38bdf8';
+              setTimeout(() => { item.element.style.outline = origOutline; }, 1000);
+              showToast(`🎯 已定位至「${item.labelText}」输入框`);
+            }
+          };
+        }
+
+        bodyEl.appendChild(card);
+      });
+
+      containerEl.appendChild(secEl);
+    });
+  }
+
   // 9. 渲染抽屉各个分类面板
   function renderDrawerContent() {
     if (!shadowRoot) return;
@@ -885,6 +1630,12 @@
       if (!q) return true;
       return texts.some(t => String(t || '').toLowerCase().includes(q));
     };
+
+    // 模式 C: 网页输入项实时对照视图
+    if (currentDrawerTab === 'form-match') {
+      renderFormMatchTabContent(containerEl, summaryTag, q);
+      return;
+    }
 
     // 模式 B: 原始分段直达视图
     if (currentDrawerTab === 'raw') {
@@ -1277,9 +2028,49 @@
       }
     };
 
+    const setupFormMutationObserver = () => {
+      if (formObserver) formObserver.disconnect();
+      formObserver = new MutationObserver(() => {
+        if (!isDrawerOpen) return;
+        clearTimeout(window.__quickfill_scan_timer);
+        window.__quickfill_scan_timer = setTimeout(() => {
+          const prevCount = currentScannedPageFields.length;
+          const scanned = scanCurrentPageInputs();
+          if (scanned.length !== prevCount) {
+            if (currentDrawerTab === 'form-match') {
+              renderDrawerContent();
+            }
+            updateFormMatchTabBadge();
+          }
+        }, 500);
+      });
+      try {
+        formObserver.observe(document.body, { childList: true, subtree: true });
+      } catch (e) {}
+    };
+
+    const updateTabStyles = () => {
+      const tabFormMatch = shadowRoot.getElementById('drawer-tab-form-match');
+      const tabStructured = shadowRoot.getElementById('drawer-tab-structured');
+      const tabRaw = shadowRoot.getElementById('drawer-tab-raw');
+      const allTabs = [
+        { el: tabFormMatch, name: 'form-match' },
+        { el: tabStructured, name: 'structured' },
+        { el: tabRaw, name: 'raw' }
+      ];
+      allTabs.forEach(({ el, name }) => {
+        if (!el) return;
+        const isActive = name === currentDrawerTab;
+        el.classList.toggle('active', isActive);
+        el.style.borderBottomColor = isActive ? '#00f2fe' : 'transparent';
+        el.style.color = isActive ? '#00f2fe' : '#94a3b8';
+        el.style.fontWeight = isActive ? '700' : '600';
+      });
+    };
+
     const openDrawer = (isUserExplicit = false) => {
       isDrawerOpen = true;
-      // 用户主动点开时，默认直接固定住 (满足用户需求: "点开了以后直接固定住")
+      // 用户主动点开时，默认直接固定住
       if (isUserExplicit) {
         isDrawerPinned = true;
         chrome.storage.local.set({ quickfillDrawerPinned: true });
@@ -1292,8 +2083,19 @@
         pill.style.opacity = '0';
         pill.style.pointerEvents = 'none';
       }
+
+      // 自动预先嗅探网页输入项
+      const scanned = scanCurrentPageInputs();
+      if (scanned.length > 0 && currentDrawerTab !== 'structured' && currentDrawerTab !== 'raw') {
+        currentDrawerTab = 'form-match';
+      }
+
       updatePinButtonState();
       updateTargetIndicator();
+      updateTabStyles();
+      setupFormMutationObserver();
+      renderDrawerContent();
+
       if (isUserExplicit && searchInput) {
         setTimeout(() => searchInput.focus(), 150);
       }
@@ -1303,6 +2105,10 @@
       isDrawerOpen = false;
       isDrawerPinned = false;
       chrome.storage.local.set({ quickfillDrawerPinned: false });
+      if (formObserver) {
+        formObserver.disconnect();
+        formObserver = null;
+      }
       if (drawer) {
         drawer.classList.remove('open');
         drawer.classList.remove('pinned');
@@ -1388,32 +2194,20 @@
       }
     });
 
-    // 抽屉双模切换 Tab
+    // 抽屉三模切换 Tab
+    const tabFormMatch = shadowRoot.getElementById('drawer-tab-form-match');
     const tabStructured = shadowRoot.getElementById('drawer-tab-structured');
     const tabRaw = shadowRoot.getElementById('drawer-tab-raw');
-    if (tabStructured && tabRaw) {
-      tabStructured.addEventListener('click', () => {
-        currentDrawerTab = 'structured';
-        tabStructured.classList.add('active');
-        tabStructured.style.borderBottomColor = '#00f2fe';
-        tabStructured.style.color = '#00f2fe';
-        tabRaw.classList.remove('active');
-        tabRaw.style.borderBottomColor = 'transparent';
-        tabRaw.style.color = '#94a3b8';
-        renderDrawerContent();
-      });
 
-      tabRaw.addEventListener('click', () => {
-        currentDrawerTab = 'raw';
-        tabRaw.classList.add('active');
-        tabRaw.style.borderBottomColor = '#00f2fe';
-        tabRaw.style.color = '#00f2fe';
-        tabStructured.classList.remove('active');
-        tabStructured.style.borderBottomColor = 'transparent';
-        tabStructured.style.color = '#94a3b8';
-        renderDrawerContent();
-      });
-    }
+    const switchTab = (tabName) => {
+      currentDrawerTab = tabName;
+      updateTabStyles();
+      renderDrawerContent();
+    };
+
+    if (tabFormMatch) tabFormMatch.addEventListener('click', () => switchTab('form-match'));
+    if (tabStructured) tabStructured.addEventListener('click', () => switchTab('structured'));
+    if (tabRaw) tabRaw.addEventListener('click', () => switchTab('raw'));
 
     // 搜索实时过滤
     if (searchInput) {

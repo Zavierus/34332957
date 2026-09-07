@@ -356,6 +356,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (prof.major && document.getElementById('prof-major')) document.getElementById('prof-major').value = prof.major;
       if (document.getElementById('prof-grad-year')) document.getElementById('prof-grad-year').value = prof.gradYear || '2024';
       if (document.getElementById('prof-city')) document.getElementById('prof-city').value = prof.city || '深圳';
+      if (prof.gender && document.getElementById('prof-gender')) document.getElementById('prof-gender').value = prof.gender;
+      if (prof.birthDate && document.getElementById('prof-birth-date')) document.getElementById('prof-birth-date').value = prof.birthDate;
+      if (prof.workYears && document.getElementById('prof-work-years')) document.getElementById('prof-work-years').value = prof.workYears;
+      if (prof.currentSalary && document.getElementById('prof-current-salary')) document.getElementById('prof-current-salary').value = prof.currentSalary;
       if (prof.targetSalary && document.getElementById('prof-salary')) document.getElementById('prof-salary').value = prof.targetSalary;
       if (prof.portfolioUrl && document.getElementById('prof-portfolio')) document.getElementById('prof-portfolio').value = prof.portfolioUrl;
 
@@ -418,6 +422,10 @@ document.addEventListener('DOMContentLoaded', () => {
       major: document.getElementById('prof-major')?.value.trim() || '',
       gradYear: document.getElementById('prof-grad-year')?.value.trim() || '2024',
       city: document.getElementById('prof-city')?.value.trim() || '深圳',
+      gender: document.getElementById('prof-gender')?.value.trim() || '男',
+      birthDate: document.getElementById('prof-birth-date')?.value.trim() || '',
+      workYears: document.getElementById('prof-work-years')?.value.trim() || '',
+      currentSalary: document.getElementById('prof-current-salary')?.value.trim() || '',
       targetSalary: document.getElementById('prof-salary')?.value.trim() || '',
       portfolioUrl: document.getElementById('prof-portfolio')?.value.trim() || ''
     };
