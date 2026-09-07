@@ -667,7 +667,31 @@
     const hasIncreased = detectedUnread > lastLagouUnreadCount;
     const now = Date.now();
 
-    if ((hasIncreased || inChatNewMessage) && (now - lastLagouAlertTimestamp > 10000)) {
+    // 二次验证：扫描侧边栏预览过滤系统消息
+    const LG_SYS_KW = [
+      '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+      '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
+      '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
+      '面试邀请', '点击预览', '收到你的', '不合适', '查看简历'
+    ];
+    let lgSystemOnly = false;
+    if (hasIncreased) {
+      const lgPreviews = document.querySelectorAll(
+        '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], [class*="chat-item"] [class*="text"], [class*="session"] [class*="msg"]'
+      );
+      if (lgPreviews.length > 0) {
+        let allSys = true, chk = 0;
+        lgPreviews.forEach(el => {
+          if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+            const t = (el.textContent || '').trim();
+            if (t.length > 0) { chk++; if (!LG_SYS_KW.some(kw => t.includes(kw))) allSys = false; }
+          }
+        });
+        if (chk > 0 && allSys) { lgSystemOnly = true; console.log('[ZIAVER Lagou] ⏭ 未读增量被二次验证拦截：系统消息，跳过'); }
+      }
+    }
+
+    if ((hasIncreased || inChatNewMessage) && !lgSystemOnly && (now - lastLagouAlertTimestamp > 10000)) {
       lastLagouAlertTimestamp = now;
       console.log(`[ZIAVER Lagou] 🔔 侦测到真实的拉勾 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLagouUnreadCount}`);
       dispatchLagouHRReplyNotification({

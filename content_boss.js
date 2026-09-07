@@ -1287,6 +1287,29 @@
     if (m) {
       const count = parseInt(m[1], 10);
       if (count > 0 && isWatcherInitialized && count > lastUnreadCount) {
+        // 二次验证：如果在聊天页面，扫描侧边栏预览确认不是系统消息
+        if (window.location.pathname.startsWith('/web/geek/chat')) {
+          const TITLE_SYS_KW = [
+            '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+            '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
+            '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
+            '面试邀请', '点击预览', '收到你的', '不合适', '查看简历'
+          ];
+          const previews = document.querySelectorAll(
+            '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], .chat-item .text, [class*="conversation-item"] p'
+          );
+          let allSys = true, checked = 0;
+          previews.forEach(el => {
+            if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+              const t = (el.textContent || '').trim();
+              if (t.length > 0) { checked++; if (!TITLE_SYS_KW.some(kw => t.includes(kw))) allSys = false; }
+            }
+          });
+          if (checked > 0 && allSys) {
+            lastUnreadCount = count;
+            return; // 系统消息导致的标题变化，跳过
+          }
+        }
         if (Date.now() - lastAlertTimestamp > 12000) {
           lastAlertTimestamp = Date.now();
           dispatchHRReplyNotification({
@@ -1394,7 +1417,49 @@
     const hasIncreasedUnread = detectedUnread > lastUnreadCount;
     const now = Date.now();
 
-    if ((hasIncreasedUnread || inChatNewMessage) && (now - lastAlertTimestamp > 10000)) {
+    // 【关键】二次验证：扫描侧边栏/页面内最新消息预览，过滤系统消息导致的假未读增量
+    const SYSTEM_PREVIEW_KEYWORDS = [
+      '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+      '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
+      '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示',
+      '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
+      '面试邀请', '不合适', '查看简历', '收到你的'
+    ];
+
+    let isSystemMsgOnly = false;
+    if (hasIncreasedUnread) {
+      // 扫描聊天侧边栏最新消息预览文本
+      const previewEls = document.querySelectorAll(
+        '.chat-conversation .last-msg, .user-list .msg-text, .user-list .last-message, ' +
+        '[class*="last-msg"], [class*="msg-preview"], [class*="message-last"], ' +
+        '[class*="chat-item"] [class*="text"], [class*="session"] [class*="msg"], ' +
+        '.chat-list-item .msg, .chat-item .text, [class*="conversation-item"] p'
+      );
+      if (previewEls.length > 0) {
+        // 收集所有可见的、有未读标记的联系人的最新消息预览
+        let allPreviewsAreSystem = true;
+        let checkedCount = 0;
+        previewEls.forEach(el => {
+          if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+            const prevText = (el.textContent || '').trim();
+            if (prevText.length > 0) {
+              checkedCount++;
+              const isSystem = SYSTEM_PREVIEW_KEYWORDS.some(kw => prevText.includes(kw));
+              if (!isSystem) {
+                allPreviewsAreSystem = false;
+              }
+            }
+          }
+        });
+        // 如果检查了预览文本且全部命中系统关键词 → 抑制通知
+        if (checkedCount > 0 && allPreviewsAreSystem) {
+          isSystemMsgOnly = true;
+          console.log(`[ZIAVER Autopilot] ⏭ BOSS 未读增量被二次验证拦截：所有最新预览均为系统消息，跳过通知`);
+        }
+      }
+    }
+
+    if ((hasIncreasedUnread || inChatNewMessage) && !isSystemMsgOnly && (now - lastAlertTimestamp > 10000)) {
       lastAlertTimestamp = now;
       console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
 
