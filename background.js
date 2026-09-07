@@ -117,6 +117,11 @@ function initOrUpdateStorage() {
       minDelaySec: 9,
       maxDelaySec: 15,
       minSalaryK: 9,
+      targetCity: '深圳',
+      strictCityFilter: true,
+      gradYear: '2024',
+      gradMonth: '9',
+      enableCampus2024Protection: true,
       audioAlert: true,
       desktopNotification: true,
       blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,培训生',
@@ -135,6 +140,10 @@ function initOrUpdateStorage() {
       updates.config = initialConfig;
     } else {
       const mergedConfig = { ...initialConfig, ...res.config };
+      if (mergedConfig.targetCity === undefined) mergedConfig.targetCity = '深圳';
+      if (mergedConfig.strictCityFilter === undefined) mergedConfig.strictCityFilter = true;
+      if (mergedConfig.gradYear === undefined) mergedConfig.gradYear = '2024';
+      if (mergedConfig.enableCampus2024Protection === undefined) mergedConfig.enableCampus2024Protection = true;
       if (mergedConfig.lastActiveDate !== today) {
         console.log(`[ZIAVER Autopilot] 存储初始化检测到新的一天: 上次活跃「${mergedConfig.lastActiveDate || '无'}」-> 今日「${today}」，执行清零`);
         mergedConfig.lastActiveDate = today;

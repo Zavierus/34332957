@@ -36,6 +36,10 @@
     minDelaySec: 9,
     maxDelaySec: 15,
     minSalaryK: 9,
+    targetCity: '深圳',
+    strictCityFilter: true,
+    gradYear: '2024',
+    enableCampus2024Protection: true,
     blacklistKeywords: '外包,单休,大小周,电话销售,无底薪,客服,劳务派遣,培训生,保险',
     enableDynamicGreeting: true,
     useCustomGreeting: true,
@@ -87,10 +91,112 @@
     });
   }
 
+  // ================= 严格地理位置核验引擎 (拉勾网 - 杜绝上海/异地侵入) =================
+  function verifyLagouJobLocation(card, title = '', company = '') {
+    const targetCity = (config.targetCity || '深圳').trim();
+    if (config.strictCityFilter === false) {
+      return { pass: true, jobArea: targetCity };
+    }
+
+    const OTHER_CITIES = [
+      '上海', '北京', '广州', '杭州', '成都', '武汉', '南京', '东莞', '佛山', '西安',
+      '长沙', '苏州', '重庆', '天津', '青岛', '厦门', '珠海', '郑州', '合肥', '无锡',
+      '宁波', '中山', '惠州', '济南', '沈阳', '大连', '昆明', '南宁', '长春', '哈尔滨'
+    ].filter(c => c !== targetCity);
+
+    const SZ_DISTRICTS = ['南山', '福田', '宝安', '龙岗', '龙华', '罗湖', '光明', '坪山', '盐田', '大鹏'];
+
+    // 1. 优先提取 DOM 明确地点 (拉勾卡片通常在 .p-bom 或 .item-bom 中的 span 标有 "深圳 · 南山区")
+    const locSelectors = [
+      '[class*="city"]', '[class*="area"]', '.item-bom__1bT73 span', '.p-bom__JlNur span',
+      '[class*="desc__"]', '[class*="company-address"]', '.position-name span'
+    ];
+    let jobArea = '';
+    for (const sel of locSelectors) {
+      const els = card ? card.querySelectorAll(sel) : [];
+      for (const el of els) {
+        const txt = el.textContent.trim();
+        if (txt.includes('·') || txt.includes('市') || txt.includes('区') || OTHER_CITIES.some(c => txt.includes(c)) || txt.includes(targetCity)) {
+          jobArea = txt;
+          break;
+        }
+      }
+      if (jobArea) break;
+    }
+
+    if (jobArea) {
+      if (jobArea.includes(targetCity) || (targetCity === '深圳' && SZ_DISTRICTS.some(d => jobArea.includes(d)))) {
+        return { pass: true, jobArea };
+      }
+      const detectedOther = OTHER_CITIES.find(c => jobArea.includes(c));
+      if (detectedOther) {
+        return { pass: false, reason: `[异地跳过] 岗位地点为「${jobArea}」，明确归属异地城市(${detectedOther})，非${targetCity}` };
+      }
+      if (!jobArea.includes('远程') && !jobArea.includes('全国') && !jobArea.includes('异地')) {
+        return { pass: false, reason: `[异地跳过] 岗位地点为「${jobArea}」，未包含目标城市(${targetCity})` };
+      }
+    }
+
+    // 2. 兜底扫描：全卡片文本排查
+    const rawCardText = (card ? (card.innerText || card.textContent || '') : '') + ' ' + title + ' ' + company;
+    const hasTarget = rawCardText.includes(targetCity) || (targetCity === '深圳' && SZ_DISTRICTS.some(d => rawCardText.includes(d)));
+    if (!hasTarget) {
+      const detectedOther = OTHER_CITIES.find(c => rawCardText.includes(c));
+      if (detectedOther) {
+        return { pass: false, reason: `[异地跳过] 卡片信息显示异地城市(${detectedOther})且未标明${targetCity}` };
+      }
+    }
+
+    return { pass: true, jobArea: jobArea || targetCity };
+  }
+
+  // ================= 2024届校招与优质应届宝藏识别引擎 (拉勾网) =================
+  function detect2024CampusOpportunity(title, company, cardLabels = '', desc = '', cardText = '') {
+    if (config.enableCampus2024Protection === false) {
+      return { isCampus2024: false };
+    }
+    const combined = `${title} ${company} ${cardLabels} ${desc} ${cardText}`.toLowerCase();
+
+    // 1. 2024届/校招/应届明确标识 (包含24届、2024届、秋招补录、回流、毕业1-2年内、择业期等)
+    const is2024Explicit = /2024届|24届|2024年毕业|24年毕业|2024秋招|24秋招|2024应届|24应届|24届补录|24届回流|毕业1年内|毕业2年内|择业期|初入职场|毕业生专场|应届专场/i.test(combined);
+    const isCampusGeneral = /校园招聘|校招|应届生|应届毕业生|管理培训生|管培生|初级运营|助理/i.test(combined);
+
+    // 2. 核心业务赛道相关度（商业化、海外、运营、电商、达人、商务、BD、投放、游戏、社区、摄影、策划、管培等）
+    const isRelevantDomain = /运营|商业化|海外|国际化|电商|达人|商务|bd|媒介|千川|投放|游戏|社区|摄影|视觉|内容|策划|管培/i.test(combined);
+
+    // 3. 严格排除明显要求高年限的资深社招
+    const isHighExp = /5-10年|10年以上|8-10年|3-5年|5年以上/i.test(combined);
+
+    if (is2024Explicit && isRelevantDomain && !isHighExp) {
+      return {
+        isCampus2024: true,
+        priority: 'high',
+        type: '2024届专属宝藏',
+        tag: '🎓24届校招/补录'
+      };
+    }
+
+    if (isCampusGeneral && isRelevantDomain && !isHighExp) {
+      return {
+        isCampus2024: true,
+        priority: 'medium',
+        type: '应届/校招通道',
+        tag: '🎓校招应届优质岗'
+      };
+    }
+
+    return { isCampus2024: false };
+  }
+
   // ================= 动态自荐话术拼装 =================
-  function synthesizeGreeting(title, matchedTag, company) {
+  function synthesizeGreeting(title, matchedTag, company, isCampus2024 = false) {
     const cleanTitle = (title || '').replace(/[\(（].*?[\)）]/g, '').trim() || title || '这个岗位';
     const cleanCompany = (company || '').trim();
+
+    // 🎓 2024届校招/补录专属自荐信（强调2024年9月毕业资质 + 近一年商业化实战经验）
+    if (isCampus2024) {
+      return `您好！看到咱们在招「${cleanTitle}」，我于2024年9月毕业，正好完全符合贵司对2024届/应届择业期的毕业时间要求；同时在过去一年中我积累了扎实的商业化运营与业务落地实战经验（涵盖海外运营、达人拓展与数据复盘），自驱力强、重数据重执行。附件已附上完整简历，非常期待能与您做进一步沟通，祝您工作顺利、天天开心～`;
+    }
 
     if (config.useCustomGreeting !== false && config.customGreetingTemplate) {
       let template = config.customGreetingTemplate;
@@ -118,6 +224,12 @@
 
     if (!title) return { pass: false, reason: '未获取到职位名称' };
 
+    // 0. 目标城市强过滤（严格杜绝上海等异地侵入，默认锁定深圳）
+    const locResult = verifyLagouJobLocation(card, title, company);
+    if (!locResult.pass) {
+      return locResult;
+    }
+
     // 提取卡片业务标签与属性
     let cardLabels = '';
     if (card) {
@@ -127,7 +239,11 @@
 
     const fullCardText = `${title} ${cardLabels} ${desc}`.toLowerCase();
 
-    // 1. 检查命中高亮职业词条 (精准标题匹配 + 业务标签命中 + 柔性语义匹配)
+    // 1. 2024届校招/补录与优质应届通道识别
+    const rawCardText = card ? (card.innerText || card.textContent || '') : '';
+    const campusCheck = detect2024CampusOpportunity(title, company, cardLabels, desc, `${fullCardText} ${rawCardText}`);
+
+    // 2. 检查命中高亮职业词条 (精准标题匹配 + 业务标签命中 + 柔性语义匹配)
     let matchedTag = null;
     let matchType = '';
 
@@ -185,36 +301,50 @@
       }
     }
 
+    // 若未命中常规词条，但该岗位属于 2024届校招/应届宝藏，赋予专属标签放行
+    if (!matchedTag && campusCheck.isCampus2024) {
+      matchedTag = campusCheck.tag;
+      matchType = '🎓24届校招宝藏专场命中';
+    }
+
     if (!matchedTag) {
       return { pass: false, reason: `[未选中词条] 「${title}」未命中高亮勾选的 ${activeTags.length} 个职业词条` };
     }
 
-    // 2. 黑名单过滤
-    const fullText = (title + ' ' + company + ' ' + desc + ' ' + cardLabels).toLowerCase();
+    // 3. 黑名单过滤 (2024届校招对管培生/助理等免疫误伤)
+    const fullText = (title + ' ' + company + ' ' + desc + ' ' + cardLabels + ' ' + rawCardText).toLowerCase();
     const blacklist = (config.blacklistKeywords || '').split(/[,，|、\s]+/).filter(Boolean);
     for (const word of blacklist) {
-      if (fullText.includes(word.toLowerCase())) {
+      const lowerWord = word.toLowerCase().trim();
+      if (!lowerWord) continue;
+      // 🎓 2024届校招保护特权：对管培生、培训生、运营助理免疫误杀
+      if (campusCheck.isCampus2024 && (lowerWord === '培训生' || lowerWord === '管培生' || lowerWord === '助理' || lowerWord === '实习')) {
+        continue;
+      }
+      if (fullText.includes(lowerWord)) {
         return { pass: false, reason: `[触发黑名单] 命中词: "${word}" (${company})` };
       }
     }
 
-    // 3. 经验年限过长过滤 (跳过5年以上)
-    if (/5-10年|10年以上|8-10年|8年以上|5年以上/i.test(desc)) {
+    // 4. 经验年限过长过滤 (校招应届岗位自动豁免)
+    if (!campusCheck.isCampus2024 && /5-10年|10年以上|8-10年|8年以上|5年以上/i.test(desc)) {
       return { pass: false, reason: `[经验要求过高跳过] ${desc}` };
     }
 
-    // 4. 薪资门槛过滤
+    // 5. 薪资门槛过滤 (2024届校招岗位免低薪拦截)
     const match = salary.match(/(\d+)(?:-(\d+))?K/i);
     if (match) {
       const maxK = match[2] ? parseInt(match[2], 10) : parseInt(match[1], 10);
       if (maxK < config.minSalaryK) {
-        return { pass: false, reason: `[低薪跳过] ${salary} 未达门槛 ${config.minSalaryK}K` };
+        if (!campusCheck.isCampus2024) {
+          return { pass: false, reason: `[低薪跳过] ${salary} 未达门槛 ${config.minSalaryK}K` };
+        }
       }
     }
 
     return {
       pass: true,
-      data: { title, salary, company, desc, matchedTag }
+      data: { title, salary, company, desc, matchedTag, isCampus2024: campusCheck.isCampus2024, jobArea: locResult.jobArea }
     };
   }
 
@@ -654,6 +784,11 @@
             <span class="tag-link" id="btn-open-dashboard">打开完整后台管理 ↗</span>
           </div>
 
+          <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); border:1px solid rgba(16,185,129,0.25); border-radius:6px; padding:4px 8px; margin-bottom:6px; font-size:10px;">
+            <span>📍 锁定城市: <b id="hud-city-name" style="color:#34d399;">深圳</b> <span style="color:#10b981; font-size:9.5px;">(严防异地)</span></span>
+            <span style="color:#c084fc;">🎓 24届校招保护: <b style="color:#34d399;">已激活</b></span>
+          </div>
+
           <div class="action-btns">
             <button class="btn btn-primary" id="btn-toggle-run">
               <span>🚀 开启拉勾投递</span>
@@ -986,6 +1121,9 @@
         pipeInd.style.display = 'none';
       }
     }
+
+    const cityEl = shadowRoot.getElementById('hud-city-name');
+    if (cityEl) cityEl.textContent = config.targetCity || '深圳';
   }
 
   function logHUD(htmlMsg) {
@@ -1304,9 +1442,14 @@
         }
 
         if (btnChat) {
-          const greetingText = synthesizeGreeting(title, matchedTag, company);
+          const isCampus = !!screenResult.data?.isCampus2024;
+          const greetingText = synthesizeGreeting(title, matchedTag, company, isCampus);
 
-          logHUD(`<span class="highlight">[命中词条: ${matchedTag}]</span> ${company} · ${title} (${salary})`);
+          if (isCampus) {
+            logHUD(`<span class="success">[🎓24届校招宝藏命中]</span> ${company} · ${title} (${salary}) <span style="font-size:10px; color:#c084fc;">[符合2024年9月毕业资质]</span>`);
+          } else {
+            logHUD(`<span class="highlight">[命中词条: ${matchedTag}]</span> ${company} · ${title} (${salary})`);
+          }
           logHUD(`<span class="skip" style="color:#6ee7b7;">合成自然话术: "${greetingText.slice(0, 30)}..."</span>`);
 
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1676,8 +1819,14 @@
     {
       id: 'qr_1',
       tag: '🌍 问询海外区域/品类',
-      title: '请教海外区域与业务品类 (用户定制)',
-      text: '您好，感谢关注。我看了下咱们的岗位描述，想先请教一下，咱们目前这条业务线主要面向的是哪个海外区域和业务品类呢？'
+      title: '请教海外区域与业务品类 (核心定制)',
+      text: '您好，感谢关注！我仔细看了一下咱们的岗位要求，想先请教一下，咱们目前这条业务线主要面向的是哪个海外区域和核心业务品类呢？方便的话我可以针对性提供过往的海外商业化实战案例与数据复盘～'
+    },
+    {
+      id: 'qr_grad2024',
+      tag: '🎓 24届应届/实战优势',
+      title: '说明2024年9月毕业+一年实战落地经验',
+      text: '您好，感谢关注与青睐！我是2024年9月毕业，完全符合贵司对2024届/应届择业期的时间要求；同时已有近一年的商业化实战落地经验，执行力与数据复盘能力强。请问目前岗位方便约一个沟通时间吗？'
     },
     {
       id: 'qr_2',
@@ -1689,7 +1838,7 @@
       id: 'qr_3',
       tag: '📄 简历/作品案例推送',
       title: '沉淀案例推送+约聊',
-      text: '您好，非常荣幸收到关注！附件已更新我针对该方向沉淀的最新简历与作品案例，背景契合度较高。请问咱们方便约个时间做进一步电话沟通吗？'
+      text: '您好，非常荣幸收到关注！附件已更新我针对该方向沉淀的最新简历与作品案例（包含达人拓展SOP与商业化投放复盘），背景契合度较高。请问咱们方便约个时间做进一步电话沟通吗？'
     },
     {
       id: 'qr_4',

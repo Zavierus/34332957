@@ -60,6 +60,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputMaxDelay = document.getElementById('cfg-max-delay');
   const inputMinSalary = document.getElementById('cfg-min-salary');
   const inputBlacklist = document.getElementById('cfg-blacklist');
+  const inputTargetCity = document.getElementById('cfg-target-city');
+  const inputStrictCity = document.getElementById('cfg-strict-city');
+  const inputCampusProtection = document.getElementById('cfg-campus-protection');
 
   const logListEl = document.getElementById('log-list');
 
@@ -100,6 +103,9 @@ document.addEventListener('DOMContentLoaded', () => {
     activeTagsEl.textContent = activeCount;
 
     // 回填设置
+    if (inputTargetCity) inputTargetCity.value = config.targetCity || '深圳';
+    if (inputStrictCity) inputStrictCity.checked = config.strictCityFilter !== false;
+    if (inputCampusProtection) inputCampusProtection.checked = config.enableCampus2024Protection !== false;
     if (config.dailyLimit !== undefined) inputDailyLimit.value = config.dailyLimit;
     if (config.minDelaySec !== undefined) inputMinDelay.value = config.minDelaySec;
     if (config.maxDelaySec !== undefined) inputMaxDelay.value = config.maxDelaySec;
@@ -141,6 +147,10 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
 
     const newConfig = {
+      targetCity: (inputTargetCity ? inputTargetCity.value.trim() : '') || '深圳',
+      strictCityFilter: inputStrictCity ? inputStrictCity.checked : true,
+      gradYear: '2024',
+      enableCampus2024Protection: inputCampusProtection ? inputCampusProtection.checked : true,
       dailyLimit: parseInt(inputDailyLimit.value, 10) || 30,
       minDelaySec: parseInt(inputMinDelay.value, 10) || 9,
       maxDelaySec: parseInt(inputMaxDelay.value, 10) || 15,

@@ -406,6 +406,32 @@
           <form id="global-settings-form">
             <div class="form-row">
               <div class="form-field">
+                <label for="set-target-city">🎯 巡航锁定目标城市 (严防异地)</label>
+                <div class="input-unit">
+                  <input type="text" id="set-target-city" value="深圳" placeholder="例如：深圳">
+                  <span class="unit">城市</span>
+                </div>
+                <div class="form-tip">全网巡航统一锁定该城市，默认：深圳。</div>
+              </div>
+
+              <div class="form-field">
+                <label>严格防异地与 2024届校招特权</label>
+                <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #e2e8f0; cursor: pointer;">
+                    <input type="checkbox" id="set-strict-city" checked style="accent-color: #00f2fe; width: 16px; height: 16px;">
+                    <span>🛡️ 严格防异地 (杜绝上海/异地误投)</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #c084fc; cursor: pointer;">
+                    <input type="checkbox" id="set-campus-protection" checked style="accent-color: #a855f7; width: 16px; height: 16px;">
+                    <span>🎓 2024届校招/补录特权保护 (24年9月毕业)</span>
+                  </label>
+                </div>
+                <div class="form-tip">2024届特权保护可免除管培生黑名单误杀，放行大厂优质校招/补录通道。</div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-field">
                 <label for="set-daily-limit">每日安全投递上限</label>
                 <div class="input-unit">
                   <input type="number" id="set-daily-limit" min="5" max="999" value="60">

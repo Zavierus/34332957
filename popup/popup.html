@@ -285,6 +285,31 @@
     <div class="tab-content" id="tab-settings">
       <form id="settings-form">
         <div class="form-group">
+          <label for="cfg-target-city">🎯 巡航锁定目标城市 (严防异地)</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="cfg-target-city" value="深圳" style="flex: 1; padding: 6px 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(0,242,254,0.3); border-radius: 6px; color: #fff; font-size: 12px;" placeholder="例如：深圳">
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; cursor: pointer; white-space: nowrap; margin-bottom: 0;">
+              <input type="checkbox" id="cfg-strict-city" checked style="accent-color: #00f2fe;">
+              <span>严防异地</span>
+            </label>
+          </div>
+          <div style="font-size: 10px; color: #64748b; margin-top: 3px;">开启后全面拦截上海、北京、广州等所有异地岗位，杜绝误投。</div>
+        </div>
+
+        <div class="form-group" style="background: rgba(168,85,247,0.08); border: 1px dashed rgba(168,85,247,0.35); border-radius: 8px; padding: 8px 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 11.5px; font-weight: 700; color: #c084fc; margin-bottom: 0;">🎓 2024届校招/补录宝藏岗保护</label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #a855f7; cursor: pointer; margin-bottom: 0;">
+              <input type="checkbox" id="cfg-campus-protection" checked style="accent-color: #a855f7;">
+              <span>已激活特权</span>
+            </label>
+          </div>
+          <div style="font-size: 10.5px; color: #cbd5e1; line-height: 1.4;">
+            身份：<b>2024年9月毕业 (2024届应届/择业期)</b>。自动免疫管培生/助理黑名单误杀，自动匹配大厂校招与补录宝藏，并合成专属高回复话术！
+          </div>
+        </div>
+
+        <div class="form-group">
           <label for="cfg-daily-limit">每日安全投递上限</label>
           <div class="input-with-unit">
             <input type="number" id="cfg-daily-limit" min="5" max="999" value="60">

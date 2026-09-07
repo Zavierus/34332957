@@ -320,6 +320,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function populateSettings() {
     const cfg = currentConfig;
+    if (cfg.targetCity !== undefined && document.getElementById('set-target-city')) document.getElementById('set-target-city').value = cfg.targetCity;
+    if (cfg.strictCityFilter !== undefined && document.getElementById('set-strict-city')) document.getElementById('set-strict-city').checked = cfg.strictCityFilter;
+    if (cfg.enableCampus2024Protection !== undefined && document.getElementById('set-campus-protection')) document.getElementById('set-campus-protection').checked = cfg.enableCampus2024Protection;
     if (cfg.dailyLimit !== undefined) document.getElementById('set-daily-limit').value = cfg.dailyLimit;
     if (cfg.minSalaryK !== undefined) document.getElementById('set-min-salary').value = cfg.minSalaryK;
     if (cfg.minDelaySec !== undefined) document.getElementById('set-min-delay').value = cfg.minDelaySec;
@@ -348,16 +351,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (prof.school && document.getElementById('prof-school')) document.getElementById('prof-school').value = prof.school;
       if (prof.degree && document.getElementById('prof-degree')) document.getElementById('prof-degree').value = prof.degree;
       if (prof.major && document.getElementById('prof-major')) document.getElementById('prof-major').value = prof.major;
-      if (prof.gradYear && document.getElementById('prof-grad-year')) document.getElementById('prof-grad-year').value = prof.gradYear;
-      if (prof.city && document.getElementById('prof-city')) document.getElementById('prof-city').value = prof.city;
+      if (document.getElementById('prof-grad-year')) document.getElementById('prof-grad-year').value = prof.gradYear || '2024';
+      if (document.getElementById('prof-city')) document.getElementById('prof-city').value = prof.city || '深圳';
       if (prof.targetSalary && document.getElementById('prof-salary')) document.getElementById('prof-salary').value = prof.targetSalary;
       if (prof.portfolioUrl && document.getElementById('prof-portfolio')) document.getElementById('prof-portfolio').value = prof.portfolioUrl;
 
       if (prof.name && document.getElementById('sidebar-user-name')) {
         document.getElementById('sidebar-user-name').textContent = prof.name;
       }
-      if (prof.city && document.getElementById('sidebar-user-city')) {
-        document.getElementById('sidebar-user-city').textContent = `${prof.city} · ${prof.targetSalary || '求职中'}`;
+      if (document.getElementById('sidebar-user-city')) {
+        document.getElementById('sidebar-user-city').textContent = `${prof.city || '深圳'} · 2024届 · ${prof.targetSalary || '求职中'}`;
       }
     });
   }
@@ -379,9 +382,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const greetingVal = document.getElementById('set-custom-greeting')?.value.trim() || DEFAULT_RECOMMENDED_GREETING;
     const useCustomVal = document.getElementById('set-use-custom-greeting')?.checked ?? true;
+    const targetCityVal = document.getElementById('set-target-city')?.value.trim() || '深圳';
+    const strictCityVal = document.getElementById('set-strict-city')?.checked ?? true;
+    const campusProtectionVal = document.getElementById('set-campus-protection')?.checked ?? true;
 
     const newConfig = {
       ...currentConfig,
+      targetCity: targetCityVal,
+      strictCityFilter: strictCityVal,
+      enableCampus2024Protection: campusProtectionVal,
+      gradYear: '2024',
       dailyLimit: parseInt(document.getElementById('set-daily-limit').value, 10) || 30,
       minSalaryK: parseInt(document.getElementById('set-min-salary').value, 10) || 9,
       minDelaySec: parseInt(document.getElementById('set-min-delay').value, 10) || 9,
@@ -402,8 +412,8 @@ document.addEventListener('DOMContentLoaded', () => {
       school: document.getElementById('prof-school')?.value.trim() || '',
       degree: document.getElementById('prof-degree')?.value.trim() || '',
       major: document.getElementById('prof-major')?.value.trim() || '',
-      gradYear: document.getElementById('prof-grad-year')?.value.trim() || '',
-      city: document.getElementById('prof-city')?.value.trim() || '',
+      gradYear: document.getElementById('prof-grad-year')?.value.trim() || '2024',
+      city: document.getElementById('prof-city')?.value.trim() || '深圳',
       targetSalary: document.getElementById('prof-salary')?.value.trim() || '',
       portfolioUrl: document.getElementById('prof-portfolio')?.value.trim() || ''
     };
