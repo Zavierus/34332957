@@ -1358,14 +1358,29 @@
       });
 
       // 2. 当前对话框实时新气泡：仅在已有对话已初始化基准值后，且对方气泡数量增加时触发
-      const friendMsgs = document.querySelectorAll(
-        '.chat-conversation .item-friend, .chat-message-list .item-friend, [class*="item-friend"], [class*="message-item"]:not(.item-myself), [class*="friend-message"], [class*="item-boss"]'
+      //    【关键】排除系统消息：附件简历请求、对方已同意、交换联系方式、简历已投递等
+      const SYSTEM_MSG_BLACKLIST = [
+        '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+        '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝',
+        '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示'
+      ];
+      const allCandidates = document.querySelectorAll(
+        '.chat-conversation .item-friend, .chat-message-list .item-friend, [class*="item-friend"], [class*="message-item"]:not(.item-myself):not([class*="system"]):not([class*="tip"]):not([class*="notice"]):not([class*="event"]):not([class*="alert"]), [class*="friend-message"], [class*="item-boss"]'
       );
-      const currentFriendCount = friendMsgs.length;
-      if (isWatcherInitialized && lastFriendMsgCount > 0 && currentFriendCount > lastFriendMsgCount) {
+      // 过滤掉系统/通知类气泡：class 含 system/tip/notice/event 或文本命中黑名单
+      let realFriendCount = 0;
+      allCandidates.forEach(el => {
+        const cls = (el.className || '').toLowerCase();
+        if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
+        const txt = (el.textContent || '').trim();
+        if (txt.length === 0) return;
+        if (SYSTEM_MSG_BLACKLIST.some(kw => txt.includes(kw))) return;
+        realFriendCount++;
+      });
+      if (isWatcherInitialized && lastFriendMsgCount > 0 && realFriendCount > lastFriendMsgCount) {
         inChatNewMessage = true;
       }
-      lastFriendMsgCount = currentFriendCount;
+      lastFriendMsgCount = realFriendCount;
     }
 
     // 首次扫描：仅初始化基准值，首屏坚决不弹窗打扰！

@@ -633,10 +633,24 @@
         }
       });
 
-      const friendMsgs = document.querySelectorAll(
+      const SYSTEM_MSG_BLACKLIST_LG = [
+        '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+        '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝',
+        '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示'
+      ];
+      const allCandidatesLG = document.querySelectorAll(
         '[class*="item-left"], [class*="friend"], [class*="other-message"], .msg-item-left'
       );
-      const curCount = friendMsgs.length;
+      let realCountLG = 0;
+      allCandidatesLG.forEach(el => {
+        const cls = (el.className || '').toLowerCase();
+        if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
+        const txt = (el.textContent || '').trim();
+        if (txt.length === 0) return;
+        if (SYSTEM_MSG_BLACKLIST_LG.some(kw => txt.includes(kw))) return;
+        realCountLG++;
+      });
+      const curCount = realCountLG;
       if (isLagouWatcherInitialized && lastLagouFriendMsgCount > 0 && curCount > lastLagouFriendMsgCount) {
         inChatNewMessage = true;
       }

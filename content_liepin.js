@@ -801,10 +801,24 @@
         }
       });
 
-      const friendMsgs = document.querySelectorAll(
+      const SYSTEM_MSG_BLACKLIST_LP = [
+        '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
+        '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝',
+        '邀请你', '预约面试', '点击预览', '安全提示', '以下是系统', '温馨提示'
+      ];
+      const allCandidatesLP = document.querySelectorAll(
         '[class*="msg-item"][class*="friend"], [class*="chat-message"][class*="left"], [class*="item-friend"], .msg-left'
       );
-      const curCount = friendMsgs.length;
+      let realCountLP = 0;
+      allCandidatesLP.forEach(el => {
+        const cls = (el.className || '').toLowerCase();
+        if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
+        const txt = (el.textContent || '').trim();
+        if (txt.length === 0) return;
+        if (SYSTEM_MSG_BLACKLIST_LP.some(kw => txt.includes(kw))) return;
+        realCountLP++;
+      });
+      const curCount = realCountLP;
       if (isLiepinWatcherInitialized && lastLiepinFriendMsgCount > 0 && curCount > lastLiepinFriendMsgCount) {
         inChatNewMessage = true;
       }
