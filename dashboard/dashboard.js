@@ -40,6 +40,15 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentLogs = [];
   let currentConfig = {};
 
+  // ================= 本地日历日期工具函数 (适配时区，杜绝 UTC 早晨滞后) =================
+  function getLocalDateStr(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   // 3. 数据初始化
   function loadAllData() {
     chrome.storage.local.get(['jobTags', 'applyLog', 'config'], (res) => {
@@ -62,8 +71,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const dashPipeTagsEl = document.getElementById('dash-pipe-active-tags-num');
     if (dashPipeTagsEl) dashPipeTagsEl.textContent = activeCount;
 
-    // 今日统计
-    const today = new Date().toISOString().split('T')[0];
+    // 今日统计 (基于本地自然日)
+    const today = getLocalDateStr();
     const todayCount = currentLogs.filter(l => (l.time || '').startsWith(today)).length;
     document.getElementById('stat-today-applied').textContent = todayCount;
     document.getElementById('stat-total-applied').textContent = currentLogs.length;
@@ -280,7 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `JobCruise_每日求职投递报表_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `JobCruise_每日求职投递报表_${getLocalDateStr()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   });
@@ -435,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `JobCruise_全量数据备份_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `JobCruise_全量数据备份_${getLocalDateStr()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       showCopyToast('全量数据备份已成功导出！换账户后一键导入即可无缝恢复。');
@@ -624,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
 
   function runDailyRetrospective() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     let logs = currentLogs.filter(l => (l.time || '').startsWith(today));
     let isFallback = false;
 
@@ -889,7 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function exportRetrospectiveMarkdown() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     const todayCount = document.getElementById('retro-today-count')?.textContent || '0';
     const replyRate = document.getElementById('retro-reply-rate')?.textContent || '0.0%';
     const topTag = document.getElementById('retro-top-tag')?.textContent || '电商/达人运营';
@@ -2101,7 +2110,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `JobCruise_网申简历武器库_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `JobCruise_网申简历武器库_${getLocalDateStr()}.json`;
         a.click();
         URL.revokeObjectURL(url);
         showCopyToast('简历武器库 JSON 备份已导出！');
@@ -2620,4 +2629,32 @@ document.addEventListener('DOMContentLoaded', () => {
   renderIndustryRadar('ecommerce');
   renderBigTechStrategies();
   renderResumeAndPortfolioAdvice();
+
+  // 实时跨日广播与数据同步总线
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.type === 'DATE_CHANGED') {
+        console.log('[ZIAVER Dashboard] 收到跨日更新通知，重新载入统计大盘:', request.today);
+        loadAllData();
+        runDailyRetrospective();
+        sendResponse({ status: 'ok' });
+        return true;
+      }
+    });
+  }
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local') {
+        if (changes.applyLog || changes.config || changes.jobTags) {
+          loadAllData();
+        }
+      }
+    });
+  }
+
+  // 定时心跳更新今日统计（每 30 秒感知日期跨越）
+  setInterval(() => {
+    updateBadges();
+  }, 30000);
 });

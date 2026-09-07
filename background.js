@@ -83,9 +83,35 @@ const DEFAULT_JOB_TAGS = [
 
 const DEFAULT_GREETING = '您好！看到咱们在招「{jobTitle}」，感觉整体要求跟我还蛮匹配的。我有相关业务实战经验，执行力强、看重数据和实际业务落地。简历在附件中，如果合适随时沟通交流，祝您工作顺利、天天开心～';
 
+// ================= 本地日历日期工具函数 (严谨适配时区，杜绝 UTC 导致早晨日期滞后) =================
+function getLocalDateStr(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// 广播消息至所有激活标签页 (HUD 与 Dashboard 即时无感同步)
+function broadcastToAllTabs(message) {
+  if (!chrome.tabs || !chrome.tabs.query) return;
+  chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
+    tabs.forEach(tab => {
+      try {
+        chrome.tabs.sendMessage(tab.id, message, () => {
+          if (chrome.runtime.lastError) {
+            // 忽略未注入 content script 的系统或空标签
+          }
+        });
+      } catch (e) {}
+    });
+  });
+}
+
 function initOrUpdateStorage() {
   chrome.storage.local.get(['config', 'jobTags', 'applyLog'], (res) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     const initialConfig = {
       dailyLimit: 30,
       minDelaySec: 9,
@@ -110,6 +136,7 @@ function initOrUpdateStorage() {
     } else {
       const mergedConfig = { ...initialConfig, ...res.config };
       if (mergedConfig.lastActiveDate !== today) {
+        console.log(`[ZIAVER Autopilot] 存储初始化检测到新的一天: 上次活跃「${mergedConfig.lastActiveDate || '无'}」-> 今日「${today}」，执行清零`);
         mergedConfig.lastActiveDate = today;
         mergedConfig.todayCount = 0;
         mergedConfig.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
@@ -143,51 +170,115 @@ function initOrUpdateStorage() {
 
     if (Object.keys(updates).length > 0) {
       chrome.storage.local.set(updates, () => {
-        console.log('[ZIAVER Autopilot] 插件存储状态已无损更新');
+        console.log('[ZIAVER Autopilot] 插件存储状态已无损更新 (当前日期:', today, ')');
       });
     }
   });
 }
 
-// ================= 每日全网求职情报每日晨间强提醒 =================
-function checkDailyJobDigest() {
+// ================= 跨日自动感应检测与每日情报强提醒 (Live Time Sensor) =================
+function checkAndPerformDailyRollover(triggerSource = '自动') {
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
-  chrome.storage.local.get(['lastDailyDigestDate'], (res) => {
-    const today = new Date().toISOString().split('T')[0];
-    if (!res || res.lastDailyDigestDate !== today) {
-      chrome.storage.local.set({ lastDailyDigestDate: today }, () => {
-        setTimeout(() => {
-          if (chrome.notifications) {
-            chrome.notifications.create('daily_job_digest_' + Date.now(), {
-              type: 'basic',
-              iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-              title: '🌅 今日全网求职情报已就绪！',
-              message: '已为您精选公众号名企直聘、大厂招聘官网与社群内推优质岗位（电商/游戏/视觉运营 · 深圳特选），点击一键查看！',
-              priority: 2,
-              requireInteraction: true
-            });
-          }
-        }, 3500);
+  const today = getLocalDateStr();
+
+  chrome.storage.local.get(['config', 'lastDailyDigestDate'], (res) => {
+    let config = res.config || {};
+    let configChanged = false;
+
+    if (config.lastActiveDate !== today) {
+      console.log(`[ZIAVER Autopilot] 自动检测到跨日变更 (${triggerSource}): 上次日期「${config.lastActiveDate || '无'}」-> 今日「${today}」，正在自动重置今日计数！`);
+      config.lastActiveDate = today;
+      config.todayCount = 0;
+      config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      configChanged = true;
+    }
+
+    const updates = {};
+    if (configChanged) {
+      updates.config = config;
+    }
+
+    // 检查是否需要触发今日求职情报强提醒
+    const needDigest = !res.lastDailyDigestDate || res.lastDailyDigestDate !== today;
+    if (needDigest) {
+      updates.lastDailyDigestDate = today;
+      setTimeout(() => {
+        if (chrome.notifications) {
+          chrome.notifications.create('daily_job_digest_' + Date.now(), {
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+            title: '🌅 今日全网求职情报已就绪！',
+            message: '已为您精选公众号名企直聘、大厂招聘官网与社群内推优质岗位（电商/游戏/视觉运营 · 深圳特选），点击一键查看！',
+            priority: 2,
+            requireInteraction: true
+          });
+        }
+      }, 2000);
+    }
+
+    if (Object.keys(updates).length > 0) {
+      chrome.storage.local.set(updates, () => {
+        console.log(`[ZIAVER Autopilot] 跨日数据与今日情报状态已持久化更新 (${today})`);
+        broadcastToAllTabs({
+          type: 'DATE_CHANGED',
+          today: today,
+          config: config
+        });
       });
     }
   });
 }
 
+// 保持旧接口兼容
+function checkDailyJobDigest() {
+  checkAndPerformDailyRollover('主动检测');
+}
+
+// 1. 生命周期挂载
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[ZIAVER Autopilot] 插件安装/更新');
   initOrUpdateStorage();
-  checkDailyJobDigest();
+  checkAndPerformDailyRollover('安装/更新');
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  console.log('[ZIAVER Autopilot] 浏览器启动检查');
+  console.log('[ZIAVER Autopilot] 浏览器冷启动检查');
   initOrUpdateStorage();
-  checkDailyJobDigest();
+  checkAndPerformDailyRollover('浏览器冷启动');
 });
 
-// Service Worker 加载时立即执行一次增量同步检查，保证重载即时生效
+// 2. 创建 Chrome 闹钟进行 5 分钟定时心跳探测（即使用户过夜不关浏览器也能准时跨日刷新）
+if (chrome.alarms) {
+  try {
+    chrome.alarms.create('check_daily_date_and_digest', { periodInMinutes: 5 });
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === 'check_daily_date_and_digest') {
+        checkAndPerformDailyRollover('定时心跳');
+      }
+    });
+  } catch (e) {
+    console.warn('[ZIAVER Autopilot] 创建 alarms 异常:', e);
+  }
+}
+
+// 3. 用户早晨回到浏览器时的实时感知（聚焦/激活标签瞬间）
+if (chrome.windows && chrome.windows.onFocusChanged) {
+  chrome.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId !== chrome.windows.WINDOW_ID_NONE) {
+      checkAndPerformDailyRollover('窗口聚焦');
+    }
+  });
+}
+
+if (chrome.tabs && chrome.tabs.onActivated) {
+  chrome.tabs.onActivated.addListener(() => {
+    checkAndPerformDailyRollover('标签切换');
+  });
+}
+
+// 4. Service Worker 唤醒时立即执行一次增量同步检查
 initOrUpdateStorage();
-checkDailyJobDigest();
+checkAndPerformDailyRollover('ServiceWorker唤醒');
 
 // ================= 全网多平台流水线巡航调度中心 (Pipeline Engine) =================
 const PIPELINE_SITES = [
@@ -668,7 +759,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // 写入投递记录表格
     chrome.storage.local.get(['config', 'applyLog'], (res) => {
       const config = res.config || {};
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateStr();
       if (config.lastActiveDate !== today) {
         config.lastActiveDate = today;
         config.todayCount = 0;

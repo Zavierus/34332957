@@ -63,16 +63,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const logListEl = document.getElementById('log-list');
 
+  // 本地日历日期工具函数 (适配时区)
+  function getLocalDateStr(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   chrome.storage.local.get(['config', 'jobTags', 'applyLog'], (res) => {
     const config = res.config || {};
     const tags = res.jobTags || [];
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
 
     // 更新统计 Banner
     if (config.lastActiveDate === today) {
       todayCountEl.textContent = config.todayCount || 0;
     } else {
       todayCountEl.textContent = 0;
+      config.lastActiveDate = today;
+      config.todayCount = 0;
+      config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      chrome.storage.local.set({ config });
     }
     const currentLimit = config.dailyLimit || 30;
     dailyLimitEl.textContent = currentLimit;

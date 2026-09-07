@@ -39,21 +39,40 @@
     acceptAllInPageFilter: true // 优先按页面筛选投递，避免微小词差导致岗位被跳过
   };
 
+  // ================= 本地日历日期工具函数 (适配时区，杜绝 UTC 早晨滞后) =================
+  function getLocalDateStr(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   function refreshConfig(callback) {
     if (!chrome.storage || !chrome.storage.local) {
       if (callback) callback();
       return;
     }
     chrome.storage.local.get(['config', 'jobTags'], (res) => {
+      const today = getLocalDateStr();
       if (res && res.config) {
         config = { targetCity: '深圳', acceptAllInPageFilter: true, ...config, ...res.config };
-        const today = new Date().toISOString().split('T')[0];
         if (config.lastActiveDate === today) {
           const counts = config.siteTodayCounts || {};
           todayCount = counts.liepin !== undefined ? counts.liepin : 0;
         } else {
+          // 跨日检测：自动清零并写回 storage
+          console.log(`[ZIAVER Autopilot] 猎聘网检测到跨日: 上次活跃「${config.lastActiveDate || '无'}」-> 今日「${today}」，执行清零`);
           todayCount = 0;
+          config.lastActiveDate = today;
+          config.todayCount = 0;
+          config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+          chrome.storage.local.set({
+            config: { ...config }
+          });
         }
+      } else {
+        todayCount = 0;
       }
       if (res && res.jobTags && Array.isArray(res.jobTags)) {
         activeTags = res.jobTags.filter(t => t.active).map(t => t.name.trim());
@@ -1514,7 +1533,7 @@
 
             // 持久化今日统计 (猎聘独立计数)
             if (chrome.storage && chrome.storage.local) {
-              const today = new Date().toISOString().split('T')[0];
+              const today = getLocalDateStr();
               const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
               siteCounts.liepin = todayCount;
               const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
@@ -1894,9 +1913,39 @@
       renderPipelineHUD(request.status);
       sendResponse({ status: 'ok' });
       return true;
+    } else if (request.type === 'DATE_CHANGED') {
+      console.log('[ZIAVER Autopilot] 猎聘网收到跨日广播，新日期:', request.today);
+      refreshConfig();
+      sendResponse({ status: 'ok' });
+      return true;
     } else if (request.type === 'PING') {
       sendResponse({ status: 'pong', platform: '猎聘网' });
       return true;
+    }
+  });
+
+  // ================= 实时跨日状态感应探针 (防止开着标签页过夜不刷新的情况) =================
+  setInterval(() => {
+    const today = getLocalDateStr();
+    if (config.lastActiveDate && config.lastActiveDate !== today) {
+      console.log('[ZIAVER Autopilot] 猎聘网页面探针感应到跨日变更，自动刷新配置与今日计数');
+      refreshConfig();
+    }
+  }, 20000);
+
+  window.addEventListener('focus', () => {
+    const today = getLocalDateStr();
+    if (config.lastActiveDate && config.lastActiveDate !== today) {
+      refreshConfig();
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      const today = getLocalDateStr();
+      if (config.lastActiveDate && config.lastActiveDate !== today) {
+        refreshConfig();
+      }
     }
   });
 
