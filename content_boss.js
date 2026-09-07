@@ -370,21 +370,25 @@
   // ================= 浏览器标签页交替闪烁 =================
   let titleFlashInterval = null;
   let originalDocTitle = document.title;
+  let isSelfFlashingTitle = false;
+
   function startTitleFlashing(alertTitle = '【🔔 HR来新消息了!】') {
     if (titleFlashInterval) clearInterval(titleFlashInterval);
-    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR')) {
+    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR') || originalDocTitle.includes('🔔')) {
       originalDocTitle = 'BOSS直聘';
     }
     let flag = true;
     let count = 0;
+    isSelfFlashingTitle = true;
     titleFlashInterval = setInterval(() => {
       document.title = flag ? alertTitle : originalDocTitle;
       flag = !flag;
       count++;
-      if (count > 20) { // 约 16 秒后停止闪烁
+      if (count > 16) { // 约 12 秒后停止闪烁
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
         document.title = originalDocTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
       }
     }, 800);
 
@@ -393,6 +397,7 @@
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
         document.title = originalDocTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
       }
       window.removeEventListener('focus', onFocus);
     };
@@ -1247,9 +1252,10 @@
     if (cityEl) cityEl.textContent = config.targetCity || '深圳';
   }
 
-  // ================= HR 回复与私信多维强提醒引擎 =================
+  // ================= HR 回复与私信多维强提醒引擎 (严格未读、防误报、防循环) =================
   let lastFriendMsgCount = -1;
-  let lastTitleHasMessage = false;
+  let lastAlertTimestamp = 0;
+  let isWatcherInitialized = false;
 
   function startHRReplyWatcher() {
     // 1. 标题变动监听 (MutationObserver 极速感知)
@@ -1257,61 +1263,66 @@
       const titleEl = document.querySelector('title');
       if (titleEl) {
         const titleObs = new MutationObserver(() => {
-          checkTitleForHRMessage();
+          if (!isSelfFlashingTitle) {
+            checkTitleForHRMessage();
+          }
         });
         titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true });
       }
     } catch (e) {}
 
-    // 2. 周期性全方位巡检 (顶栏Badge + 纯红点 + 聊天页气泡 + 标题)
+    // 2. 周期性巡检：首屏仅采集基准，后续仅在真实新未读增量时提醒
     setInterval(() => {
       checkAllHRMessageSources();
-    }, 2500);
+    }, 2800);
   }
 
   function checkTitleForHRMessage() {
+    if (isSelfFlashingTitle) return;
     const title = document.title || '';
-    const hasMsg = /【.*?新消息.*?】|【\d+条|\(\d+\)\s*BOSS|【有新沟通】/i.test(title);
-    if (hasMsg && !lastTitleHasMessage) {
-      lastTitleHasMessage = true;
-      dispatchHRReplyNotification({
-        title: 'BOSS 直聘 · HR 发来新消息！',
-        desc: '系统检测到网页标题出现新消息动态提示，HR 正在期待您的回复～',
-        count: 1
-      });
-    } else if (!hasMsg) {
-      lastTitleHasMessage = false;
+    if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
+
+    // 必须匹配带有真实未读数字的标题，例如 "【1条新消息】" 或 "(2) BOSS直聘"
+    const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*BOSS/);
+    if (m) {
+      const count = parseInt(m[1], 10);
+      if (count > 0 && isWatcherInitialized && count > lastUnreadCount) {
+        if (Date.now() - lastAlertTimestamp > 12000) {
+          lastAlertTimestamp = Date.now();
+          dispatchHRReplyNotification({
+            title: '🔔 BOSS 直聘 · HR 新回复/私信！',
+            desc: `有企业 HR 正在期待您的回复 (${count} 条未读)，请及时跟进！`,
+            count
+          });
+        }
+        lastUnreadCount = count;
+      }
     }
   }
 
   function checkAllHRMessageSources() {
     let detectedUnread = 0;
-    let hasRedDot = false;
 
-    // A. 顶栏消息气泡与红点深度扫描
+    // A. 顶栏消息气泡扫描：必须包含有效未读数字 > 0，绝不抓取无数字占位符
     const headerMsgLinks = document.querySelectorAll(
       'a[ka*="header-message"], a[ka*="header-chat"], a[href*="/web/geek/chat"], a[href*="/chat"], .nav-item-message, .header-message, .header-nav-message'
     );
 
     headerMsgLinks.forEach(link => {
-      // 查找子代中的各类可能徽标
       const badges = link.querySelectorAll(
-        '.nav-chat-num, .badge, .header-chat-count, .msg-count, .badge-count, [class*="chat-num"], [class*="msg-num"], [class*="unread-num"], [class*="unread"], [class*="badge"], .red-dot, .red-point, i.dot, span.dot'
+        '.nav-chat-num, .badge, .header-chat-count, .msg-count, .badge-count, [class*="chat-num"], [class*="msg-num"], [class*="unread-num"]'
       );
       badges.forEach(b => {
-        if (b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none') {
+        if (b.offsetWidth > 0 && b.offsetHeight > 0 && window.getComputedStyle(b).display !== 'none' && window.getComputedStyle(b).visibility !== 'hidden') {
           const txt = b.textContent.trim();
           const num = parseInt(txt, 10);
           if (!isNaN(num) && num > 0) {
             detectedUnread = Math.max(detectedUnread, num);
-          } else {
-            // 无数字红点（例如圆点标识）
-            hasRedDot = true;
           }
         }
       });
 
-      // 文本正则检测例如 "消息(3)" 或 "沟通 2"
+      // 链接文本正则检测如 "消息(3)" 或 "沟通 2"
       const textMatch = (link.textContent || '').match(/[\(（](\d+)[\)）]/);
       if (textMatch) {
         const n = parseInt(textMatch[1], 10);
@@ -1319,60 +1330,67 @@
       }
     });
 
-    // 兜底独立全局未读元素扫描
+    // 顶栏全局未读元素扫描
     const globalBadges = document.querySelectorAll(
       '.nav-item-message .badge, .nav-item-message span.count, [class*="unread-num"], [class*="badge-count"], .header-nav-message span.badge, .nav-chat-num'
     );
     globalBadges.forEach(el => {
-      const num = parseInt(el.textContent.trim(), 10);
-      if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
+      if (el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none' && window.getComputedStyle(el).visibility !== 'hidden') {
+        const num = parseInt(el.textContent.trim(), 10);
+        if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
+      }
     });
 
     // B. 聊天页面内部深度扫描 (/web/geek/chat)
     let inChatNewMessage = false;
     if (window.location.pathname.startsWith('/web/geek/chat')) {
-      // 1. 左侧联系人列表中的未读红点/数字
+      // 1. 左侧联系人列表：必须是真实带有未读数字 > 0 的徽标
       const chatUserListBadges = document.querySelectorAll(
-        '.user-list .unread, .user-list .badge, .chat-conversation .unread-num, [class*="unread-count"], [class*="badge-num"], [class*="chat-item"] [class*="unread"]'
+        '.user-list .unread, .user-list .badge, .chat-conversation .unread-num, [class*="unread-count"], [class*="badge-num"]'
       );
       chatUserListBadges.forEach(el => {
-        if (el.offsetWidth > 0 || el.offsetHeight > 0) {
+        if (el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none') {
           const num = parseInt(el.textContent.trim(), 10);
-          if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
-          else hasRedDot = true;
+          if (!isNaN(num) && num > 0) {
+            detectedUnread = Math.max(detectedUnread, num);
+          }
         }
       });
 
-      // 2. 当前打开对话框中的对方最新回复气泡
+      // 2. 当前对话框实时新气泡：仅在已有对话已初始化基准值后，且对方气泡数量增加时触发
       const friendMsgs = document.querySelectorAll(
         '.chat-conversation .item-friend, .chat-message-list .item-friend, [class*="item-friend"], [class*="message-item"]:not(.item-myself), [class*="friend-message"], [class*="item-boss"]'
       );
       const currentFriendCount = friendMsgs.length;
-      if (lastFriendMsgCount !== -1 && currentFriendCount > lastFriendMsgCount) {
+      if (isWatcherInitialized && lastFriendMsgCount > 0 && currentFriendCount > lastFriendMsgCount) {
         inChatNewMessage = true;
       }
       lastFriendMsgCount = currentFriendCount;
     }
 
-    // C. 标题检查兜底
-    checkTitleForHRMessage();
+    // 首次扫描：仅初始化基准值，首屏坚决不弹窗打扰！
+    if (!isWatcherInitialized) {
+      lastUnreadCount = detectedUnread;
+      isWatcherInitialized = true;
+      return;
+    }
 
-    // D. 判定是否触发强提醒
-    const effectiveUnread = detectedUnread > 0 ? detectedUnread : (hasRedDot ? 1 : 0);
-    const hasIncreasedUnread = effectiveUnread > lastUnreadCount;
+    // 只有当未读数真正产生增量，或者当前会话收到对方新气泡时，才触发强提醒
+    const hasIncreasedUnread = detectedUnread > lastUnreadCount;
+    const now = Date.now();
 
-    if (hasIncreasedUnread || inChatNewMessage) {
-      const delta = hasIncreasedUnread ? (effectiveUnread - lastUnreadCount) : 1;
-      console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到 HR 新回复/私信！未读数: ${effectiveUnread}, 增量: ${delta}, 聊天内新气泡: ${inChatNewMessage}`);
-      
+    if ((hasIncreasedUnread || inChatNewMessage) && (now - lastAlertTimestamp > 10000)) {
+      lastAlertTimestamp = now;
+      console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
+
       dispatchHRReplyNotification({
         title: '🔔 BOSS 直聘 · HR 新回复/私信！',
-        desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${effectiveUnread} 条未读)，请及时跟进！`,
-        count: effectiveUnread || 1
+        desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${detectedUnread} 条未读)，请及时跟进！`,
+        count: detectedUnread || 1
       });
     }
 
-    lastUnreadCount = effectiveUnread;
+    lastUnreadCount = detectedUnread;
   }
 
   function dispatchHRReplyNotification(info = {}) {

@@ -421,21 +421,25 @@
   // ================= 浏览器标签页交替闪烁 =================
   let titleFlashInterval = null;
   let originalDocTitle = document.title;
+  let isSelfFlashingTitle = false;
+
   function startTitleFlashing(alertTitle = '【🔔 拉勾HR来新消息了!】') {
     if (titleFlashInterval) clearInterval(titleFlashInterval);
-    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR')) {
+    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR') || originalDocTitle.includes('🔔')) {
       originalDocTitle = '拉勾网';
     }
     let flag = true;
     let count = 0;
+    isSelfFlashingTitle = true;
     titleFlashInterval = setInterval(() => {
       document.title = flag ? alertTitle : originalDocTitle;
       flag = !flag;
       count++;
-      if (count > 20) {
+      if (count > 16) {
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
         document.title = originalDocTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
       }
     }, 800);
 
@@ -444,6 +448,7 @@
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
         document.title = originalDocTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
       }
       window.removeEventListener('focus', onFocus);
     };
@@ -544,17 +549,20 @@
     }, 8500);
   }
 
-  // ================= HR 回复与私信多维强提醒引擎 (拉勾网) =================
+  // ================= HR 回复与私信多维强提醒引擎 (拉勾网 - 严格未读、防误报、防循环) =================
   let lastLagouUnreadCount = 0;
   let lastLagouFriendMsgCount = -1;
-  let lastLagouTitleHasMessage = false;
+  let lastLagouAlertTimestamp = 0;
+  let isLagouWatcherInitialized = false;
 
   function startHRReplyWatcher() {
     try {
       const titleEl = document.querySelector('title');
       if (titleEl) {
         const titleObs = new MutationObserver(() => {
-          checkLagouTitleForHR();
+          if (!isSelfFlashingTitle) {
+            checkLagouTitleForHR();
+          }
         });
         titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true });
       }
@@ -562,42 +570,47 @@
 
     setInterval(() => {
       checkAllLagouHRMessageSources();
-    }, 2500);
+    }, 3000);
   }
 
   function checkLagouTitleForHR() {
+    if (isSelfFlashingTitle) return;
     const title = document.title || '';
-    const hasMsg = /【.*?新消息.*?】|【\d+条|\(\d+\)\s*拉勾/i.test(title);
-    if (hasMsg && !lastLagouTitleHasMessage) {
-      lastLagouTitleHasMessage = true;
-      dispatchLagouHRReplyNotification({
-        title: '🔔 拉勾网 · HR 发来新消息！',
-        desc: '系统检测到网页标题出现新消息动态提示，拉勾HR正在期待您的回复～',
-        count: 1
-      });
-    } else if (!hasMsg) {
-      lastLagouTitleHasMessage = false;
+    if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
+
+    const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*拉勾/);
+    if (m) {
+      const count = parseInt(m[1], 10);
+      if (count > 0 && isLagouWatcherInitialized && count > lastLagouUnreadCount) {
+        if (Date.now() - lastLagouAlertTimestamp > 12000) {
+          lastLagouAlertTimestamp = Date.now();
+          dispatchLagouHRReplyNotification({
+            title: '🔔 拉勾网 · HR 新回复/私信！',
+            desc: `有拉勾企业 HR 正在期待您的回复 (${count} 条未读)，请及时跟进！`,
+            count
+          });
+        }
+        lastLagouUnreadCount = count;
+      }
     }
   }
 
   function checkAllLagouHRMessageSources() {
     let detectedUnread = 0;
-    let hasRedDot = false;
 
-    // A. 顶栏消息气泡扫描
+    // A. 顶栏消息气泡扫描：必须提取数字 > 0，绝不抓取无数字占位符
     const headerMsgLinks = document.querySelectorAll(
       'a[href*="/message/"], a[href*="/im/"], a[data-lg-tj-id="message"], .header-msg, .nav-message'
     );
     headerMsgLinks.forEach(link => {
       const badges = link.querySelectorAll(
-        '.msg-count, .msg_count, .badge, [class*="unread"], [class*="badge"], [class*="red-dot"], span.dot, i.dot'
+        '.msg-count, .msg_count, .badge, [class*="unread"], [class*="badge"]'
       );
       badges.forEach(b => {
-        if (b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none') {
+        if (b.offsetWidth > 0 && b.offsetHeight > 0 && window.getComputedStyle(b).display !== 'none' && window.getComputedStyle(b).visibility !== 'hidden') {
           const txt = b.textContent.trim();
           const num = parseInt(txt, 10);
           if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
-          else hasRedDot = true;
         }
       });
       const textMatch = (link.textContent || '').match(/[\(（](\d+)[\)）]/);
@@ -614,10 +627,9 @@
         '.chat-list [class*="unread"], .chat-list [class*="badge"], [class*="session-item"] [class*="unread"]'
       );
       chatUserBadges.forEach(el => {
-        if (el.offsetWidth > 0 || el.offsetHeight > 0) {
+        if (el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none') {
           const num = parseInt(el.textContent.trim(), 10);
           if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
-          else hasRedDot = true;
         }
       });
 
@@ -625,27 +637,33 @@
         '[class*="item-left"], [class*="friend"], [class*="other-message"], .msg-item-left'
       );
       const curCount = friendMsgs.length;
-      if (lastLagouFriendMsgCount !== -1 && curCount > lastLagouFriendMsgCount) {
+      if (isLagouWatcherInitialized && lastLagouFriendMsgCount > 0 && curCount > lastLagouFriendMsgCount) {
         inChatNewMessage = true;
       }
       lastLagouFriendMsgCount = curCount;
     }
 
-    checkLagouTitleForHR();
+    // 首次扫描基准化：首屏坚决不弹窗打扰！
+    if (!isLagouWatcherInitialized) {
+      lastLagouUnreadCount = detectedUnread;
+      isLagouWatcherInitialized = true;
+      return;
+    }
 
-    const effectiveUnread = detectedUnread > 0 ? detectedUnread : (hasRedDot ? 1 : 0);
-    const hasIncreased = effectiveUnread > lastLagouUnreadCount;
+    const hasIncreased = detectedUnread > lastLagouUnreadCount;
+    const now = Date.now();
 
-    if (hasIncreased || inChatNewMessage) {
-      console.log(`[ZIAVER Lagou] 🔔 侦测到拉勾 HR 新回复/私信！未读数: ${effectiveUnread}`);
+    if ((hasIncreased || inChatNewMessage) && (now - lastLagouAlertTimestamp > 10000)) {
+      lastLagouAlertTimestamp = now;
+      console.log(`[ZIAVER Lagou] 🔔 侦测到真实的拉勾 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLagouUnreadCount}`);
       dispatchLagouHRReplyNotification({
         title: '🔔 拉勾网 · HR 新回复/私信！',
-        desc: inChatNewMessage ? '拉勾 HR 正在对话窗口中发来新消息！' : `有拉勾 HR 正在与您互动沟通 (${effectiveUnread} 条未读)，请及时跟进！`,
-        count: effectiveUnread || 1
+        desc: inChatNewMessage ? '拉勾 HR 正在对话窗口中发来新消息！' : `有拉勾 HR 正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
+        count: detectedUnread || 1
       });
     }
 
-    lastLagouUnreadCount = effectiveUnread;
+    lastLagouUnreadCount = detectedUnread;
   }
 
   function dispatchLagouHRReplyNotification(info = {}) {

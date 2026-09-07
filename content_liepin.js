@@ -589,21 +589,25 @@
   // ================= 浏览器标签页交替闪烁 =================
   let titleFlashInterval = null;
   let originalDocTitle = document.title;
+  let isSelfFlashingTitle = false;
+
   function startTitleFlashing(alertTitle = '【🔔 猎聘HR来新消息了!】') {
     if (titleFlashInterval) clearInterval(titleFlashInterval);
-    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR')) {
+    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR') || originalDocTitle.includes('🔔')) {
       originalDocTitle = '猎聘网';
     }
     let flag = true;
     let count = 0;
+    isSelfFlashingTitle = true;
     titleFlashInterval = setInterval(() => {
       document.title = flag ? alertTitle : originalDocTitle;
       flag = !flag;
       count++;
-      if (count > 20) {
+      if (count > 16) {
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
         document.title = originalDocTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
       }
     }, 800);
 
@@ -612,6 +616,7 @@
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
         document.title = originalDocTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
       }
       window.removeEventListener('focus', onFocus);
     };
@@ -712,17 +717,20 @@
     }, 8500);
   }
 
-  // ================= HR 回复与私信多维强提醒引擎 (猎聘网) =================
+  // ================= HR 回复与私信多维强提醒引擎 (猎聘网 - 严格未读、防误报、防循环) =================
   let lastLiepinUnreadCount = 0;
   let lastLiepinFriendMsgCount = -1;
-  let lastLiepinTitleHasMessage = false;
+  let lastLiepinAlertTimestamp = 0;
+  let isLiepinWatcherInitialized = false;
 
   function startHRReplyWatcher() {
     try {
       const titleEl = document.querySelector('title');
       if (titleEl) {
         const titleObs = new MutationObserver(() => {
-          checkLiepinTitleForHR();
+          if (!isSelfFlashingTitle) {
+            checkLiepinTitleForHR();
+          }
         });
         titleObs.observe(titleEl, { childList: true, characterData: true, subtree: true });
       }
@@ -730,42 +738,47 @@
 
     setInterval(() => {
       checkAllLiepinHRMessageSources();
-    }, 2500);
+    }, 3000);
   }
 
   function checkLiepinTitleForHR() {
+    if (isSelfFlashingTitle) return;
     const title = document.title || '';
-    const hasMsg = /【.*?新消息.*?】|【\d+条|\(\d+\)\s*猎聘/i.test(title);
-    if (hasMsg && !lastLiepinTitleHasMessage) {
-      lastLiepinTitleHasMessage = true;
-      dispatchLiepinHRReplyNotification({
-        title: '🔔 猎聘网 · HR 发来新消息！',
-        desc: '系统检测到网页标题出现新消息动态提示，猎头或HR正在期待您的回复～',
-        count: 1
-      });
-    } else if (!hasMsg) {
-      lastLiepinTitleHasMessage = false;
+    if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
+
+    const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*猎聘/);
+    if (m) {
+      const count = parseInt(m[1], 10);
+      if (count > 0 && isLiepinWatcherInitialized && count > lastLiepinUnreadCount) {
+        if (Date.now() - lastLiepinAlertTimestamp > 12000) {
+          lastLiepinAlertTimestamp = Date.now();
+          dispatchLiepinHRReplyNotification({
+            title: '🔔 猎聘网 · HR 新回复/私信！',
+            desc: `有猎聘企业 HR/猎头正在期待您的回复 (${count} 条未读)，请及时跟进！`,
+            count
+          });
+        }
+        lastLiepinUnreadCount = count;
+      }
     }
   }
 
   function checkAllLiepinHRMessageSources() {
     let detectedUnread = 0;
-    let hasRedDot = false;
 
-    // A. 顶栏消息气泡扫描
+    // A. 顶栏消息气泡扫描：必须提取数字 > 0，绝不抓取无数字占位符
     const headerMsgLinks = document.querySelectorAll(
       'a[href*="/im/"], a[href*="/chat/"], [data-nick="header-im"], .header-im, .header-message'
     );
     headerMsgLinks.forEach(link => {
       const badges = link.querySelectorAll(
-        '.header-im-count, .im-badge, [class*="unread-count"], [class*="badge"], [class*="red-dot"], span.dot, i.dot'
+        '.header-im-count, .im-badge, [class*="unread-count"], [class*="badge"]'
       );
       badges.forEach(b => {
-        if (b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none') {
+        if (b.offsetWidth > 0 && b.offsetHeight > 0 && window.getComputedStyle(b).display !== 'none' && window.getComputedStyle(b).visibility !== 'hidden') {
           const txt = b.textContent.trim();
           const num = parseInt(txt, 10);
           if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
-          else hasRedDot = true;
         }
       });
       const textMatch = (link.textContent || '').match(/[\(（](\d+)[\)）]/);
@@ -782,10 +795,9 @@
         '[class*="conversation"] [class*="unread"], [class*="conversation"] [class*="badge"], .im-list [class*="badge"]'
       );
       chatUserBadges.forEach(el => {
-        if (el.offsetWidth > 0 || el.offsetHeight > 0) {
+        if (el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none') {
           const num = parseInt(el.textContent.trim(), 10);
           if (!isNaN(num) && num > 0) detectedUnread = Math.max(detectedUnread, num);
-          else hasRedDot = true;
         }
       });
 
@@ -793,27 +805,33 @@
         '[class*="msg-item"][class*="friend"], [class*="chat-message"][class*="left"], [class*="item-friend"], .msg-left'
       );
       const curCount = friendMsgs.length;
-      if (lastLiepinFriendMsgCount !== -1 && curCount > lastLiepinFriendMsgCount) {
+      if (isLiepinWatcherInitialized && lastLiepinFriendMsgCount > 0 && curCount > lastLiepinFriendMsgCount) {
         inChatNewMessage = true;
       }
       lastLiepinFriendMsgCount = curCount;
     }
 
-    checkLiepinTitleForHR();
+    // 首次扫描基准化：首屏坚决不弹窗打扰！
+    if (!isLiepinWatcherInitialized) {
+      lastLiepinUnreadCount = detectedUnread;
+      isLiepinWatcherInitialized = true;
+      return;
+    }
 
-    const effectiveUnread = detectedUnread > 0 ? detectedUnread : (hasRedDot ? 1 : 0);
-    const hasIncreased = effectiveUnread > lastLiepinUnreadCount;
+    const hasIncreased = detectedUnread > lastLiepinUnreadCount;
+    const now = Date.now();
 
-    if (hasIncreased || inChatNewMessage) {
-      console.log(`[ZIAVER Liepin] 🔔 侦测到猎聘 HR 新回复/私信！未读数: ${effectiveUnread}`);
+    if ((hasIncreased || inChatNewMessage) && (now - lastLiepinAlertTimestamp > 10000)) {
+      lastLiepinAlertTimestamp = now;
+      console.log(`[ZIAVER Liepin] 🔔 侦测到真实的猎聘 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLiepinUnreadCount}`);
       dispatchLiepinHRReplyNotification({
         title: '🔔 猎聘网 · HR 新回复/私信！',
-        desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${effectiveUnread} 条未读)，请及时跟进！`,
-        count: effectiveUnread || 1
+        desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
+        count: detectedUnread || 1
       });
     }
 
-    lastLiepinUnreadCount = effectiveUnread;
+    lastLiepinUnreadCount = detectedUnread;
   }
 
   function dispatchLiepinHRReplyNotification(info = {}) {
