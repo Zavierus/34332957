@@ -214,6 +214,17 @@ function initOrUpdateStorage() {
   });
 }
 
+let cachedConfig = null;
+
+// 监听 storage 变动实时更新 cachedConfig
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.config) {
+      cachedConfig = changes.config.newValue;
+    }
+  });
+}
+
 // ================= 跨日自动感应检测与每日情报强提醒 (Live Time Sensor) =================
 function checkAndPerformDailyRollover(triggerSource = '自动') {
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
@@ -221,6 +232,7 @@ function checkAndPerformDailyRollover(triggerSource = '自动') {
 
   chrome.storage.local.get(['config', 'lastDailyDigestDate'], (res) => {
     let config = res.config || {};
+    cachedConfig = config;
     let configChanged = false;
 
     if (config.lastActiveDate !== today) {
@@ -228,6 +240,7 @@ function checkAndPerformDailyRollover(triggerSource = '自动') {
       config.lastActiveDate = today;
       config.todayCount = 0;
       config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
       configChanged = true;
     }
 
@@ -350,12 +363,21 @@ let cruisePipeline = {
   siteSkipped: {}
 };
 
-// 获取详尽的全网流水线协同状态
+// 获取详尽的全网流水线协同状态 (与早中晚分时段深度对齐)
 function getDetailedPipelineStatus() {
   const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex] || null;
   const totalSites = PIPELINE_SITES.length;
   const targetPerSite = cruisePipeline.perSiteTarget || 30;
   const overallTarget = totalSites * targetPerSite;
+
+  const cfg = cachedConfig || {};
+  const slot = getCurrentTimeSlot();
+  const slotLimits = cfg.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
+  const slotCounts = cfg.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
+  const slotLimit = slotLimits[slot] !== undefined ? slotLimits[slot] : 20;
+  const slotCount = slotCounts[slot] || 0;
+  const slotRemaining = Math.max(0, slotLimit - slotCount);
+  const slotPercent = slotLimit > 0 ? Math.min(100, Math.round((slotCount / slotLimit) * 100)) : 0;
 
   let totalDone = 0;
   const sitesStatus = PIPELINE_SITES.map((s, idx) => {
@@ -389,6 +411,14 @@ function getDetailedPipelineStatus() {
     totalDone,
     overallTarget,
     overallPercent,
+    timeSlot: {
+      slot,
+      slotDisplayName: getTimeSlotDisplayName(slot),
+      slotLimit,
+      slotCount,
+      slotRemaining,
+      slotPercent
+    },
     sites: PIPELINE_SITES,
     siteStats: cruisePipeline.siteStats,
     siteSkipped: cruisePipeline.siteSkipped,
@@ -424,12 +454,25 @@ function broadcastPipelineStatus() {
   });
 }
 
-function startCruisePipeline(perSiteTarget = 'follow_limit') {
-  chrome.storage.local.get(['config'], (res) => {
+function startCruisePipeline(perSiteTarget = 'follow_slot') {
+  chrome.storage.local.get(['config', 'savedBossFilters'], (res) => {
     const config = res.config || {};
-    const effectiveTarget = (perSiteTarget && perSiteTarget !== 'follow_limit' && Number(perSiteTarget) > 0)
-      ? Number(perSiteTarget)
-      : (config.dailyLimit || 30);
+    cachedConfig = config;
+
+    const slot = getCurrentTimeSlot();
+    const slotLimits = config.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
+    const slotCounts = config.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
+    const slotLimit = slotLimits[slot] !== undefined ? slotLimits[slot] : 20;
+    const slotCount = slotCounts[slot] || 0;
+    const slotRemaining = Math.max(0, slotLimit - slotCount);
+
+    let effectiveTarget = 20;
+    if (perSiteTarget === 'follow_slot' || perSiteTarget === 'follow_limit') {
+      // 深度对齐当前时段！若当前时段尚有剩余额度，以剩余额度为准；若已达成，以本时段上限为准
+      effectiveTarget = slotRemaining > 0 ? slotRemaining : slotLimit;
+    } else if (Number(perSiteTarget) > 0) {
+      effectiveTarget = Number(perSiteTarget);
+    }
 
     cruisePipeline.isActive = true;
     cruisePipeline.perSiteTarget = effectiveTarget;
@@ -437,15 +480,18 @@ function startCruisePipeline(perSiteTarget = 'follow_limit') {
     cruisePipeline.currentSiteCount = 0;
     cruisePipeline.siteStats = {};
     cruisePipeline.siteSkipped = {};
+    cruisePipeline.slot = slot;
+    cruisePipeline.slotLimit = slotLimit;
 
     updateExtensionBadge();
     broadcastPipelineStatus();
 
+    const slotName = getTimeSlotDisplayName(slot);
     chrome.notifications.create('pipeline_start_' + Date.now(), {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-      title: '🚀 全网流水线巡航已开启！',
-      message: `目标: 每个平台各投递 ${effectiveTarget} 个符合高亮词条与薪资门槛的岗位。第一站：【${PIPELINE_SITES[0].name}】`,
+      title: `🚀 全网巡航已开启 (对齐 ${slotName})`,
+      message: `目标: 本时段巡航 ${effectiveTarget} 个高契合岗位 (当前时段已投: ${slotCount}/${slotLimit})。首站：【${PIPELINE_SITES[0].name}】`,
       priority: 2
     });
 
@@ -487,13 +533,19 @@ function launchCurrentPipelineSite() {
   const currentSite = PIPELINE_SITES[cruisePipeline.currentIndex];
   cruisePipeline.currentSiteCount = 0;
 
-  chrome.storage.local.get(['jobTags'], (res) => {
+  chrome.storage.local.get(['jobTags', 'savedBossFilters'], (res) => {
     const rawTags = (res && res.jobTags) || DEFAULT_JOB_TAGS;
     const activeTags = rawTags.filter(t => t.active).map(t => (t.name || '').trim()).filter(Boolean);
     const firstTag = activeTags.length > 0 ? activeTags[0] : '';
 
     let siteUrl = currentSite.url;
-    if (currentSite.id === 'liepin') {
+    if (currentSite.id === 'boss') {
+      const savedBoss = res.savedBossFilters;
+      if (savedBoss && savedBoss.url && savedBoss.url.includes('zhipin.com')) {
+        siteUrl = savedBoss.url;
+        console.log('[ZIAVER Pipeline] 🎯 采用已保存的 BOSS 网页筛选参数自动启动:', siteUrl);
+      }
+    } else if (currentSite.id === 'liepin') {
       // 猎聘优先附带深圳、10-15万、1年以内精准筛选参数
       const lpParams = 'city=050090&salary=10$15&workYearCode=1';
       if (firstTag) {
@@ -1045,8 +1097,227 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html#daily-digest') });
     sendResponse({ status: 'ok' });
     return true;
+  } else if (request.type === 'LOG_MANUAL_APPLY') {
+    // 捕获并深度学习用户手动投递岗位
+    chrome.storage.local.get(['manualApplyLog', 'userPreferenceProfile'], (res) => {
+      let list = Array.isArray(res.manualApplyLog) ? res.manualApplyLog : [];
+      const job = request.job || {};
+      if (!job.title && !job.company) {
+        sendResponse({ success: false, reason: 'empty_job' });
+        return;
+      }
+      const today = getLocalDateStr();
+      const isDuplicate = list.some(item => 
+        item.company === job.company && 
+        item.title === job.title && 
+        (item.applyTime || '').startsWith(today)
+      );
+
+      if (!isDuplicate) {
+        list.unshift({
+          id: 'manual_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          title: job.title || '未知岗位',
+          company: job.company || '未知企业',
+          salary: job.salary || '面议',
+          experience: job.experience || '经验不限',
+          education: job.education || '不限',
+          tags: Array.isArray(job.tags) ? job.tags : [],
+          location: job.location || '',
+          hrName: job.hrName || 'HR',
+          hrTitle: job.hrTitle || '',
+          jobDesc: (job.jobDesc || '').slice(0, 300),
+          platform: job.platform || 'BOSS直聘',
+          applyTime: job.applyTime || (new Date().toLocaleString())
+        });
+        if (list.length > 200) list = list.slice(0, 200);
+        const profile = updateUserPreferenceProfile(list);
+        chrome.storage.local.set({ manualApplyLog: list, userPreferenceProfile: profile }, () => {
+          console.log('[ZIAVER Learning] 🧠 成功记录并学习用户手动投递岗位:', job.title, job.company);
+          // 广播学习画像给前端
+          broadcastToAllTabs({ type: 'LEARNED_PROFILE_UPDATED', profile, count: list.length });
+          sendResponse({ success: true, count: list.length, profile });
+        });
+      } else {
+        sendResponse({ success: true, duplicate: true, count: list.length });
+      }
+    });
+    return true;
+  } else if (request.type === 'GET_LEARNED_PROFILE') {
+    chrome.storage.local.get(['manualApplyLog', 'userPreferenceProfile'], (res) => {
+      const list = Array.isArray(res.manualApplyLog) ? res.manualApplyLog : [];
+      const profile = res.userPreferenceProfile || updateUserPreferenceProfile(list);
+      sendResponse({ status: 'ok', profile, logs: list });
+    });
+    return true;
+  } else if (request.type === 'SYNC_LEARNED_TAGS') {
+    // 将学到的高频词汇一键同步到生效词条
+    chrome.storage.local.get(['userPreferenceProfile', 'jobTags'], (res) => {
+      const profile = res.userPreferenceProfile || {};
+      const keywords = Array.isArray(profile.topKeywords) ? profile.topKeywords : [];
+      let tags = Array.isArray(res.jobTags) ? res.jobTags : DEFAULT_JOB_TAGS;
+      let addedCount = 0;
+      const addedKeywords = [];
+
+      keywords.slice(0, 8).forEach(rawKw => {
+        const cleanKw = (typeof rawKw === 'object' ? (rawKw.word || '') : (rawKw || '')).trim();
+        if (!cleanKw || cleanKw.length < 2) return;
+        const exists = tags.some(t => ((t.text || t.name) || '').trim().toLowerCase() === cleanKw.toLowerCase());
+        if (!exists) {
+          tags.push({
+            id: 'learned_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+            name: cleanKw,
+            text: cleanKw,
+            category: '🧠 手动偏好学习',
+            active: true,
+            source: 'learned',
+            highlightColor: 'rgba(168, 85, 247, 0.4)'
+          });
+          addedCount++;
+          addedKeywords.push(cleanKw);
+        } else {
+          // 若已存在但未激活，则激活它
+          const targetTag = tags.find(t => ((t.text || t.name) || '').trim().toLowerCase() === cleanKw.toLowerCase());
+          if (targetTag && !targetTag.active) {
+            targetTag.active = true;
+            addedCount++;
+            addedKeywords.push(`${cleanKw}(激活)`);
+          }
+        }
+      });
+
+      chrome.storage.local.set({ jobTags: tags }, () => {
+        sendResponse({ status: 'ok', success: true, addedCount, addedKeywords, totalTags: tags.length, tags });
+      });
+    });
+    return true;
+  } else if (request.type === 'CLEAR_MANUAL_LOGS') {
+    const emptyProfile = updateUserPreferenceProfile([]);
+    chrome.storage.local.set({ manualApplyLog: [], userPreferenceProfile: emptyProfile }, () => {
+      sendResponse({ success: true });
+    });
+    return true;
+  } else if (request.type === 'SAVE_BOSS_FILTERS') {
+    const filters = request.filters || {};
+    chrome.storage.local.set({ savedBossFilters: filters }, () => {
+      console.log('[ZIAVER] 💾 已保存用户 BOSS 网页筛选参数:', filters);
+      broadcastToAllTabs({ type: 'SAVED_BOSS_FILTERS_UPDATED', filters });
+      sendResponse({ success: true, filters });
+    });
+    return true;
+  } else if (request.type === 'GET_SAVED_BOSS_FILTERS') {
+    chrome.storage.local.get(['savedBossFilters'], (res) => {
+      sendResponse({ status: 'ok', filters: res.savedBossFilters || null });
+    });
+    return true;
   }
 });
+
+// ================= 启发式用户手动投递画像学习算法 =================
+function updateUserPreferenceProfile(manualLogs = []) {
+  if (!Array.isArray(manualLogs) || manualLogs.length === 0) {
+    return {
+      sampleCount: 0,
+      topKeywords: [],
+      salaryBand: '面议',
+      salaryPreference: { minAvg: 0, maxAvg: 0 },
+      experiencePreference: [],
+      educationPreference: [],
+      learnedInsights: '尚未捕获到手动投递样本。当您日常在各招聘网站手动点击“立即沟通”时，系统会自动在此深度学习提炼偏好画像。',
+      lastUpdated: new Date().toLocaleString()
+    };
+  }
+
+  const stopWords = new Set([
+    '的', '及', '和', '与', '等', '专员', '主管', '经理', '助理', '岗位', '职位', 
+    '招聘', '深圳', '南山', '福田', '宝安', '龙岗', '罗湖', '无责', '底薪', '兼职', 
+    '全职', '公司', '集团', '有限', '责任', '工作室', '双休', '急聘', '高薪', '直聘', '人员', '工作'
+  ]);
+
+  const keywordCounts = {};
+  const salaryMins = [];
+  const salaryMaxs = [];
+  const expCounts = {};
+  const eduCounts = {};
+
+  manualLogs.forEach(item => {
+    const rawTitle = (item.title || '');
+    const tokens = rawTitle.split(/[\s\/\-\+\·\、\(\)（）_]+/).filter(Boolean);
+    tokens.forEach(tok => {
+      const clean = tok.trim();
+      if (clean.length >= 2 && !stopWords.has(clean)) {
+        keywordCounts[clean] = (keywordCounts[clean] || 0) + 1;
+      }
+    });
+
+    // 强化常见运营/策划/数码/影视复合词权重
+    const compositeWords = [
+      '新媒体运营', '短视频运营', '活动策划', '兼职策划', '达人商务', '达人媒介', 
+      '摄影师', '商业摄影', '电商运营', '社群运营', '内容运营', '文案策划', '编导', 
+      '视频剪辑', '渠道拓展', '品牌公关', '用户运营'
+    ];
+    compositeWords.forEach(w => {
+      if (rawTitle.includes(w)) {
+        keywordCounts[w] = (keywordCounts[w] || 0) + 3;
+      }
+    });
+
+    if (Array.isArray(item.tags)) {
+      item.tags.forEach(t => {
+        const clean = (t || '').trim();
+        if (clean.length >= 2 && !stopWords.has(clean)) {
+          keywordCounts[clean] = (keywordCounts[clean] || 0) + 1;
+        }
+      });
+    }
+
+    const rawSal = item.salary || '';
+    const kMatch = rawSal.match(/(\d+)(?:[-~到])(\d+)[kK千]/);
+    if (kMatch) {
+      salaryMins.push(parseInt(kMatch[1], 10));
+      salaryMaxs.push(parseInt(kMatch[2], 10));
+    }
+
+    if (item.experience && item.experience !== '不限' && item.experience !== '经验不限') {
+      expCounts[item.experience] = (expCounts[item.experience] || 0) + 1;
+    }
+
+    if (item.education && item.education !== '不限') {
+      eduCounts[item.education] = (eduCounts[item.education] || 0) + 1;
+    }
+  });
+
+  const sortedKeywords = Object.keys(keywordCounts)
+    .sort((a, b) => keywordCounts[b] - keywordCounts[a])
+    .slice(0, 10);
+
+  let minAvg = salaryMins.length > 0 ? Math.round(salaryMins.reduce((a, b) => a + b, 0) / salaryMins.length) : 7;
+  let maxAvg = salaryMaxs.length > 0 ? Math.round(salaryMaxs.reduce((a, b) => a + b, 0) / salaryMaxs.length) : 12;
+  const salaryBand = salaryMins.length > 0 ? `${minAvg}-${maxAvg}K` : '面议/兼职日薪';
+
+  const sortedExp = Object.keys(expCounts).sort((a, b) => expCounts[b] - expCounts[a]);
+  const sortedEdu = Object.keys(eduCounts).sort((a, b) => eduCounts[b] - eduCounts[a]);
+
+  const topExp = sortedExp.length > 0 ? sortedExp.slice(0, 2).join(' / ') : '1-3年/经验不限';
+  const topEdu = sortedEdu.length > 0 ? sortedEdu.slice(0, 2).join(' / ') : '大专/本科';
+
+  const insights = `基于您最近 ${manualLogs.length} 次手动投递沉淀：\n` +
+    `• 核心偏好岗位：【${sortedKeywords.slice(0, 4).join(' / ') || '运营类'}】\n` +
+    `• 目标薪资带：${salaryBand}\n` +
+    `• 倾向要求：${topExp} · ${topEdu}\n` +
+    `巡航引擎已自动将此偏好特征融合至初筛逻辑，优先自动投递相似优质岗位！`;
+
+  return {
+    sampleCount: manualLogs.length,
+    topKeywords: sortedKeywords,
+    keywordCounts,
+    salaryBand,
+    salaryPreference: { minAvg, maxAvg },
+    experiencePreference: sortedExp,
+    educationPreference: sortedEdu,
+    learnedInsights: insights,
+    lastUpdated: new Date().toLocaleString()
+  };
+}
 
 // 点击桌面通知时，精准区分日常求职情报、HR回复直接跳转与普通巡航切换
 chrome.notifications.onClicked.addListener((notifId) => {

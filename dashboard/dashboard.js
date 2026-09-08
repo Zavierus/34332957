@@ -14,14 +14,18 @@ document.addEventListener('DOMContentLoaded', () => {
       item.classList.add('active');
       const panel = document.getElementById(targetView);
       if (panel) panel.classList.add('active');
+      if (targetView === 'view-manual-learning') {
+        renderManualLearningCenter();
+      }
     });
   });
 
-  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot 或 #daily-digest 或 #key-companies)
+  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot 或 #daily-digest 或 #key-companies 或 #manual-learning)
   const urlParams = new URLSearchParams(window.location.search);
   let targetViewName = urlParams.get('tab') || window.location.hash.replace('#', '');
   if (targetViewName === 'daily-digest') targetViewName = 'view-daily-digest';
   if (targetViewName === 'key-companies') targetViewName = 'view-key-companies';
+  if (targetViewName === 'manual-learning') targetViewName = 'view-manual-learning';
   if (targetViewName) {
     const targetNavItem = document.querySelector(`.nav-item[data-view="${targetViewName}"]`);
     if (targetNavItem) {
@@ -33,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let hash = window.location.hash.replace('#', '');
     if (hash === 'daily-digest') hash = 'view-daily-digest';
     if (hash === 'key-companies') hash = 'view-key-companies';
+    if (hash === 'manual-learning') hash = 'view-manual-learning';
     const item = document.querySelector(`.nav-item[data-view="${hash}"]`);
     if (item) item.click();
   });
@@ -63,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderTagsLibrary();
       renderLogTable();
       renderKeyCompanies();
+      renderManualLearningCenter();
       populateSettings();
       updateBadges();
     });
@@ -83,6 +89,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const todayCount = currentLogs.filter(l => (l.time || '').startsWith(today)).length;
     document.getElementById('stat-today-applied').textContent = todayCount;
     document.getElementById('stat-total-applied').textContent = currentLogs.length;
+
+    // 手动学习样本统计
+    chrome.storage.local.get(['manualApplyLog'], (res) => {
+      const mlCountEl = document.getElementById('sidebar-learning-count');
+      if (mlCountEl) mlCountEl.textContent = (res.manualApplyLog || []).length;
+    });
   }
 
   // ================= 4. 职业词条高亮选择库 =================
@@ -520,6 +532,142 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ================= 6.5. 手动投递偏好学习中心 =================
+  function renderManualLearningCenter() {
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    chrome.runtime.sendMessage({ type: 'GET_LEARNED_PROFILE' }, (res) => {
+      if (chrome.runtime.lastError || !res) {
+        console.warn('[ZIAVER Dashboard] 获取偏好学习画像失败:', chrome.runtime.lastError);
+        return;
+      }
+      const logs = Array.isArray(res.logs) ? res.logs : [];
+      const profile = res.profile || {};
+
+      // 1. 顶部核心指标
+      const samplesEl = document.getElementById('stat-learning-samples');
+      if (samplesEl) samplesEl.textContent = `${logs.length} 次`;
+
+      const rawKeywords = Array.isArray(profile.topKeywords) ? profile.topKeywords : [];
+      const topKeywords = rawKeywords.map(k => {
+        if (typeof k === 'object' && k !== null) return { word: k.word || '', count: k.count || 1 };
+        return { word: String(k), count: (profile.keywordCounts && profile.keywordCounts[k]) || 1 };
+      }).filter(k => k.word);
+
+      const kwNumEl = document.getElementById('stat-learning-keywords-num');
+      if (kwNumEl) kwNumEl.textContent = `${topKeywords.length} 个`;
+
+      const salaryEl = document.getElementById('stat-learning-salary');
+      if (salaryEl) salaryEl.textContent = profile.salaryBand || profile.preferredSalaryRange || '待积累样本';
+
+      const expEl = document.getElementById('stat-learning-exp');
+      if (expEl) {
+        const expStr = Array.isArray(profile.experiencePreference) ? (profile.experiencePreference[0] || '经验不限') : (profile.preferredExp || '经验不限');
+        expEl.textContent = expStr;
+      }
+
+      const updatedEl = document.getElementById('learning-last-updated');
+      if (updatedEl) {
+        const timeStr = profile.lastUpdated || (profile.updatedAt ? new Date(profile.updatedAt).toLocaleTimeString() : '刚刚');
+        updatedEl.textContent = `最后更新：${timeStr}`;
+      }
+
+      // 侧边栏徽章同步
+      const sideEl = document.getElementById('sidebar-learning-count');
+      if (sideEl) sideEl.textContent = logs.length;
+
+      // 2. AI 深度洞察与总结建议文本
+      const insightsEl = document.getElementById('learning-insights-text');
+      if (insightsEl) {
+        insightsEl.textContent = profile.learnedInsights || profile.insights || '系统正在深度观察您的手动投递行为，当您在 BOSS 直聘上主动发起沟通，插件将自动提炼画像。';
+      }
+
+      // 3. 高频词标签芯片渲染
+      const chipsContainer = document.getElementById('learning-keyword-chips');
+      if (chipsContainer) {
+        if (topKeywords.length === 0) {
+          chipsContainer.innerHTML = '<span style="color:#94a3b8; font-size:12px;">暂无高频意向词，在 BOSS 直聘手动点击「立即沟通」后将自动提炼显示～</span>';
+        } else {
+          chipsContainer.innerHTML = topKeywords.map(item => `
+            <span style="display:inline-flex; align-items:center; gap:5px; padding:4px 10px; background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); border-radius:16px; font-size:12px; font-weight:600;">
+              <span>🎯 ${item.word}</span>
+              <span style="background:rgba(168,85,247,0.3); color:#f3e8ff; padding:1px 6px; border-radius:10px; font-size:10px;">${item.count}次</span>
+            </span>
+          `).join('');
+        }
+      }
+
+      // 4. 手动投递样本明细表渲染
+      const tbody = document.getElementById('manual-learning-table-body');
+      if (tbody) {
+        if (logs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:32px; color:#94a3b8; font-size:13px;">暂无手动投递样本。当您在 BOSS 直聘网页手动点击「立即沟通」时，巡航大脑将在此记录并深度分析您的求职心智！</td></tr>';
+        } else {
+          tbody.innerHTML = logs.map((item, idx) => {
+            const num = logs.length - idx;
+            const tagsHtml = (item.tags || []).slice(0, 3).map(t => `<span class="badge" style="background:rgba(255,255,255,0.06); color:#cbd5e1; font-size:10.5px; margin-right:4px;">${t}</span>`).join('');
+            const linkHtml = item.url ? `<a href="${item.url}" target="_blank" style="color:#38bdf8; text-decoration:none; font-weight:700;">${item.title || '未知岗位'} ↗</a>` : `<span style="font-weight:700; color:#f8fafc;">${item.title || '未知岗位'}</span>`;
+            return `
+              <tr>
+                <td style="font-weight:600; color:#64748b;">#${num}</td>
+                <td>${linkHtml}</td>
+                <td style="font-weight:600; color:#00f2fe;">${item.company || '未知企业'}</td>
+                <td style="font-weight:700; color:#10b981;">${item.salary || '面议'}</td>
+                <td style="color:#94a3b8; font-size:12px;">${item.city || '-'} / ${item.exp || '-'} / ${item.edu || '-'}</td>
+                <td>${tagsHtml || '<span style="color:#64748b;">-</span>'}</td>
+                <td style="color:#64748b; font-size:11.5px;">${item.time || '-'}</td>
+              </tr>
+            `;
+          }).join('');
+        }
+      }
+    });
+  }
+
+  function initManualLearningEvents() {
+    // 同步偏好词至词条库
+    const btnSync = document.getElementById('btn-sync-learned-tags-dash');
+    if (btnSync) {
+      btnSync.addEventListener('click', () => {
+        btnSync.disabled = true;
+        btnSync.textContent = '⏳ 同步中...';
+        chrome.runtime.sendMessage({ type: 'SYNC_LEARNED_TAGS' }, (res) => {
+          btnSync.disabled = false;
+          btnSync.textContent = '✨ 将学习偏好词同步至生效词条';
+          if (res && res.status === 'ok') {
+            if (res.addedCount > 0) {
+              alert(`🎉 成功从手动偏好中提取 ${res.addedCount} 个高频意向词，已自动加入并激活到您的求职词条库！\n\n新词条：${(res.addedKeywords || []).join(', ')}`);
+              loadAllData();
+            } else {
+              alert('ℹ️ 当前偏好词已全部存在于您的词条库中，无需重复添加。');
+            }
+          } else {
+            alert('⚠️ 暂无可同步的高频偏好词，请先手动多投递几个心仪岗位！');
+          }
+        });
+      });
+    }
+
+    // 刷新画像
+    const btnRefresh = document.getElementById('btn-refresh-manual-learning');
+    if (btnRefresh) {
+      btnRefresh.addEventListener('click', () => {
+        renderManualLearningCenter();
+      });
+    }
+
+    // 清空学习历史
+    const btnClear = document.getElementById('btn-clear-manual-learning');
+    if (btnClear) {
+      btnClear.addEventListener('click', () => {
+        if (confirm('确定要清空已记录的手动投递样本与偏好画像吗？清空后将从零开始重新学习。')) {
+          chrome.runtime.sendMessage({ type: 'CLEAR_MANUAL_LOGS' }, () => {
+            renderManualLearningCenter();
+          });
+        }
+      });
+    }
+  }
+
   // ================= 7. 全局参数设置 =================
   const DEFAULT_RECOMMENDED_GREETING = '您好！看到贵司在招「{jobTitle}」，整体要求与我的背景非常契合。我具备相关领域的实操经验，执行力强，注重数据与实际成果落地。简历已附上，期待与您进一步沟通交流，祝您工作顺利、身体健康～';
 
@@ -600,6 +748,40 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (document.getElementById('sidebar-user-city')) {
         document.getElementById('sidebar-user-city').textContent = `${prof.city || '深圳'} · 2024届 · ${prof.targetSalary || '求职中'}`;
+      }
+    });
+
+    // 记忆的 BOSS 直聘网页筛选参数回显与操作
+    chrome.storage.local.get(['savedBossFilters'], (res) => {
+      const filters = res.savedBossFilters;
+      const summaryEl = document.getElementById('dash-saved-filters-summary');
+      const timeEl = document.getElementById('dash-saved-filters-time');
+      const btnOpen = document.getElementById('btn-dash-open-saved-boss');
+      const btnClear = document.getElementById('btn-dash-clear-saved-boss');
+
+      if (filters && filters.url) {
+        if (summaryEl) summaryEl.textContent = filters.summary || filters.url;
+        if (timeEl) timeEl.textContent = `保存时间：${filters.savedTime || '未知'}`;
+        if (btnOpen) {
+          btnOpen.style.display = 'inline-block';
+          btnOpen.onclick = () => window.open(filters.url, '_blank');
+        }
+        if (btnClear) {
+          btnClear.style.display = 'inline-block';
+          btnClear.onclick = () => {
+            if (confirm('确定要清除记忆的 BOSS 直聘网页筛选条件吗？清除后巡航将恢复跟随实时网页。')) {
+              chrome.storage.local.remove(['savedBossFilters'], () => {
+                populateSettings();
+                alert('已清除保存的 BOSS 筛选参数！');
+              });
+            }
+          };
+        }
+      } else {
+        if (summaryEl) summaryEl.textContent = '尚未保存自定义筛选 (当前跟随实时网页)';
+        if (timeEl) timeEl.textContent = '保存时间：无';
+        if (btnOpen) btnOpen.style.display = 'none';
+        if (btnClear) btnClear.style.display = 'none';
       }
     });
   }
@@ -2885,9 +3067,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 初始化简历武器库事件
+  // 初始化简历武器库与学习中心事件
   initResumeDepotEvents();
   initDailyDigest();
+  initManualLearningEvents();
 
   // 初始化加载
   loadAllData();
@@ -2912,7 +3095,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'local') {
-        if (changes.applyLog || changes.config || changes.jobTags) {
+        if (changes.applyLog || changes.config || changes.jobTags || changes.manualApplyLog || changes.userPreferenceProfile || changes.savedBossFilters) {
           loadAllData();
         }
       }

@@ -30,6 +30,10 @@
   };
 
   let activeTags = []; // 当前在后台勾选高亮生效的职业词条
+  let userPreferenceProfile = null; // 用户手动投递偏好画像 (从后台深度学习沉淀)
+  let savedBossFilters = null; // 已记忆的 BOSS 网页筛选参数
+  let isAutomatingCard = false; // 标记是否为自动化巡航触发的点击 (杜绝误判为手动投递)
+
   let config = {
     dailyLimit: 70,
     timeSlotLimits: { morning: 20, afternoon: 30, evening: 20 },
@@ -158,13 +162,131 @@
     };
   }
 
+  // ================= 用户日常手动投递智能感知与深度学习引擎 =================
+  let isManualInterceptorBound = false;
+  function initManualApplyInterceptor() {
+    if (isManualInterceptorBound) return;
+    isManualInterceptorBound = true;
+
+    document.addEventListener('click', (e) => {
+      // 若当前是自动巡航脚本在点击，跳过捕获，防止自循环上报
+      if (isAutomatingCard) return;
+
+      const target = e.target;
+      if (!target) return;
+
+      // 探测是否点击了沟通按钮
+      const btn = target.closest(
+        '.btn-startchat, .op-btn-chat, .btn-sure, [ka*="job_list_chat"], [class*="startchat"], [class*="btn-chat"], [class*="btn-sure"]'
+      );
+      const btnText = (target.textContent || (btn ? btn.textContent : '')).trim();
+      const isChatClick = !!btn || /立即沟通|继续沟通|打招呼|确定/i.test(btnText);
+
+      if (!isChatClick) return;
+
+      // 提取被点击岗位卡片的信息
+      let card = target.closest('.job-card-wrapper, .job-card-box, .job-card, li.job-card-item, [class*="job-card"]');
+      let title = '';
+      let company = '';
+      let salary = '';
+      let experience = '';
+      let education = '';
+      let location = '';
+      let hrName = '';
+      let hrTitle = '';
+      let tags = [];
+
+      if (card) {
+        const titleEl = card.querySelector('.job-name, .job-title, a[ka*="job_list_"], [class*="job-name"]');
+        const companyEl = card.querySelector('.company-name, .company-info a, [class*="company-name"]');
+        const salaryEl = card.querySelector('.salary, [class*="salary"]');
+        const infoEl = card.querySelector('.tag-list, .job-tags, .info-desc');
+        const hrEl = card.querySelector('.info-public, [class*="boss-info"]');
+
+        title = titleEl ? titleEl.textContent.trim() : '';
+        company = companyEl ? companyEl.textContent.trim() : '';
+        salary = salaryEl ? salaryEl.textContent.trim() : '';
+        const infoText = infoEl ? infoEl.textContent.trim() : '';
+        
+        if (infoText) {
+          const parts = infoText.split(/[\s·,]+/);
+          parts.forEach(p => {
+            if (/年|应届|不限/.test(p)) experience = p;
+            if (/大专|本科|硕士|学历/.test(p)) education = p;
+            tags.push(p);
+          });
+        }
+        if (hrEl) {
+          hrName = hrEl.textContent.trim();
+        }
+      } else if (window.location.pathname.includes('/job_detail/')) {
+        // 岗位详情页内手动投递
+        const titleEl = document.querySelector('.name h1, .job-name, .pos-bread');
+        const companyEl = document.querySelector('.company-info a, .business-info h3, .name-box a');
+        const salaryEl = document.querySelector('.salary, .job-banner .salary');
+        const bossNameEl = document.querySelector('.boss-info .boss-name, .job-boss-info .name');
+        const infoEl = document.querySelector('.job-banner .tag-list, .job-banner .job-tags');
+
+        title = titleEl ? titleEl.textContent.trim() : '';
+        company = companyEl ? companyEl.textContent.trim() : '';
+        salary = salaryEl ? salaryEl.textContent.trim() : '';
+        hrName = bossNameEl ? bossNameEl.textContent.trim() : '';
+
+        if (infoEl) {
+          const parts = infoEl.textContent.split(/[\s·,]+/);
+          parts.forEach(p => {
+            if (/年|应届|不限/.test(p)) experience = p;
+            if (/大专|本科|硕士/.test(p)) education = p;
+            tags.push(p);
+          });
+        }
+      }
+
+      if (title || company) {
+        const jobData = {
+          title: title || '运营岗位',
+          company: company || '直聘企业',
+          salary: salary || '面议',
+          experience: experience || '经验不限',
+          education: education || '不限',
+          tags: tags.filter(Boolean),
+          location,
+          hrName,
+          hrTitle,
+          platform: 'BOSS直聘',
+          applyTime: new Date().toLocaleString()
+        };
+
+        chrome.runtime.sendMessage({
+          type: 'LOG_MANUAL_APPLY',
+          job: jobData
+        }, (res) => {
+          if (res && res.success && !res.duplicate) {
+            logHUD(`<span class="highlight" style="color:#c084fc;">🧠 [偏好学习] 已感知并深度学习您手动投递的【${jobData.title}】(${jobData.company})！</span>`);
+            if (res.profile) {
+              userPreferenceProfile = res.profile;
+            }
+            updateHUD();
+          }
+        });
+      }
+    }, true);
+  }
+
   function refreshConfig(callback) {
     if (!chrome.storage || !chrome.storage.local) {
       if (callback) callback();
       return;
     }
-    chrome.storage.local.get(['config', 'jobTags'], (res) => {
+    chrome.storage.local.get(['config', 'jobTags', 'userPreferenceProfile', 'savedBossFilters'], (res) => {
       const today = getLocalDateStr();
+      if (res && res.userPreferenceProfile) {
+        userPreferenceProfile = res.userPreferenceProfile;
+      }
+      if (res && res.savedBossFilters) {
+        savedBossFilters = res.savedBossFilters;
+      }
+
       if (res && res.config) {
         config = { ...config, ...res.config };
         if (!config.timeSlotLimits) {
@@ -398,6 +520,19 @@
         if (broadKeywords.some(k => rawLower.includes(k)) || curFilters.activeTab) {
           matchedTag = activeTags[0] || (curFilters.activeTab ? curFilters.activeTab.replace(/[\(（].*?[\)）]/g, '') : '综合运营');
           matchType = `页面筛选放行 (${curFilters.summary})`;
+        }
+      }
+    }
+
+    // 2.2 融合用户手动投递偏好画像 (深度学习用户手动点击投递习惯)
+    if (!matchedTag && userPreferenceProfile && Array.isArray(userPreferenceProfile.topKeywords) && userPreferenceProfile.topKeywords.length > 0) {
+      const rawLower = (title + ' ' + tags + ' ' + rawCardText).toLowerCase();
+      for (const rawKw of userPreferenceProfile.topKeywords) {
+        const mkw = typeof rawKw === 'object' ? (rawKw.word || '') : rawKw;
+        if (mkw && mkw.length >= 2 && rawLower.includes(mkw.toLowerCase())) {
+          matchedTag = mkw;
+          matchType = `🧠 命中手动投递偏好【${mkw}】`;
+          break;
         }
       }
     }
@@ -1095,6 +1230,18 @@
             <span class="tag-link" id="btn-hud-open-key-companies" style="color: #f59e0b; cursor: pointer; text-decoration: underline;">查看榜单 ↗</span>
           </div>
 
+          <!-- 记忆筛选与自动巡航联动 -->
+          <div id="hud-saved-filter-bar" style="display: flex; justify-content: space-between; align-items: center; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; font-size: 10px;">
+            <span style="color: #38bdf8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px;">📌 巡航筛选: <b id="hud-saved-filter-desc">实时页面</b></span>
+            <span class="tag-link" id="btn-save-boss-filters" style="color: #00f2fe; cursor: pointer; text-decoration: underline; font-weight: 600;" title="记住当前页面上的经验/学历/兼职等全部筛选项，巡航时自动加载">💾 记住筛选</span>
+          </div>
+
+          <!-- 手动投递偏好学习画像条目 -->
+          <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; font-size: 10px;">
+            <span style="color: #c084fc; font-weight: 600;">🧠 手动偏好学习: <b id="hud-manual-learned-count">0</b> 条样本</span>
+            <span class="tag-link" id="btn-hud-open-learning" style="color: #a855f7; cursor: pointer; text-decoration: underline;">偏好画像 ↗</span>
+          </div>
+
           <!-- 页面筛选自适应放行指示器 -->
           <div id="hud-page-filter-status" style="display: none; background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; font-size: 10px; color: #34d399;">
             <span>🎯 页面筛选已激活：<b id="hud-page-filter-summary">已开启</b> (自适应放行)</span>
@@ -1238,6 +1385,33 @@
       chrome.runtime.sendMessage({
         type: 'OPEN_PAGE',
         url: chrome.runtime.getURL('dashboard/dashboard.html#key-companies')
+      });
+    });
+
+    // 记忆当前页面筛选条件
+    shadowRoot.getElementById('btn-save-boss-filters')?.addEventListener('click', () => {
+      const cur = getBossCurrentFilters();
+      const filterData = {
+        url: window.location.href,
+        query: window.location.search,
+        summary: cur.summary,
+        savedTime: new Date().toLocaleString()
+      };
+      chrome.runtime.sendMessage({
+        type: 'SAVE_BOSS_FILTERS',
+        filters: filterData
+      }, (res) => {
+        savedBossFilters = filterData;
+        logHUD(`💾 <span class="success">[筛选已记忆]</span> 已保存当前页面筛选：【${cur.summary}】！后续全网巡航将自动采用此条件。`);
+        updateHUD();
+      });
+    });
+
+    // 打开手动投递偏好学习中心
+    shadowRoot.getElementById('btn-hud-open-learning')?.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'OPEN_PAGE',
+        url: chrome.runtime.getURL('dashboard/dashboard.html#manual-learning')
       });
     });
 
@@ -1502,12 +1676,25 @@
       }
     }
 
-    // 重点跟进企业数异步读取
+    // 重点跟进企业数、手动学习样本数与记忆筛选状态异步读取
     if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['keyCompanies'], (kRes) => {
+      chrome.storage.local.get(['keyCompanies', 'manualApplyLog', 'savedBossFilters'], (kRes) => {
         const kList = Array.isArray(kRes.keyCompanies) ? kRes.keyCompanies : [];
         const kcEl = shadowRoot.getElementById('hud-key-companies-count');
         if (kcEl) kcEl.textContent = kList.length;
+
+        const mList = Array.isArray(kRes.manualApplyLog) ? kRes.manualApplyLog : [];
+        const mlEl = shadowRoot.getElementById('hud-manual-learned-count');
+        if (mlEl) mlEl.textContent = mList.length;
+
+        const sfDesc = shadowRoot.getElementById('hud-saved-filter-desc');
+        if (sfDesc) {
+          if (kRes.savedBossFilters && kRes.savedBossFilters.summary) {
+            sfDesc.textContent = kRes.savedBossFilters.summary;
+          } else {
+            sfDesc.textContent = '跟随当前页面';
+          }
+        }
       });
     }
   }
@@ -2361,9 +2548,15 @@
         await sleep(Math.floor(Math.random() * 500) + 400);
 
         // 严格校验投递过程与真实送达回执 (捕获「已向BOSS发送消息」并点击「留在此页」)
-        const chatResult = await executeAndVerifyBossChat(card, btnChat, greetingText);
+        let chatResult = null;
+        try {
+          isAutomatingCard = true;
+          chatResult = await executeAndVerifyBossChat(card, btnChat, greetingText);
+        } finally {
+          isAutomatingCard = false;
+        }
 
-        if (chatResult.success) {
+        if (chatResult && chatResult.success) {
           todayCount++;
           sessionCount++;
           const currentSlot = getCurrentTimeSlot();
@@ -3213,6 +3406,7 @@
   }
 
   if (location.hostname.includes('zhipin.com')) {
+    initManualApplyInterceptor();
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         refreshConfig(() => {

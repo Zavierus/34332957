@@ -33,6 +33,11 @@
           <span>重点企业与HR交流榜</span>
           <span class="active-badge" id="sidebar-kc-count" style="background:rgba(245,158,11,0.25); color:#fbbf24;">0</span>
         </button>
+        <button class="nav-item" data-view="view-manual-learning">
+          <span class="nav-icon">💡</span>
+          <span>手动投递偏好学习</span>
+          <span class="active-badge" id="sidebar-learning-count" style="background:rgba(168,85,247,0.25); color:#c084fc;">0</span>
+        </button>
         <button class="nav-item" data-view="view-sites">
           <span class="nav-icon">🌐</span>
           <span>跨网页投递中心</span>
@@ -211,6 +216,90 @@
             </thead>
             <tbody id="key-companies-table-body">
               <!-- 动态回填重点企业 -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 视图: 手动投递偏好深度学习与巡航优化中心 -->
+      <section class="view-panel" id="view-manual-learning">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">💡 手动投递偏好学习与巡航优化中心</h1>
+            <p class="panel-desc">智能感知您日常在各大招聘平台的手动沟通行为，通过启发式聚类深度提炼您的岗位偏好画像，并将核心特征动态注入全网自动巡航系统。</p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary" id="btn-sync-learned-tags-dash">✨ 将学习偏好词同步至生效词条</button>
+            <button class="btn btn-secondary" id="btn-refresh-manual-learning">🔄 刷新画像</button>
+            <button class="btn btn-danger" id="btn-clear-manual-learning">🗑️ 清空学习历史</button>
+          </div>
+        </div>
+
+        <!-- 统计指标卡片 -->
+        <div class="table-toolbar">
+          <div class="stats-cards-row">
+            <div class="mini-stat">
+              <span class="mini-label">已深度学习样本</span>
+              <span class="mini-num" id="stat-learning-samples" style="color:#c084fc;">0 次</span>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-label">提取核心偏好词</span>
+              <span class="mini-num" id="stat-learning-keywords-num" style="color:#00f2fe;">0 个</span>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-label">倾向薪资区间</span>
+              <span class="mini-num" id="stat-learning-salary" style="color:#10b981;">面议</span>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-label">主流经验要求</span>
+              <span class="mini-num" id="stat-learning-exp" style="color:#38bdf8;">经验不限/1-3年</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI 偏好画像洞察卡片 -->
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="font-size: 14px; font-weight: 700; color: #c084fc; display: flex; align-items: center; gap: 6px;">
+              <span>🤖 AI 偏好画像洞察报告 & 巡航优化建议</span>
+            </div>
+            <span style="font-size: 11px; color: #94a3b8;" id="learning-last-updated">最后更新：刚刚</span>
+          </div>
+
+          <div id="learning-insights-text" style="font-size: 12.5px; color: #cbd5e1; line-height: 1.7; white-space: pre-wrap; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 12px 14px; border-left: 3px solid #a855f7;">
+            尚未捕获到手动投递样本。当您日常在各招聘网站手动点击“立即沟通”时，系统会自动在此深度学习提炼偏好画像。
+          </div>
+
+          <!-- 提取的高频偏好关键词标签云 -->
+          <div style="margin-top: 12px;">
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">🎯 提取到的高频偏好关键词云 (已自动纳入初筛自适应加权)：</div>
+            <div id="learning-keyword-chips" style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <span style="font-size: 11px; color: #64748b;">暂无关键词</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 手动投递历史明细列表 -->
+        <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: 13px; font-weight: 700; color: #f8fafc; margin: 0;">📋 手动投递记录明细 (已学样本集)</h3>
+          <span style="font-size: 11px; color: #64748b;">支持自动去重，保留最新200条手动投递记录</span>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="data-table" id="manual-learning-table">
+            <thead>
+              <tr>
+                <th style="width: 180px;">岗位名称</th>
+                <th style="width: 170px;">企业名称</th>
+                <th style="width: 110px;">薪资待遇</th>
+                <th style="width: 120px;">经验 / 学历</th>
+                <th style="width: 90px; text-align: center;">平台</th>
+                <th>关联标签 / HR</th>
+                <th style="width: 140px;">投递时间</th>
+              </tr>
+            </thead>
+            <tbody id="manual-learning-table-body">
+              <!-- 动态回填手动记录 -->
             </tbody>
           </table>
         </div>
@@ -704,6 +793,31 @@
               <button type="submit" class="btn btn-primary" id="btn-save-all-settings" style="padding: 12px 28px; font-size: 14px;">💾 保存所有设置</button>
             </div>
           </form>
+
+          <!-- 已记忆的 BOSS 网页筛选条件 -->
+          <div style="margin-top: 26px; padding: 20px 22px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <div>
+                <div style="font-size: 15px; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 8px;">
+                  <span>📌 已记忆的 BOSS 直聘网页筛选参数 (巡航专属基准)</span>
+                </div>
+                <p style="font-size: 12px; color: #94a3b8; margin-top: 4px; line-height: 1.6;">
+                  当您在 BOSS 直聘顶栏选择了学历、工作经验、薪资或兼职等筛选并点击“记住筛选”后，系统已牢牢锁定该条件。全网流水线与一键巡航将自动按此条件检索投递。
+                </p>
+              </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); border: 1px dashed rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 12px 16px; margin-top: 10px;">
+              <div>
+                <div style="font-size: 11px; color: #64748b;">当前记忆的筛选概要：</div>
+                <div style="font-size: 13px; font-weight: 700; color: #f8fafc; margin-top: 2px;" id="dash-saved-filters-summary">尚未保存自定义筛选 (当前跟随实时网页)</div>
+                <div style="font-size: 10.5px; color: #94a3b8; margin-top: 4px;" id="dash-saved-filters-time">保存时间：无</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-primary" id="btn-dash-open-saved-boss" style="padding: 6px 14px; font-size: 12px;">🚀 打开此筛选页 ↗</button>
+                <button type="button" class="btn btn-danger" id="btn-dash-clear-saved-boss" style="padding: 6px 14px; font-size: 12px;">🗑️ 清除记忆</button>
+              </div>
+            </div>
+          </div>
 
           <!-- 跨账户 / 跨设备全量配置迁移与备份 -->
           <div style="margin-top: 26px; padding: 20px 22px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(0, 242, 254, 0.3); border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">

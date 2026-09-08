@@ -27,6 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const heroRetroBtn = document.getElementById('btn-hero-retro');
   const heroResumeDepotBtn = document.getElementById('btn-hero-resume-depot');
   const heroKeyCompaniesBtn = document.getElementById('btn-hero-key-companies');
+  const heroManualLearningBtn = document.getElementById('btn-hero-manual-learning');
+  const linkFilterSettings = document.getElementById('pop-link-filter-settings');
 
   if (topOpenBtn) topOpenBtn.addEventListener('click', openDashboard);
   if (heroOpenBtn) heroOpenBtn.addEventListener('click', openDashboard);
@@ -43,6 +45,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (heroKeyCompaniesBtn) {
     heroKeyCompaniesBtn.addEventListener('click', () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-key-companies') });
+    });
+  }
+  if (heroManualLearningBtn) {
+    heroManualLearningBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-manual-learning') });
+    });
+  }
+  if (linkFilterSettings) {
+    linkFilterSettings.addEventListener('click', (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-settings') });
     });
   }
 
@@ -131,10 +144,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (popSlotEvening) popSlotEvening.textContent = `${slotCounts.evening || 0}/${slotLimits.evening || 20}`;
 
     // 动态同步全网巡航下拉选项与安全上限联动
-    const optFollow = document.querySelector('#pipe-target-select option[value="follow_limit"]');
-    if (optFollow) {
-      optFollow.textContent = `🔄 跟随设定上限 (${currentLimit}个/站)`;
+    const optFollowLimit = document.querySelector('#pipe-target-select option[value="follow_limit"]');
+    if (optFollowLimit) {
+      optFollowLimit.textContent = `🔄 跟随全天上限 (${currentLimit}个/站)`;
     }
+
+    const optFollowSlot = document.querySelector('#pipe-target-select option[value="follow_slot"]');
+    if (optFollowSlot) {
+      const now = new Date();
+      const h = now.getHours();
+      let curSlot = 'morning';
+      let curDisp = '上午';
+      if (h >= 12 && h < 18) { curSlot = 'afternoon'; curDisp = '下午'; }
+      else if (h >= 18 || h < 6) { curSlot = 'evening'; curDisp = '晚上'; }
+      const slotLimit = slotLimits[curSlot] || 20;
+      const slotCount = slotCounts[curSlot] || 0;
+      const slotRem = Math.max(0, slotLimit - slotCount);
+      optFollowSlot.textContent = `🕒 跟随当前时段 (${curDisp}剩余 ${slotRem} 个，推荐)`;
+    }
+
+    // 回显记忆的 BOSS 直聘筛选概要
+    chrome.storage.local.get(['savedBossFilters'], (sfRes) => {
+      const filterSummaryEl = document.getElementById('pop-saved-filter-summary');
+      if (filterSummaryEl) {
+        if (sfRes.savedBossFilters && sfRes.savedBossFilters.summary) {
+          filterSummaryEl.textContent = sfRes.savedBossFilters.summary;
+          filterSummaryEl.title = `${sfRes.savedBossFilters.summary} (记忆于: ${sfRes.savedBossFilters.savedTime || ''})`;
+        } else {
+          filterSummaryEl.textContent = '跟随实时页面';
+        }
+      }
+    });
 
     const activeCount = tags.filter(t => t.active).length;
     activeTagsEl.textContent = activeCount;
@@ -267,10 +307,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentIndex = status.currentIndex || 0;
 
       if (pipeLiveText) {
+        const slotPart = status.timeSlot ? ` (${status.timeSlot.slotDisplayName}: ${status.timeSlot.slotCount}/${status.timeSlot.slotLimit})` : '';
         if (status.siteSkipped && status.siteSkipped[status.currentSite?.id]) {
-          pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ⚠️ ${status.siteSkipped[status.currentSite?.id]} (自动跳过)`;
+          pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ⚠️ ${status.siteSkipped[status.currentSite?.id]}${slotPart}`;
         } else {
-          pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ${siteCount}/${target}`;
+          pipeLiveText.textContent = `第 ${currentIndex + 1}/${totalSites} 站【${siteName}】: ${siteCount}/${target}${slotPart}`;
         }
       }
       
@@ -308,8 +349,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnStartPipeline) {
     btnStartPipeline.addEventListener('click', () => {
-      const selectedVal = pipeTargetSelect ? pipeTargetSelect.value : 'follow_limit';
-      const target = selectedVal === 'follow_limit' ? 'follow_limit' : (parseInt(selectedVal, 10) || 30);
+      const selectedVal = pipeTargetSelect ? pipeTargetSelect.value : 'follow_slot';
+      const target = (selectedVal === 'follow_limit' || selectedVal === 'follow_slot') ? selectedVal : (parseInt(selectedVal, 10) || 30);
       chrome.runtime.sendMessage({
         type: 'START_CRUISE_PIPELINE',
         perSiteTarget: target
