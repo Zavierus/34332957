@@ -596,11 +596,7 @@
   let lagouWatcherInitTimestamp = Date.now();
 
   const LG_SYSTEM_BLACKLIST = [
-    '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-    '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
-    '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
-    '面试邀请', '点击预览', '收到你的', '不合适', '查看简历', '拉勾小秘书',
-    '系统通知', '职位推荐', '安全提醒', '温馨提示'
+    '拉勾小秘书', '系统通知', '职位推荐', '安全提醒', '温馨提示', '平台提示', '系统消息'
   ];
 
   function isLagouSystemText(text) {
@@ -656,6 +652,7 @@
     return true;
   }
 
+  let lastLagouTitleHasMessage = false;
   function startHRReplyWatcher() {
     lagouWatcherInitTimestamp = Date.now();
     try {
@@ -680,29 +677,24 @@
     const title = document.title || '';
     if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
 
-    if (Date.now() - lagouWatcherInitTimestamp < 4000) return;
+    if (Date.now() - lagouWatcherInitTimestamp < 3000) return;
 
-    const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
-    if (m) {
-      const count = parseInt(m[1], 10);
-      if (count > 0 && isLagouWatcherInitialized && count > lastLagouUnreadCount) {
-        if (!checkLagouChatLastBubbleIsRealHR() || !checkLagouSidebarUnreadIsRealHR()) {
-          lastLagouUnreadCount = count;
-          return;
-        }
-
-        if (Date.now() - lastLagouAlertTimestamp > 12000) {
-          lastLagouAlertTimestamp = Date.now();
-          dispatchLagouHRReplyNotification({
-            title: '🔔 拉勾网 · HR 新回复/私信！',
-            desc: `有拉勾企业 HR 正在期待您的回复 (${count} 条未读)，请及时跟进！`,
-            count
-          });
-        }
-        lastLagouUnreadCount = count;
+    const hasMsg = /[\(（](\d+|新消息|有新招呼)[\)）]|【.*?新消息.*?】|【\d+条|\[\d+\]|\d+条新消息/i.test(title);
+    const now = Date.now();
+    if (hasMsg) {
+      if (!lastLagouTitleHasMessage || (now - lastLagouAlertTimestamp > 12000)) {
+        lastLagouTitleHasMessage = true;
+        lastLagouAlertTimestamp = now;
+        const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
+        const count = m ? parseInt(m[1], 10) : 1;
+        dispatchLagouHRReplyNotification({
+          title: '🔔 拉勾网 · HR 新回复/私信！',
+          desc: `检测到拉勾网页标签出现新消息动态提示 (${count} 条未读)，请及时跟进！`,
+          count
+        });
       }
-    } else if (lastLagouUnreadCount > 0) {
-      lastLagouUnreadCount = 0;
+    } else {
+      lastLagouTitleHasMessage = false;
     }
   }
 

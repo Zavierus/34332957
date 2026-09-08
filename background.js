@@ -797,6 +797,44 @@ function finishEntirePipeline() {
   });
 }
 
+let isCreatingOffscreen = false;
+async function playBackgroundChime() {
+  try {
+    if (!chrome.offscreen) return;
+    const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+    
+    let hasDoc = false;
+    if (chrome.offscreen.hasDocument) {
+      hasDoc = await chrome.offscreen.hasDocument();
+    } else if (globalThis.clients && globalThis.clients.matchAll) {
+      const clients = await globalThis.clients.matchAll();
+      hasDoc = clients.some(c => c.url === offscreenUrl);
+    }
+
+    if (!hasDoc) {
+      if (isCreatingOffscreen) return;
+      isCreatingOffscreen = true;
+      try {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen.html',
+          reasons: ['AUDIO_PLAYBACK'],
+          justification: 'Play notification chime when HR replies'
+        });
+      } catch (err) {
+        if (!err.message || !err.message.includes('Only a single offscreen document may be created')) {
+          console.warn('[Background Audio] createDocument error:', err);
+        }
+      } finally {
+        isCreatingOffscreen = false;
+      }
+    }
+
+    chrome.runtime.sendMessage({ type: 'PLAY_BACKGROUND_CHIME' }).catch(() => {});
+  } catch (e) {
+    console.warn('[Background Audio Chime Warning]', e);
+  }
+}
+
 // 处理来自各页面的消息通信
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'RELOAD_EXTENSION') {
@@ -881,36 +919,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'next_site_triggered' });
     return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
-    // HR 新消息回复系统桌面强提醒与直通路由 (严格遵守持久化存储的冷却周期，杜绝多标签并发堆叠)
+    // HR 新消息回复系统桌面强提醒与后台穿透发声
     chrome.storage.local.get(['config', 'lastGlobalHRAlertTimestamp'], (res) => {
       const cfg = res.config || {};
+
+      // 1. 如果开启了提示音，立即通过 offscreen document 在后台播放清脆叮咚声（击破 Chrome 自动播放拦截）
+      if (cfg.audioAlert !== false) {
+        playBackgroundChime();
+      }
+
+      // 如果桌面通知被禁用，发声后直接结束
       if (cfg.desktopNotification === false) {
         sendResponse({ status: 'desktop_notification_disabled' });
         return;
       }
 
-      // 如果是手动测试触发，无视任何冷却
+      // 2. 防连发防护：手动测试无视冷却，真实消息保留 12 秒防护防止多标签轰炸
       if (!request.isTest) {
         const cooldownMins = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0)
           ? Number(cfg.hrAlertCooldownMinutes)
           : 1;
-        // 防瞬间多标签并发堆叠：设置 20 秒去重窗口，杜绝 5 分钟超长锁死导致错失重要消息
-        const cooldownMs = Math.min(cooldownMins * 60 * 1000, 20 * 1000);
+        const cooldownMs = Math.min(cooldownMins * 60 * 1000, 12 * 1000);
         const now = Date.now();
         const lastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
 
         if (now - lastAlert < cooldownMs && lastAlert > 0) {
-          console.log(`[ZIAVER Background] ⏳ HR 提醒处于全局防打扰去重期 (${cooldownMs / 1000}秒内仅弹一次)，已拦截去重`);
+          console.log(`[ZIAVER Background] ⏳ HR 提醒处于去重防抖期 (${cooldownMs / 1000}秒内)，已拦截弹窗堆叠`);
           sendResponse({ status: 'cooldown_suppressed' });
           return;
         }
       }
 
       const now = Date.now();
-      // 立即持久化记录本次提醒触发时间戳
       chrome.storage.local.set({ lastGlobalHRAlertTimestamp: now });
 
-      const notifId = 'hr_reply_singleton';
+      const notifId = 'hr_reply_' + Date.now();
       const chatUrl = request.chatUrl || (
         request.platform === 'liepin' ? 'https://www.liepin.com/im/' :
         request.platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
@@ -925,16 +968,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.platform === 'liepin') siteTitle = '猎聘网';
       else if (request.platform === 'lagou') siteTitle = '拉勾网';
 
-      // 先清除旧通知，确保屏幕右侧永远最多只有 1 个清爽通知，绝不堆叠！
-      chrome.notifications.clear(notifId, () => {
-        chrome.notifications.create(notifId, {
-          type: 'basic',
-          iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-          title: `🔔 ${siteTitle} · 检测到 HR 新回复/私信！`,
-          message: request.text || '有企业 HR 正在与您互动沟通，点击立即直达聊天界面！',
-          priority: 2,
-          requireInteraction: false // 自动在数秒后优雅隐退，不卡在屏幕边侧阻塞视野
-        });
+      chrome.notifications.create(notifId, {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
+        title: `🔔 ${siteTitle} · HR 新回复/私信！`,
+        message: request.text || '企业 HR 正在期待与您沟通，点击立即直达聊天界面！',
+        priority: 2,
+        requireInteraction: false
+      }, (createdId) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background Notification Error]', chrome.runtime.lastError);
+        }
       });
 
       sendResponse({ status: 'ok' });
