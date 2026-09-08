@@ -1659,19 +1659,16 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const hasDate = /(20\d{2}[.\-\/年]\d{1,2}|至今|现在)/.test(line);
-        const isCompanyEntity = /(?:公司|科技|企业|集团|店|社|工作室|品牌|平台|互娱|传媒|Studio|Club|有限公司)/i.test(line);
-        const hasSplit = /[|｜]/.test(line);
+        const cleanLine = line.replace(/^(?:ADDITIONAL\s*EXPERIENCE\s*\/)?\s*(?:补充经历|工作经历|实习经历|兼职经历|项目经历|主要经历)[：:\s]*/i, '').trim();
+        const hasDate = /(20\d{2}[.\-\/年—–-]\d{1,2}|至今|现在)/.test(cleanLine);
+        const isCompanyEntity = /(?:公司|科技|企业|集团|店|社|工作室|品牌|平台|互娱|传媒|Studio|Club|有限公司|宣传部|融媒体|中心|医院|机构)/i.test(cleanLine);
+        const hasSplit = /[|｜·•●◆]/.test(cleanLine);
 
-        if (hasDate && (hasSplit || isCompanyEntity || line.length < 50)) {
+        if (hasDate && (hasSplit || isCompanyEntity || cleanLine.length < 60)) {
           if (currentWork) depot.workExperiences.push(currentWork);
-          let parts = line.split(/[|｜]/).map(p => p.trim()).filter(Boolean);
-          if (parts.length === 1) {
-            if (/[\t]|\s{2,}/.test(line)) {
-              parts = line.split(/[\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
-            } else if (/\s+/.test(line)) {
-              parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
-            }
+          let parts = cleanLine.split(/[|｜·•●◆\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
+          if (parts.length === 1 && /\s+/.test(cleanLine)) {
+            parts = cleanLine.split(/\s+/).map(p => p.trim()).filter(Boolean);
           }
 
           let period = '';
@@ -1679,9 +1676,9 @@ document.addEventListener('DOMContentLoaded', () => {
           let role = '';
 
           parts.forEach(p => {
-            if (/(20\d{2}|至今|现在)/.test(p)) {
+            if (/(?:20\d{2}[.\-\/年—–-]|至今|现在)/.test(p)) {
               period = period ? (period + ' ' + p) : p;
-            } else if (!company && /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|网络|网络科技|信息科技|电子商务|文化传媒)/i.test(p)) {
+            } else if (!company && /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|网络|信息|电商|宣传部|融媒体|中心|医院|机构)/i.test(p)) {
               company = p;
             } else if (!role) {
               role = p;
@@ -1692,11 +1689,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // 智能正则兜底提取
           if (!period) {
-            const dateMatch = line.match(/(?:20\d{2}[.\-\/年]\d{1,2}\s*(?:[-–—~至到]\s*(?:20\d{2}[.\-\/年]\d{1,2}|至今|现在))?)/);
+            const dateMatch = cleanLine.match(/(?:20\d{2}[.\-\/年]\d{1,2}\s*(?:[-–—~至到]\s*(?:20\d{2}[.\-\/年]\d{1,2}|至今|现在))?)/);
             if (dateMatch) period = dateMatch[0].trim();
           }
           if (!company) {
-            const compMatch = line.match(/(?:[\u4e00-\u9fa5A-Za-z0-9]+(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司))/);
+            const compMatch = cleanLine.match(/(?:[\u4e00-\u9fa5A-Za-z0-9]+(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|宣传部|融媒体中心|医院))/);
             if (compMatch) company = compMatch[0].trim();
           }
 
@@ -1722,25 +1719,22 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       } else if (currentSection === 'proj') {
-        const hasDate = /(20\d{2}[.\-\/年]\d{1,2}|至今)/.test(line);
-        const hasSplit = /[|｜]/.test(line);
-        const isProjStart = hasDate || hasSplit || /^(?:【|●|◆|项目[一二三四五12345:：]|AIGC|千万级|实战)/i.test(line);
+        const cleanProjLine = line.replace(/^(?:SELECTED\s*BUSINESS\s*PROJECTS\s*\/)?\s*(?:业务项目|核心项目|项目经历)[：:\s]*/i, '').trim();
+        const hasDate = /(20\d{2}[.\-\/年—–-]\d{1,2}|至今)/.test(cleanProjLine);
+        const hasSplit = /[|｜·•●◆]/.test(cleanProjLine);
+        const isProjStart = hasDate || hasSplit || /^(?:【|●|◆|项目[一二三四五12345:：]|AIGC|千万级|实战)/i.test(cleanProjLine);
 
-        if (isProjStart && line.length < 70) {
+        if (isProjStart && cleanProjLine.length < 80) {
           if (currentProj) depot.projects.push(currentProj);
-          let parts = line.split(/[|｜]/).map(p => p.trim()).filter(Boolean);
-          if (parts.length === 1) {
-            if (/[\t]|\s{2,}/.test(line)) {
-              parts = line.split(/[\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
-            } else if (/\s+/.test(line)) {
-              parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
-            }
+          let parts = cleanProjLine.split(/[|｜·•●◆\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
+          if (parts.length === 1 && /\s+/.test(cleanProjLine)) {
+            parts = cleanProjLine.split(/\s+/).map(p => p.trim()).filter(Boolean);
           }
           let name = '';
           let role = '';
           let period = '';
           parts.forEach(p => {
-            if (/(20\d{2}|至今)/.test(p)) period = p;
+            if (/(?:20\d{2}[.\-\/年—–-]|至今)/.test(p)) period = p;
             else if (!name) name = p.replace(/^[【●◆\d+、. ]+/, '');
             else role = p;
           });

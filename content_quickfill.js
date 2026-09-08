@@ -408,7 +408,56 @@
     };
   }
 
-  // 自动嗅探当前页面已填的公司名与简历库中哪一段经历最契合
+  // 经历行智能拆解器 (支持 · | ｜ • ● ◆ \t 及各类空格格式，并剥除前缀噪声)
+  function parseExpLine(line) {
+    if (!line) return { company: '', role: '', period: '' };
+    let cleanLine = line.replace(/^(?:ADDITIONAL\s*EXPERIENCE\s*\/)?\s*(?:补充经历|工作经历|实习经历|兼职经历|项目经历|主要经历)[：:\s]*/i, '').trim();
+    let parts = cleanLine.split(/[|｜·•●◆\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
+    if (parts.length === 1 && /\s+/.test(cleanLine)) {
+      parts = cleanLine.split(/\s+/).map(p => p.trim()).filter(Boolean);
+    }
+
+    let period = '';
+    let company = '';
+    let role = '';
+
+    parts.forEach(p => {
+      if (/(?:20\d{2}[.\-\/年—–-]|至今|现在)/.test(p)) {
+        period = period ? (period + ' ' + p) : p;
+      } else if (!company && /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|网络|信息|电商|宣传部|融媒体|中心|医院|机构)/i.test(p)) {
+        company = p;
+      } else if (!role) {
+        role = p;
+      } else if (!company) {
+        company = p;
+      }
+    });
+
+    if (!period) {
+      const dm = cleanLine.match(/(?:20\d{2}[.\-\/年]\d{1,2}\s*(?:[-–—~至到]\s*(?:20\d{2}[.\-\/年]\d{1,2}|至今|现在))?)/);
+      if (dm) period = dm[0].trim();
+    }
+    if (!company) {
+      const cm = cleanLine.match(/(?:[\u4e00-\u9fa5A-Za-z0-9]+(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|宣传部|融媒体中心|医院))/);
+      if (cm) company = cm[0].trim();
+    }
+
+    return { company, role, period };
+  }
+
+  function sanitizeWorkExperience(w) {
+    if (!w) return { company: '', role: '', period: '', desc: '', achievements: [] };
+    const clone = { ...w };
+    if ((!clone.company || clone.company === '重点实战企业' || clone.company === '重点科技公司') && clone.period) {
+      const parsed = parseExpLine(clone.period);
+      if (parsed.company) clone.company = parsed.company;
+      if (parsed.role && (!clone.role || clone.role === '运营/核心业务专家')) clone.role = parsed.role;
+      if (parsed.period) clone.period = parsed.period;
+    }
+    return clone;
+  }
+
+  // 自动嗅探当前页面已填的公司名或职位与简历库中哪一段经历最契合
   function autoDetectMatchingWorkIndex() {
     if (!resumeDepot || !Array.isArray(resumeDepot.workExperiences) || resumeDepot.workExperiences.length <= 1) return;
     const works = resumeDepot.workExperiences;
@@ -417,17 +466,33 @@
       const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea');
       for (const inp of inputs) {
         const val = (inp.value || '').trim();
-        if (val && val.length >= 3) {
+        if (val && val.length >= 2) {
           for (let i = 0; i < works.length; i++) {
-            const comp = (works[i].company || '').trim();
-            const role = (works[i].role || '').trim();
-            if (comp && (val.includes(comp) || comp.includes(val) || (val.length >= 4 && comp.slice(0, 4) === val.slice(0, 4)))) {
-              selectedWorkIndex = i;
-              return;
+            const w = sanitizeWorkExperience(works[i]);
+            const comp = (w.company || '').trim();
+            const role = (w.role || '').trim();
+            const rawPeriod = (works[i].period || '').trim();
+
+            // 1. 公司名双向模糊匹配 (如 "JADE" 或 "散览" 或 "字节跳动")
+            if (comp) {
+              if (val.includes(comp) || comp.includes(val)) { selectedWorkIndex = i; return; }
+              const compCore = comp.replace(/[\(\)（）\s/]/g, '');
+              const valCore = val.replace(/[\(\)（）\s/]/g, '');
+              if (compCore.length >= 3 && valCore.length >= 3 && (compCore.includes(valCore) || valCore.includes(compCore))) {
+                selectedWorkIndex = i; return;
+              }
             }
-            if (role && (val.includes(role) || role.includes(val))) {
-              selectedWorkIndex = i;
-              return;
+            // 2. 职位名匹配 (如 "独立商业人像摄影师" 或 "达人运营")
+            if (role) {
+              if (val.includes(role) || role.includes(val)) { selectedWorkIndex = i; return; }
+              const roleParts = role.split(/[\/、\s]/).filter(Boolean);
+              for (const rp of roleParts) {
+                if (rp.length >= 3 && (val.includes(rp) || rp.includes(val))) { selectedWorkIndex = i; return; }
+              }
+            }
+            // 3. 原始经历头字符串包含 (如包含 JADE 或 摄影 或 瓜子)
+            if (rawPeriod && val.length >= 3 && rawPeriod.includes(val)) {
+              selectedWorkIndex = i; return;
             }
           }
         }
@@ -443,7 +508,7 @@
     const depot = resumeDepot || {};
     const prof = applicantProfile || {};
     const basic = depot.basicInfo || {};
-    const works = depot.workExperiences || [];
+    const works = (depot.workExperiences || []).map(sanitizeWorkExperience);
     const projects = depot.projects || [];
     const edu = (depot.education && depot.education[0]) || {};
 
@@ -454,21 +519,27 @@
     // 1. 公司名称 / 单位名称 / 就任企业 / 任职公司
     if (/公司名称|单位名称|企业名称|就任单位|任职公司|所任公司|现任公司|所属企业|雇主|employer|company|organization/i.test(text) ||
         (/公司|单位|企业/i.test(text) && !/项目|学校|院校|大学|学院/i.test(text))) {
-      const val = activeWork.company || (works[0] && works[0].company) || '深圳散览文化科技有限公司';
+      const val = activeWork.company || (works[0] && works[0].company) || '重点实战企业';
       return { category: '💼 工作经历', icon: '🏢', fieldName: '公司名称', value: val, key: 'company' };
     }
 
     // 2. 职位名称 / 岗位名称 / 担任职务 / 职务
     if (/职位名称|岗位名称|担任职位|任职岗位|所任职务|职务|工种|^职位$|^岗位$|role|title|position/i.test(text) &&
         !/期望|目标|意向/i.test(text)) {
-      const val = activeWork.role || (works[0] && works[0].role) || prof.targetRole || basic.targetRole || '达人运营/视觉设计师';
+      const val = activeWork.role || (works[0] && works[0].role) || prof.targetRole || basic.targetRole || '运营/业务专家';
       return { category: '💼 工作经历', icon: '💼', fieldName: '职位名称', value: val, key: 'role' };
     }
 
     // 3. 所在部门 / 所属部门 / 团队
     if (/所在部门|所属部门|部门|团队|科室|业务线|事业部|department|dept|division/i.test(text)) {
-      const val = activeWork.department || prof.department || (activeWork.role ? activeWork.role.split(/[\/、\s]/)[0] + '部' : '核心业务部');
-      return { category: '💼 工作经历', icon: '👥', fieldName: '所在部门', value: val, key: 'department' };
+      let deptVal = activeWork.department || prof.department || '';
+      if (!deptVal && activeWork.role) {
+        const rPart = activeWork.role.split(/[\/、\s]/)[0];
+        if (!/摄影师|设计|讲师|助理|总监/i.test(rPart)) {
+          deptVal = rPart + '部';
+        }
+      }
+      return { category: '💼 工作经历', icon: '👥', fieldName: '所在部门', value: deptVal || '', key: 'department' };
     }
 
     // 4. 工作描述 / 工作职责 / 工作内容 / 工作业绩
@@ -1206,6 +1277,7 @@
             <span class="drawer-tag" id="depot-summary-tag">PRO</span>
           </div>
           <div style="display:flex; align-items:center; gap:5px;">
+            <button class="drawer-pin-btn" id="btn-force-reload-extension" title="代码更新后一键完全重载插件并刷新页面" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.4); font-size:11px; padding:3px 8px; border-radius:4px; cursor:pointer;">🔄 重载插件</button>
             <button class="drawer-pin-btn" id="btn-pin-drawer" title="固定常驻模式：开启后切换网页、翻页或刷新页面均保持展开">📌 固定常驻</button>
             <button class="drawer-close-btn" id="btn-collapse-drawer" title="收起面板" style="font-size:11.5px; padding:4px 7px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.12); border-radius:6px;">收起 ⇥</button>
             <button class="drawer-close-btn" id="btn-close-drawer" title="关闭面板">✕</button>
@@ -1243,7 +1315,7 @@
         <!-- 底部栏 -->
         <div class="drawer-footer">
           <button class="btn-open-dash" id="btn-open-depot-settings">⚙️ 上传新简历 / 重新解析 ↗</button>
-          <span style="color:#64748b; font-size:10px;">支持连续点选填表</span>
+          <span style="color:#10b981; font-weight:700; font-size:10.5px;">v2.11.0 最新引擎已激活</span>
         </div>
 
         <!-- 浮动通知 Toast -->
@@ -2257,6 +2329,25 @@
           if (finalWidth) {
             chrome.storage.local.set({ quickfillDrawerWidth: finalWidth });
           }
+        }
+      });
+    }
+
+    // 重载插件并刷新页面按钮
+    const btnReloadExt = shadowRoot.getElementById('btn-force-reload-extension');
+    if (btnReloadExt) {
+      btnReloadExt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        btnReloadExt.textContent = '⏳ 重载中...';
+        btnReloadExt.disabled = true;
+        try {
+          chrome.runtime.sendMessage({ type: 'RELOAD_EXTENSION' }, () => {
+            setTimeout(() => {
+              window.location.reload();
+            }, 300);
+          });
+        } catch (err) {
+          window.location.reload();
         }
       });
     }

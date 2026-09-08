@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobCruise - 求职自动化巡航助手 (Job Autopilot)",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "description": "现代化智能求职巡航框架。支持多招聘平台全自动流水线协同巡航、网页输入项自动嗅探对齐与简历速填、职业词条高亮匹配与投递复盘诊断。",
   "icons": {
     "16": "icons/icon_16.png",

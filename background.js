@@ -206,6 +206,45 @@ function initOrUpdateStorage() {
       updates.applyLog = [];
     }
 
+    // 4. 简历资料库自愈清洗 (自动识别包含 · 或其他分隔符的真实公司与职位，修复历史误存为「重点实战企业」的经历数据)
+    if (res.resumeDepot && Array.isArray(res.resumeDepot.workExperiences)) {
+      let depotChanged = false;
+      const depot = res.resumeDepot;
+      depot.workExperiences.forEach(w => {
+        if ((!w.company || w.company === '重点实战企业' || w.company === '重点科技公司') && w.period) {
+          const raw = (w.period || '').replace(/^(?:ADDITIONAL\s*EXPERIENCE\s*\/)?\s*(?:补充经历|工作经历|实习经历|兼职经历|项目经历|主要经历)[：:\s]*/i, '').trim();
+          let parts = raw.split(/[|｜·•●◆\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
+          if (parts.length === 1 && /\s+/.test(raw)) {
+            parts = raw.split(/\s+/).map(p => p.trim()).filter(Boolean);
+          }
+          let foundComp = '';
+          let foundRole = '';
+          let foundPeriod = '';
+          parts.forEach(p => {
+            if (/(?:20\d{2}[.\-\/年—–-]|至今|现在)/.test(p)) {
+              foundPeriod = foundPeriod ? (foundPeriod + ' ' + p) : p;
+            } else if (!foundComp && /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|网络|信息|电商|宣传部|融媒体|中心|医院|机构)/i.test(p)) {
+              foundComp = p;
+            } else if (!foundRole) {
+              foundRole = p;
+            }
+          });
+          const dm = raw.match(/(?:20\d{2}[.\-\/年]\d{1,2}\s*(?:[-–—~至到]\s*(?:20\d{2}[.\-\/年]\d{1,2}|至今|现在))?)/);
+          if (dm) foundPeriod = dm[0].trim();
+          const cm = raw.match(/(?:[\u4e00-\u9fa5A-Za-z0-9]+(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|宣传部|融媒体中心|医院))/);
+          if (cm && !foundComp) foundComp = cm[0].trim();
+
+          if (foundComp) { w.company = foundComp; depotChanged = true; }
+          if (foundRole && (!w.role || w.role === '运营/核心业务专家')) { w.role = foundRole; depotChanged = true; }
+          if (foundPeriod) { w.period = foundPeriod; depotChanged = true; }
+        }
+      });
+      if (depotChanged) {
+        updates.resumeDepot = depot;
+        console.log('[ZIAVER Autopilot] 已自动清洗并修复历史简历工作经历字段！');
+      }
+    }
+
     if (Object.keys(updates).length > 0) {
       chrome.storage.local.set(updates, () => {
         console.log('[ZIAVER Autopilot] 插件存储状态已无损更新 (当前日期:', today, ')');
@@ -760,7 +799,14 @@ function finishEntirePipeline() {
 
 // 处理来自各页面的消息通信
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'START_CRUISE_PIPELINE') {
+  if (request.type === 'RELOAD_EXTENSION') {
+    console.log('[ZIAVER Autopilot] 收到完全重载插件请求，正在执行 chrome.runtime.reload()...');
+    sendResponse({ status: 'ok' });
+    setTimeout(() => {
+      chrome.runtime.reload();
+    }, 100);
+    return true;
+  } else if (request.type === 'START_CRUISE_PIPELINE') {
     startCruisePipeline(request.perSiteTarget);
     sendResponse({ status: 'ok', pipeline: cruisePipeline });
     return true;
