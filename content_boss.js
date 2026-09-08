@@ -1859,9 +1859,6 @@
       if (!lastTitleHasMessage || (now - lastAlertTimestamp > 12000)) {
         lastTitleHasMessage = true;
         lastAlertTimestamp = now;
-        if (chrome.storage && chrome.storage.local) {
-          chrome.storage.local.set({ lastGlobalHRAlertTimestamp: now });
-        }
 
         const count = extractUnreadCountFromTitle(title) || 1;
         console.log(`[ZIAVER Autopilot] 🔔 BOSS 网页标题侦测到 HR 新回复动态！标题: "${title}"`);
@@ -2078,9 +2075,6 @@
     if (shouldTriggerAlert) {
       if (now - lastAlertTimestamp > 12000) {
         lastAlertTimestamp = now;
-        if (chrome.storage && chrome.storage.local) {
-          chrome.storage.local.set({ lastGlobalHRAlertTimestamp: now });
-        }
 
         console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到 HR 新回复！触发原因: ${alertReason}`);
 

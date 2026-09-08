@@ -798,6 +798,7 @@ function finishEntirePipeline() {
 }
 
 let isCreatingOffscreen = false;
+let lastBackgroundHRAlertTime = 0;
 async function playBackgroundChime() {
   try {
     if (!chrome.offscreen) return;
@@ -920,7 +921,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
     // HR 新消息回复系统桌面强提醒与后台穿透发声
-    chrome.storage.local.get(['config', 'lastGlobalHRAlertTimestamp'], (res) => {
+    const now = Date.now();
+    // 防并发多标签同时推送同一条消息：2.5秒极短去重保护
+    if (!request.isTest && (now - lastBackgroundHRAlertTime < 2500)) {
+      sendResponse({ status: 'cooldown_suppressed' });
+      return true;
+    }
+    lastBackgroundHRAlertTime = now;
+
+    chrome.storage.local.get(['config'], (res) => {
       const cfg = res.config || {};
 
       // 1. 如果开启了提示音，立即通过 offscreen document 在后台播放清脆叮咚声（击破 Chrome 自动播放拦截）
@@ -933,25 +942,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ status: 'desktop_notification_disabled' });
         return;
       }
-
-      // 2. 防连发防护：手动测试无视冷却，真实消息保留 12 秒防护防止多标签轰炸
-      if (!request.isTest) {
-        const cooldownMins = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0)
-          ? Number(cfg.hrAlertCooldownMinutes)
-          : 1;
-        const cooldownMs = Math.min(cooldownMins * 60 * 1000, 12 * 1000);
-        const now = Date.now();
-        const lastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
-
-        if (now - lastAlert < cooldownMs && lastAlert > 0) {
-          console.log(`[ZIAVER Background] ⏳ HR 提醒处于去重防抖期 (${cooldownMs / 1000}秒内)，已拦截弹窗堆叠`);
-          sendResponse({ status: 'cooldown_suppressed' });
-          return;
-        }
-      }
-
-      const now = Date.now();
-      chrome.storage.local.set({ lastGlobalHRAlertTimestamp: now });
 
       const notifId = 'hr_reply_' + Date.now();
       const chatUrl = request.chatUrl || (
@@ -968,16 +958,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.platform === 'liepin') siteTitle = '猎聘网';
       else if (request.platform === 'lagou') siteTitle = '拉勾网';
 
+      // 桌面右下角强提醒系统通知：开启 requireInteraction: true，保持常驻桌面右下角，直到用户点击或手动关闭！
       chrome.notifications.create(notifId, {
         type: 'basic',
         iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-        title: `🔔 ${siteTitle} · HR 新回复/私信！`,
-        message: request.text || '企业 HR 正在期待与您沟通，点击立即直达聊天界面！',
+        title: `🔔 ${siteTitle} · 检测到 HR 新回复！`,
+        message: request.text || '有企业 HR 正在与您互动，请切换回浏览器及时跟进！',
         priority: 2,
-        requireInteraction: false
+        requireInteraction: true
       }, (createdId) => {
         if (chrome.runtime.lastError) {
           console.warn('[Background Notification Error]', chrome.runtime.lastError);
+        } else {
+          console.log('[ZIAVER Background] 🔔 桌面右下角通知已成功发射:', createdId);
         }
       });
 
