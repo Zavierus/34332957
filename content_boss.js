@@ -1705,9 +1705,12 @@
   let isWatcherInitialized = false;
   let watcherInitTimestamp = Date.now();
   let lastTitleHasMessage = false;
+  let lastTitleUnreadCount = 0;
   let lastHeaderUnreadCount = 0;
   let lastHeaderHasRedDot = false;
   let lastChatSidebarKey = '';
+  let lastHasHRUnreadBadge = false;
+  let lastFloatNoticeText = '';
 
   const SYSTEM_REPLY_BLACKLIST = [
     '直聘小秘书', '安全中心', '平台提示', '直聘助手', '以下是系统消息',
@@ -1852,16 +1855,20 @@
     if (Date.now() - watcherInitTimestamp < 3000) return;
 
     const hasMsg = isTitleHavingMessage(title);
+    const count = extractUnreadCountFromTitle(title) || 1;
     const now = Date.now();
 
     if (hasMsg) {
-      // 标题进入消息状态：如果之前不是消息状态，或者距离上次提醒超过 12 秒防抖
-      if (!lastTitleHasMessage || (now - lastAlertTimestamp > 12000)) {
+      // 仅在标题由无消息变为有消息，或者标题中的未读数字发生递增时触发报警（彻底阻断每12秒死循环反复报警Bug）
+      const isNewMessageState = !lastTitleHasMessage;
+      const hasCountIncreased = count > lastTitleUnreadCount;
+
+      if (isNewMessageState || hasCountIncreased) {
         lastTitleHasMessage = true;
+        lastTitleUnreadCount = Math.max(lastTitleUnreadCount, count);
         lastAlertTimestamp = now;
 
-        const count = extractUnreadCountFromTitle(title) || 1;
-        console.log(`[ZIAVER Autopilot] 🔔 BOSS 网页标题侦测到 HR 新回复动态！标题: "${title}"`);
+        console.log(`[ZIAVER Autopilot] 🔔 BOSS 网页标题侦测到 HR 新回复动态！标题: "${title}", 未读数: ${count}`);
 
         dispatchHRReplyNotification({
           title: '🔔 BOSS 直聘 · HR 新回复/私信！',
@@ -1872,6 +1879,7 @@
     } else {
       // 标题已经恢复正常，重置状态
       lastTitleHasMessage = false;
+      lastTitleUnreadCount = 0;
     }
   }
 
@@ -1975,11 +1983,17 @@
 
   // 全方位周期巡检（顶栏 + 浮窗 + 聊天侧栏 + 聊天气泡 + 标题）
   function checkAllHRMessageSources() {
-    // 首次稳态期
+    // 首次稳态期（基准化顶栏、标题与浮窗，避免新开标签页即误报）
     if (!isWatcherInitialized || (Date.now() - watcherInitTimestamp < 3000)) {
       const initHeader = extractHeaderUnreadInfo();
       lastHeaderUnreadCount = initHeader.count;
       lastHeaderHasRedDot = initHeader.hasRedDot;
+      lastTitleHasMessage = isTitleHavingMessage(document.title || '');
+      lastTitleUnreadCount = extractUnreadCountFromTitle(document.title || '');
+      const initFloat = checkFloatChatNotice();
+      if (initFloat.found) {
+        lastFloatNoticeText = initFloat.text;
+      }
       isWatcherInitialized = true;
       return;
     }
@@ -2000,14 +2014,24 @@
       alertReason = `顶栏出现新消息红点标记`;
       alertCount = headerInfo.count || 1;
     }
+    // 当未读被用户点开清零时，通知后台中枢重置未读计数，使后续新消息不必死等冷却期
+    if (headerInfo.count === 0 && !headerInfo.hasRedDot && (lastHeaderUnreadCount > 0 || lastHeaderHasRedDot)) {
+      chrome.runtime.sendMessage({ type: 'HR_UNREAD_CLEARED', platform: 'boss' }).catch(() => {});
+    }
     lastHeaderUnreadCount = headerInfo.count;
     lastHeaderHasRedDot = headerInfo.hasRedDot;
 
-    // B. 右下角即时浮窗卡片检测
+    // B. 右下角即时浮窗卡片检测（带文本指纹去重，同一浮窗停留期间绝不重复报警）
     const floatNotice = checkFloatChatNotice();
     if (floatNotice.found) {
-      shouldTriggerAlert = true;
-      alertReason = `右下角收到 HR 实时弹窗消息: "${floatNotice.text.slice(0, 30)}"`;
+      if (floatNotice.text !== lastFloatNoticeText) {
+        lastFloatNoticeText = floatNotice.text;
+        shouldTriggerAlert = true;
+        alertReason = `右下角收到 HR 实时弹窗消息: "${floatNotice.text.slice(0, 30)}"`;
+        alertCount = Math.max(alertCount, headerInfo.count || 1);
+      }
+    } else {
+      lastFloatNoticeText = '';
     }
 
     // C. 聊天页面深度监听 (/web/geek/chat)
@@ -2043,10 +2067,12 @@
             shouldTriggerAlert = true;
             alertReason = `聊天列表最新消息变动: ${topName} ("${topMsg.slice(0, 25)}")`;
           }
-        } else if (hasHRUnreadBadge && (now - lastAlertTimestamp > 15000)) {
+        } else if (hasHRUnreadBadge && !lastHasHRUnreadBadge) {
+          // 仅在红点由无到有首次出现时触发，坚决杜绝每隔15秒无条件重新报警Bug
           shouldTriggerAlert = true;
-          alertReason = `会话列表中有 HR 发来新消息`;
+          alertReason = `会话列表中出现 HR 新未读标记`;
         }
+        lastHasHRUnreadBadge = hasHRUnreadBadge;
         lastChatSidebarKey = currentSidebarKey;
       }
 
@@ -2071,27 +2097,23 @@
     // D. 网页标题兜底
     checkTitleForHRMessage();
 
-    // E. 触发多维报警（带 12 秒防连发保护）
+    // E. 触发多维报警
     if (shouldTriggerAlert) {
-      if (now - lastAlertTimestamp > 12000) {
-        lastAlertTimestamp = now;
+      lastAlertTimestamp = now;
 
-        console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到 HR 新回复！触发原因: ${alertReason}`);
+      console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到 HR 新回复！触发原因: ${alertReason}`);
 
-        dispatchHRReplyNotification({
-          title: '🔔 BOSS 直聘 · HR 新回复/私信！',
-          desc: `【${alertReason}】，企业 HR 正在期待您的回复，请及时跟进！`,
-          count: alertCount
-        });
-      }
+      dispatchHRReplyNotification({
+        title: '🔔 BOSS 直聘 · HR 新回复/私信！',
+        desc: `【${alertReason}】，企业 HR 正在期待您的回复，请及时跟进！`,
+        count: alertCount
+      });
     }
   }
 
   function dispatchHRReplyNotification(info = {}) {
-    // 1. 穿透式清脆提示音 (两连音叮咚)
-    if (config.audioAlert !== false) {
-      playDoubleChime();
-    }
+    // 1. 穿透式提示音：统一交由 background.js 通过 offscreen 全局单例发声，杜绝多标签页本地声音混响
+    // (仅在后台离线或测试模式异常时由本地 fallback)
 
     // 2. 页面内高可见度浮动 Toast (带呼吸灯与直达跳转)
     showHRReplyToast({
@@ -2107,13 +2129,20 @@
     // 4. JobCruise HUD 悬浮窗黄金高亮播报（即使静音也一眼可见！）
     logHUD(`<span class="highlight" style="color: #fbbf24; font-weight: bold; background: rgba(251, 191, 36, 0.15); padding: 2px 6px; border-radius: 4px;">🔔 【HR新回复】${info.desc || '企业 HR 发来新消息！已触发声音与桌面通知。'}</span>`);
 
-    // 5. 系统级桌面弹窗通知与后台穿透发声
+    // 5. 系统级桌面弹窗通知与后台全局唯一发声
     chrome.runtime.sendMessage({
       type: 'HR_REPLY_ALERT',
       platform: 'boss',
       isTest: !!info.isTest,
+      count: info.count || 1,
       chatUrl: 'https://www.zhipin.com/web/geek/chat',
       text: info.desc || `BOSS直聘有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
+    }, (res) => {
+      if (chrome.runtime.lastError) {
+        if (config.audioAlert !== false && info.isTest) {
+          playDoubleChime();
+        }
+      }
     });
   }
 
@@ -3133,6 +3162,18 @@
       console.log('[ZIAVER Autopilot] BOSS 直聘收到跨日广播，新日期:', request.today);
       refreshConfig();
       sendResponse({ status: 'ok' });
+      return true;
+    } else if (request.type === 'HR_ALERT_COORDINATION_SYNC') {
+      // 接收来自 background 的多标签页协同广播，即时对齐本地基准，避免本标签页后续定时器误报
+      if (request.platform === 'boss') {
+        lastAlertTimestamp = request.timestamp || Date.now();
+        if (request.count) {
+          lastHeaderUnreadCount = Math.max(lastHeaderUnreadCount, request.count);
+          lastTitleUnreadCount = Math.max(lastTitleUnreadCount, request.count);
+        }
+        lastTitleHasMessage = true;
+      }
+      sendResponse({ status: 'synced' });
       return true;
     } else if (request.type === 'PING') {
       sendResponse({ status: 'pong', platform: 'BOSS直聘' });

@@ -821,6 +821,7 @@ async function playBackgroundChime() {
           reasons: ['AUDIO_PLAYBACK'],
           justification: 'Play notification chime when HR replies'
         });
+        await new Promise(r => setTimeout(r, 100));
       } catch (err) {
         if (!err.message || !err.message.includes('Only a single offscreen document may be created')) {
           console.warn('[Background Audio] createDocument error:', err);
@@ -919,34 +920,85 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     sendResponse({ status: 'next_site_triggered' });
     return true;
+  } else if (request.type === 'HR_UNREAD_CLEARED') {
+    // 某标签页已点开会话或顶栏未读清零，同步重置后台未读计数，确保下次新消息不被冷却阻断
+    const platform = request.platform || 'boss';
+    chrome.storage.local.get(['lastPlatformAlertState'], (res) => {
+      const platformState = res.lastPlatformAlertState || {};
+      if (platformState[platform]) {
+        platformState[platform].count = 0;
+        chrome.storage.local.set({ lastPlatformAlertState: platformState });
+      }
+    });
+    sendResponse({ status: 'cleared' });
+    return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
-    // HR 新消息回复系统桌面强提醒与后台穿透发声
+    // HR 新消息回复系统桌面强提醒与后台穿透发声（多标签中枢协同单例）
     const now = Date.now();
-    // 防并发多标签同时推送同一条消息：2.5秒极短去重保护
-    if (!request.isTest && (now - lastBackgroundHRAlertTime < 2500)) {
-      sendResponse({ status: 'cooldown_suppressed' });
-      return true;
-    }
-    lastBackgroundHRAlertTime = now;
+    const platform = request.platform || 'boss';
+    const currentCount = Math.max(1, parseInt(request.count, 10) || 1);
 
-    chrome.storage.local.get(['config'], (res) => {
+    chrome.storage.local.get(['config', 'lastPlatformAlertState'], (res) => {
       const cfg = res.config || {};
+      const platformState = res.lastPlatformAlertState || {};
+      const lastPlatformInfo = platformState[platform] || { time: 0, count: 0 };
+      const lastPlatformTime = lastPlatformInfo.time || 0;
+      const lastPlatformCount = lastPlatformInfo.count || 0;
+      const cooldownMinutes = Math.max(1, Number(cfg.hrAlertCooldownMinutes) || 5);
+      const cooldownMs = cooldownMinutes * 60 * 1000;
 
-      // 1. 如果开启了提示音，立即通过 offscreen document 在后台播放清脆叮咚声（击破 Chrome 自动播放拦截）
+      if (!request.isTest) {
+        // 1. 多标签并发爆发窗口拦截 (15秒内绝对防抖，彻底消除多标签打开同一站点时的阶梯式重复报警)
+        if (now - lastPlatformTime < 15000) {
+          console.log(`[ZIAVER Background] 🛡️ 拦截多标签并发重复告警 (${platform}): 距上次告警仅 ${((now - lastPlatformTime) / 1000).toFixed(1)}s (<15s)`);
+          sendResponse({ status: 'multitab_burst_suppressed' });
+          return;
+        }
+
+        // 2. 冷却周期拦截：若在用户配置的冷却期内 (默认5分钟)，且未读数未增加，坚决不骚扰用户
+        if (now - lastPlatformTime < cooldownMs && currentCount <= lastPlatformCount) {
+          console.log(`[ZIAVER Background] ⏳ 命中平台冷却期 (${cooldownMinutes}分钟) 且未读数未增加 (${currentCount} <= ${lastPlatformCount})，静默阻断重复提醒`);
+          sendResponse({ status: 'cooldown_suppressed' });
+          return;
+        }
+      }
+
+      // 通过校验，更新全局中枢状态
+      platformState[platform] = {
+        time: now,
+        count: currentCount
+      };
+
+      chrome.storage.local.set({
+        lastPlatformAlertState: platformState,
+        lastGlobalHRAlertTimestamp: now,
+        lastGlobalHRAlertPlatform: platform,
+        lastGlobalHRAlertCount: currentCount
+      });
+
+      // 1. 全局单例发声：由 background 通过 offscreen document 播放清脆提示音，杜绝多标签重音混响
       if (cfg.audioAlert !== false) {
         playBackgroundChime();
       }
 
-      // 如果桌面通知被禁用，发声后直接结束
+      // 2. 广播至所有标签页协同同步：通知所有打开的标签页更新其本地基准，彻底消除本地轮询错位
+      broadcastToAllTabs({
+        type: 'HR_ALERT_COORDINATION_SYNC',
+        platform: platform,
+        count: currentCount,
+        timestamp: now
+      });
+
+      // 3. 桌面右下角通知：如果桌面通知被禁用，发声与协同后直接结束
       if (cfg.desktopNotification === false) {
-        sendResponse({ status: 'desktop_notification_disabled' });
+        sendResponse({ status: 'desktop_notification_disabled', dispatched: true });
         return;
       }
 
       const notifId = 'hr_reply_' + Date.now();
       const chatUrl = request.chatUrl || (
-        request.platform === 'liepin' ? 'https://www.liepin.com/im/' :
-        request.platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
+        platform === 'liepin' ? 'https://www.liepin.com/im/' :
+        platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
         'https://www.zhipin.com/web/geek/chat'
       );
       if (!globalThis.notifChatTargetMap) {
@@ -955,8 +1007,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       globalThis.notifChatTargetMap.set(notifId, chatUrl);
 
       let siteTitle = 'BOSS 直聘';
-      if (request.platform === 'liepin') siteTitle = '猎聘网';
-      else if (request.platform === 'lagou') siteTitle = '拉勾网';
+      if (platform === 'liepin') siteTitle = '猎聘网';
+      else if (platform === 'lagou') siteTitle = '拉勾网';
 
       // 桌面右下角强提醒系统通知：开启 requireInteraction: true，保持常驻桌面右下角，直到用户点击或手动关闭！
       chrome.notifications.create(notifId, {
@@ -974,7 +1026,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       });
 
-      sendResponse({ status: 'ok' });
+      sendResponse({ status: 'ok', dispatched: true });
     });
     return true;
   } else if (request.type === 'APPLY_LOG') {

@@ -760,6 +760,7 @@
   let lastLiepinUnreadCount = 0;
   let lastLiepinFriendMsgCount = -1;
   let lastLiepinAlertTimestamp = 0;
+  let lastLiepinTitleUnreadCount = 0;
   let isLiepinWatcherInitialized = false;
   let liepinWatcherInitTimestamp = Date.now();
 
@@ -848,13 +849,20 @@
     if (Date.now() - liepinWatcherInitTimestamp < 3000) return;
 
     const hasMsg = /[\(（](\d+|新消息|有新招呼)[\)）]|【.*?新消息.*?】|【\d+条|\[\d+\]|\d+条新消息/i.test(title);
+    const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
+    const count = m ? parseInt(m[1], 10) : 1;
     const now = Date.now();
+
     if (hasMsg) {
-      if (!lastLiepinTitleHasMessage || (now - lastLiepinAlertTimestamp > 12000)) {
+      // 仅在标题由无消息变为有消息，或者标题未读数字递增时报警，彻底消除12秒死循环重复报警Bug
+      const isNewMessageState = !lastLiepinTitleHasMessage;
+      const hasCountIncreased = count > lastLiepinTitleUnreadCount;
+
+      if (isNewMessageState || hasCountIncreased) {
         lastLiepinTitleHasMessage = true;
+        lastLiepinTitleUnreadCount = Math.max(lastLiepinTitleUnreadCount, count);
         lastLiepinAlertTimestamp = now;
-        const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
-        const count = m ? parseInt(m[1], 10) : 1;
+
         dispatchLiepinHRReplyNotification({
           title: '🔔 猎聘网 · HR 新回复/私信！',
           desc: `检测到猎聘网页标签出现新消息动态提示 (${count} 条未读)，请及时跟进！`,
@@ -863,6 +871,7 @@
       }
     } else {
       lastLiepinTitleHasMessage = false;
+      lastLiepinTitleUnreadCount = 0;
     }
   }
 
@@ -933,6 +942,7 @@
 
     if (detectedUnread === 0 && lastLiepinUnreadCount > 0) {
       lastLiepinUnreadCount = 0;
+      chrome.runtime.sendMessage({ type: 'HR_UNREAD_CLEARED', platform: 'liepin' }).catch(() => {});
       return;
     }
 
@@ -947,22 +957,21 @@
         return;
       }
 
-      if (now - lastLiepinAlertTimestamp > 10000) {
-        lastLiepinAlertTimestamp = now;
-        console.log(`[ZIAVER Liepin] 🔔 侦测到真实的猎聘 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLiepinUnreadCount}`);
-        dispatchLiepinHRReplyNotification({
-          title: '🔔 猎聘网 · HR 新回复/私信！',
-          desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
-          count: detectedUnread || 1
-        });
-      }
+      lastLiepinAlertTimestamp = now;
+      console.log(`[ZIAVER Liepin] 🔔 侦测到真实的猎聘 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLiepinUnreadCount}`);
+      dispatchLiepinHRReplyNotification({
+        title: '🔔 猎聘网 · HR 新回复/私信！',
+        desc: inChatNewMessage ? '猎聘 HR 正在对话窗口中发来新消息！' : `有猎聘 HR/猎头正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
+        count: detectedUnread || 1
+      });
     }
 
     lastLiepinUnreadCount = detectedUnread;
   }
 
   function dispatchLiepinHRReplyNotification(info = {}) {
-    if (config.audioAlert !== false) playDoubleChime();
+    // 1. 穿透式提示音：统一由 background.js 通过 offscreen 全局单例发声，杜绝多标签页声音重叠
+    // 2. 页面内高可见度浮动 Toast
     showLiepinHRReplyToast({
       title: info.title || '猎聘网 · HR 新回复',
       desc: info.desc || '检测到企业 HR 正在与您互动，请及时跟进！',
@@ -970,14 +979,20 @@
       chatUrl: 'https://www.liepin.com/im/'
     });
     startTitleFlashing('【🔔 猎聘HR来新消息了!】');
-    if (config.desktopNotification !== false) {
-      chrome.runtime.sendMessage({
-        type: 'HR_REPLY_ALERT',
-        platform: 'liepin',
-        chatUrl: 'https://www.liepin.com/im/',
-        text: info.desc || `猎聘网有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
-      });
-    }
+    chrome.runtime.sendMessage({
+      type: 'HR_REPLY_ALERT',
+      platform: 'liepin',
+      isTest: !!info.isTest,
+      count: info.count || 1,
+      chatUrl: 'https://www.liepin.com/im/',
+      text: info.desc || `猎聘网有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
+    }, (res) => {
+      if (chrome.runtime.lastError) {
+        if (config.audioAlert !== false && info.isTest) {
+          playDoubleChime();
+        }
+      }
+    });
     if (typeof logHUD === 'function') {
       logHUD(`<span class="success" style="font-weight: bold;">🔔 检测到猎聘 HR 新回复！请查看消息中心。</span>`);
     }
@@ -2513,6 +2528,17 @@
       console.log('[ZIAVER Autopilot] 猎聘网收到跨日广播，新日期:', request.today);
       refreshConfig();
       sendResponse({ status: 'ok' });
+      return true;
+    } else if (request.type === 'HR_ALERT_COORDINATION_SYNC') {
+      if (request.platform === 'liepin') {
+        lastLiepinAlertTimestamp = request.timestamp || Date.now();
+        if (request.count) {
+          lastLiepinUnreadCount = Math.max(lastLiepinUnreadCount, request.count);
+          lastLiepinTitleUnreadCount = Math.max(lastLiepinTitleUnreadCount, request.count);
+        }
+        lastLiepinTitleHasMessage = true;
+      }
+      sendResponse({ status: 'synced' });
       return true;
     } else if (request.type === 'PING') {
       sendResponse({ status: 'pong', platform: '猎聘网' });

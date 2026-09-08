@@ -592,6 +592,7 @@
   let lastLagouUnreadCount = 0;
   let lastLagouFriendMsgCount = -1;
   let lastLagouAlertTimestamp = 0;
+  let lastLagouTitleUnreadCount = 0;
   let isLagouWatcherInitialized = false;
   let lagouWatcherInitTimestamp = Date.now();
 
@@ -680,13 +681,20 @@
     if (Date.now() - lagouWatcherInitTimestamp < 3000) return;
 
     const hasMsg = /[\(（](\d+|新消息|有新招呼)[\)）]|【.*?新消息.*?】|【\d+条|\[\d+\]|\d+条新消息/i.test(title);
+    const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
+    const count = m ? parseInt(m[1], 10) : 1;
     const now = Date.now();
+
     if (hasMsg) {
-      if (!lastLagouTitleHasMessage || (now - lastLagouAlertTimestamp > 12000)) {
+      // 仅在标题由无消息变为有消息，或者标题未读数字递增时报警，彻底消除12秒死循环重复报警Bug
+      const isNewMessageState = !lastLagouTitleHasMessage;
+      const hasCountIncreased = count > lastLagouTitleUnreadCount;
+
+      if (isNewMessageState || hasCountIncreased) {
         lastLagouTitleHasMessage = true;
+        lastLagouTitleUnreadCount = Math.max(lastLagouTitleUnreadCount, count);
         lastLagouAlertTimestamp = now;
-        const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
-        const count = m ? parseInt(m[1], 10) : 1;
+
         dispatchLagouHRReplyNotification({
           title: '🔔 拉勾网 · HR 新回复/私信！',
           desc: `检测到拉勾网页标签出现新消息动态提示 (${count} 条未读)，请及时跟进！`,
@@ -695,6 +703,7 @@
       }
     } else {
       lastLagouTitleHasMessage = false;
+      lastLagouTitleUnreadCount = 0;
     }
   }
 
@@ -765,6 +774,7 @@
 
     if (detectedUnread === 0 && lastLagouUnreadCount > 0) {
       lastLagouUnreadCount = 0;
+      chrome.runtime.sendMessage({ type: 'HR_UNREAD_CLEARED', platform: 'lagou' }).catch(() => {});
       return;
     }
 
@@ -779,22 +789,21 @@
         return;
       }
 
-      if (now - lastLagouAlertTimestamp > 10000) {
-        lastLagouAlertTimestamp = now;
-        console.log(`[ZIAVER Lagou] 🔔 侦测到真实的拉勾 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLagouUnreadCount}`);
-        dispatchLagouHRReplyNotification({
-          title: '🔔 拉勾网 · HR 新回复/私信！',
-          desc: inChatNewMessage ? '拉勾 HR 正在对话窗口中发来新消息！' : `有拉勾 HR 正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
-          count: detectedUnread || 1
-        });
-      }
+      lastLagouAlertTimestamp = now;
+      console.log(`[ZIAVER Lagou] 🔔 侦测到真实的拉勾 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastLagouUnreadCount}`);
+      dispatchLagouHRReplyNotification({
+        title: '🔔 拉勾网 · HR 新回复/私信！',
+        desc: inChatNewMessage ? '拉勾 HR 正在对话窗口中发来新消息！' : `有拉勾 HR 正在与您互动沟通 (${detectedUnread} 条未读)，请及时跟进！`,
+        count: detectedUnread || 1
+      });
     }
 
     lastLagouUnreadCount = detectedUnread;
   }
 
   function dispatchLagouHRReplyNotification(info = {}) {
-    if (config.audioAlert !== false) playDoubleChime();
+    // 1. 穿透式提示音：统一由 background.js 通过 offscreen 全局单例发声，杜绝多标签页声音重叠
+    // 2. 页面内高可见度浮动 Toast
     showLagouHRReplyToast({
       title: info.title || '拉勾网 · HR 新回复',
       desc: info.desc || '检测到企业 HR 正在与您互动，请及时跟进！',
@@ -802,14 +811,20 @@
       chatUrl: 'https://easy.lagou.com/im/chat.htm'
     });
     startTitleFlashing('【🔔 拉勾HR来新消息了!】');
-    if (config.desktopNotification !== false) {
-      chrome.runtime.sendMessage({
-        type: 'HR_REPLY_ALERT',
-        platform: 'lagou',
-        chatUrl: 'https://easy.lagou.com/im/chat.htm',
-        text: info.desc || `拉勾网有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
-      });
-    }
+    chrome.runtime.sendMessage({
+      type: 'HR_REPLY_ALERT',
+      platform: 'lagou',
+      isTest: !!info.isTest,
+      count: info.count || 1,
+      chatUrl: 'https://easy.lagou.com/im/chat.htm',
+      text: info.desc || `拉勾网有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
+    }, (res) => {
+      if (chrome.runtime.lastError) {
+        if (config.audioAlert !== false && info.isTest) {
+          playDoubleChime();
+        }
+      }
+    });
     if (typeof logHUD === 'function') {
       logHUD(`<span class="success" style="font-weight: bold;">🔔 检测到拉勾 HR 新回复！请查看消息中心。</span>`);
     }
@@ -2213,6 +2228,17 @@
       console.log('[ZIAVER Autopilot] 拉勾招聘收到跨日广播，新日期:', request.today);
       refreshConfig();
       sendResponse({ status: 'ok' });
+      return true;
+    } else if (request.type === 'HR_ALERT_COORDINATION_SYNC') {
+      if (request.platform === 'lagou') {
+        lastLagouAlertTimestamp = request.timestamp || Date.now();
+        if (request.count) {
+          lastLagouUnreadCount = Math.max(lastLagouUnreadCount, request.count);
+          lastLagouTitleUnreadCount = Math.max(lastLagouTitleUnreadCount, request.count);
+        }
+        lastLagouTitleHasMessage = true;
+      }
+      sendResponse({ status: 'synced' });
       return true;
     } else if (request.type === 'PING') {
       sendResponse({ status: 'pong', platform: '拉勾招聘' });
