@@ -307,7 +307,7 @@
   }
 
   function extractFieldMetadata(el) {
-    if (!el) return { label: '', isRequired: false, section: '📝 表单输入项' };
+    if (!el) return { label: '', isRequired: false, section: '📝 表单信息' };
     let itemLabels = [];
     let isRequired = false;
 
@@ -315,103 +315,124 @@
       isRequired = true;
     }
 
-    // 1. <label for="..."> 或最近父级 <label>
+    // 1. 显式关联的 label：<label for="...">
     if (el.id) {
       try {
-        const explicitLabel = document.querySelector(`label[for="${el.id}"]`);
+        const explicitLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
         if (explicitLabel) {
           const lt = (explicitLabel.innerText || explicitLabel.textContent || '').trim();
           if (lt.includes('*')) isRequired = true;
-          if (lt) itemLabels.push(lt);
+          const clean = lt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
+          if (clean) itemLabels.push(clean);
         }
       } catch (e) {}
     }
+
+    // 2. 最近的直接包裹 <label>
     const parentLabel = el.closest && el.closest('label');
-    if (parentLabel) {
+    if (parentLabel && itemLabels.length === 0) {
       const plt = (parentLabel.innerText || parentLabel.textContent || '').trim();
       if (plt.includes('*')) isRequired = true;
-      if (plt && !itemLabels.includes(plt)) itemLabels.push(plt);
+      const clean = plt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
+      if (clean && clean !== el.value) itemLabels.push(clean);
     }
 
-    // 向上遍历祖先容器寻找表单项标题与章节标题 (适配各类常见UI库及大厂ATS/北森/Moka/大易等)
-    let parent = el.parentElement;
-    let depth = 0;
-    let detectedSection = '';
-    let foundDomLabel = itemLabels.length > 0;
-
-    while (parent && depth < 8 && parent !== document.body) {
-      // 检查必填 class
-      if (parent.classList && (
-        parent.classList.contains('is-required') ||
-        parent.classList.contains('ant-form-item-required') ||
-        parent.classList.contains('required')
-      )) {
-        isRequired = true;
+    // 3. 常见UI组件库专属容器提取专属label (Ant Design, Element UI, TDesign, Arco, Moka, Beisen)
+    const itemContainer = el.closest && el.closest('.ant-form-item, .el-form-item, .arco-form-item, .t-form__item, .form-group, .form-item, .form-row, .field-wrap, .form-field');
+    if (itemContainer && itemLabels.length === 0) {
+      const labelEl = itemContainer.querySelector('label, .ant-form-item-label, .el-form-item__label, .arco-form-item-label, .t-form__label, .form-label, .item-label, .control-label, .field-label, .form-title');
+      if (labelEl) {
+        const lt = (labelEl.innerText || labelEl.textContent || '').trim();
+        if (lt.includes('*')) isRequired = true;
+        const clean = lt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
+        if (clean) itemLabels.push(clean);
       }
+    }
 
-      // 优先从直接表单项容器层 (depth <= 2) 提取专属 DOM Label (包含必填 *)，切忌向顶层大容器泛化查询造成兄弟串扰
-      if (!foundDomLabel && depth <= 2) {
-        const labelEls = parent.querySelectorAll('label, .ant-form-item-label, .el-form-item__label, .form-item-label, .form-label, .item-label, .control-label, .field-label, .form-title, .title-text, dt, th');
-        labelEls.forEach(le => {
-          const t = (le.innerText || le.textContent || '').trim();
-          if (t.includes('*')) isRequired = true;
-          if (t && t.length < 50 && !itemLabels.includes(t)) {
-            itemLabels.push(t);
-            foundDomLabel = true;
-          }
-        });
-
-        // 同级前驱兄弟节点
-        let prev = parent.previousElementSibling || el.previousElementSibling;
-        if (prev) {
-          const pt = (prev.innerText || prev.textContent || '').trim();
-          if (pt.includes('*')) isRequired = true;
-          if (pt && pt.length < 40 && !itemLabels.includes(pt)) {
-            itemLabels.push(pt);
-            foundDomLabel = true;
-          }
+    // 4. 前驱兄弟元素 label (排除纯数字如日历中的天数 "9", "2022")
+    if (itemLabels.length === 0) {
+      const prev = el.previousElementSibling || (el.parentElement && el.parentElement.previousElementSibling);
+      if (prev) {
+        const pt = (prev.innerText || prev.textContent || '').trim();
+        if (pt.includes('*')) isRequired = true;
+        const clean = pt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
+        if (clean && !/^\d{1,4}$/.test(clean) && clean.length < 35) {
+          itemLabels.push(clean);
         }
       }
+    }
 
-      // 探测 Section 区域标题 (如 个人信息, 求职意向, 工作经历, 教育背景, 项目经历)
+    // 5. 元素自身属性：placeholder, aria-label, title, data-label, name
+    const ph = el.getAttribute('placeholder') || '';
+    const aria = el.getAttribute('aria-label') || '';
+    const title = el.getAttribute('title') || '';
+    const dataLabel = el.getAttribute('data-label') || el.getAttribute('data-field') || el.getAttribute('data-placeholder') || '';
+    const name = el.getAttribute('name') || '';
+
+    if (itemLabels.length === 0) {
+      if (ph) itemLabels.push(ph.replace(/请输入|请选择|请填写/g, '').trim());
+      else if (aria) itemLabels.push(aria);
+      else if (title) itemLabels.push(title);
+      else if (dataLabel) itemLabels.push(dataLabel);
+      else if (name && !/^\d+$/.test(name)) itemLabels.push(name);
+    }
+
+    // 探测 Section 区域标题
+    let detectedSection = '';
+    let curr = el.parentElement;
+    let depth = 0;
+    while (curr && depth < 8 && curr !== document.body) {
       if (!detectedSection) {
-        const headings = parent.querySelectorAll('h1, h2, h3, h4, .section-title, .card-title, .ant-card-head-title, .group-title, .group-header, .form-group-title, .module-title, legend');
-        headings.forEach(h => {
+        const headings = curr.querySelectorAll('h1, h2, h3, h4, .section-title, .card-title, .ant-card-head-title, .group-title, .group-header, .form-group-title, .module-title, legend');
+        for (const h of headings) {
           const ht = (h.innerText || h.textContent || '').trim();
-          if (/个人信息|基本信息|基本资料/i.test(ht)) detectedSection = '👤 个人信息';
-          else if (/求职意向|期望|意向/i.test(ht)) detectedSection = '🎯 求职意向';
-          else if (/工作经历|工作经验|实习经历|工作实战|工作履历/i.test(ht)) detectedSection = '💼 工作经历';
-          else if (/教育背景|教育经历|在校/i.test(ht)) detectedSection = '🎓 教育背景';
-          else if (/项目经历|项目经验|核心项目/i.test(ht)) detectedSection = '🚀 项目经历';
-          else if (/自我评价|个人优势|自我介绍/i.test(ht)) detectedSection = '🌟 自我评价';
-        });
+          if (/个人信息|基本信息|基本资料/i.test(ht)) { detectedSection = '👤 个人信息'; break; }
+          else if (/求职意向|期望|意向/i.test(ht)) { detectedSection = '🎯 求职意向'; break; }
+          else if (/工作经历|工作经验|实习经历|工作实战|工作履历/i.test(ht)) { detectedSection = '💼 工作经历'; break; }
+          else if (/教育背景|教育经历|在校/i.test(ht)) { detectedSection = '🎓 教育背景'; break; }
+          else if (/项目经历|项目经验|核心项目/i.test(ht)) { detectedSection = '🚀 项目经历'; break; }
+          else if (/自我评价|个人优势|自我介绍/i.test(ht)) { detectedSection = '🌟 自我评价'; break; }
+        }
       }
-
-      parent = parent.parentElement;
+      curr = curr.parentElement;
       depth++;
     }
 
-    // 2. 元素自身显式属性作为次要备选
-    const ph = el.getAttribute('placeholder');
-    const aria = el.getAttribute('aria-label');
-    const title = el.getAttribute('title');
-    const name = el.getAttribute('name');
-    const id = el.getAttribute('id');
-    const dataLabel = el.getAttribute('data-label') || el.getAttribute('data-field') || el.getAttribute('data-placeholder');
+    const firstLabel = itemLabels[0] || '';
+    const cleanLabel = firstLabel.replace(/[\*\:：\s\r\n\t]+/g, ' ').trim();
 
-    if (ph && !itemLabels.includes(ph)) itemLabels.push(ph);
-    if (aria && !itemLabels.includes(aria)) itemLabels.push(aria);
-    if (title && !itemLabels.includes(title)) itemLabels.push(title);
-    if (name && !itemLabels.includes(name)) itemLabels.push(name);
-    if (id && !itemLabels.includes(id)) itemLabels.push(id);
-    if (dataLabel && !itemLabels.includes(dataLabel)) itemLabels.push(dataLabel);
-
-    const cleanLabel = itemLabels.join(' ').replace(/[\*\:：\s\r\n\t]+/g, ' ').trim();
     return {
       label: cleanLabel,
       isRequired,
       section: detectedSection || '📝 表单信息'
     };
+  }
+
+  // 自动嗅探当前页面已填的公司名与简历库中哪一段经历最契合
+  function autoDetectMatchingWorkIndex() {
+    if (!resumeDepot || !Array.isArray(resumeDepot.workExperiences) || resumeDepot.workExperiences.length <= 1) return;
+    const works = resumeDepot.workExperiences;
+
+    try {
+      const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea');
+      for (const inp of inputs) {
+        const val = (inp.value || '').trim();
+        if (val && val.length >= 3) {
+          for (let i = 0; i < works.length; i++) {
+            const comp = (works[i].company || '').trim();
+            const role = (works[i].role || '').trim();
+            if (comp && (val.includes(comp) || comp.includes(val) || (val.length >= 4 && comp.slice(0, 4) === val.slice(0, 4)))) {
+              selectedWorkIndex = i;
+              return;
+            }
+            if (role && (val.includes(role) || role.includes(val))) {
+              selectedWorkIndex = i;
+              return;
+            }
+          }
+        }
+      }
+    } catch (e) {}
   }
 
   function classifyAndMatchInput(el, fieldMeta) {
@@ -430,31 +451,100 @@
     const activeWork = works[selectedWorkIndex] || works[0] || {};
     const activeProj = projects[selectedProjectIndex] || projects[0] || {};
 
-    // 1. 姓名
-    if (/姓名|真实姓名|候选人|申请人|your\s*name|^name$/i.test(text) && !/项目|学校|公司|岗位|职位|职务|微信号|紧急|联系人/i.test(text)) {
+    // 1. 公司名称 / 单位名称 / 就任企业 / 任职公司
+    if (/公司名称|单位名称|企业名称|就任单位|任职公司|所任公司|现任公司|所属企业|雇主|employer|company|organization/i.test(text) ||
+        (/公司|单位|企业/i.test(text) && !/项目|学校|院校|大学|学院/i.test(text))) {
+      const val = activeWork.company || (works[0] && works[0].company) || '深圳散览文化科技有限公司';
+      return { category: '💼 工作经历', icon: '🏢', fieldName: '公司名称', value: val, key: 'company' };
+    }
+
+    // 2. 职位名称 / 岗位名称 / 担任职务 / 职务
+    if (/职位名称|岗位名称|担任职位|任职岗位|所任职务|职务|工种|^职位$|^岗位$|role|title|position/i.test(text) &&
+        !/期望|目标|意向/i.test(text)) {
+      const val = activeWork.role || (works[0] && works[0].role) || prof.targetRole || basic.targetRole || '达人运营/视觉设计师';
+      return { category: '💼 工作经历', icon: '💼', fieldName: '职位名称', value: val, key: 'role' };
+    }
+
+    // 3. 所在部门 / 所属部门 / 团队
+    if (/所在部门|所属部门|部门|团队|科室|业务线|事业部|department|dept|division/i.test(text)) {
+      const val = activeWork.department || prof.department || (activeWork.role ? activeWork.role.split(/[\/、\s]/)[0] + '部' : '核心业务部');
+      return { category: '💼 工作经历', icon: '👥', fieldName: '所在部门', value: val, key: 'department' };
+    }
+
+    // 4. 工作描述 / 工作职责 / 工作内容 / 工作业绩
+    if (/工作描述|工作职责|工作内容|工作业绩|经历描述|职责描述|岗位职责|工作总结|duty|responsibilit|description|achievement/i.test(text) &&
+        !/项目/i.test(text)) {
+      let val = '';
+      if (activeWork.desc && activeWork.achievements && activeWork.achievements.length > 0) {
+        val = `${activeWork.desc}\n\n【核心量化业绩】:\n${activeWork.achievements.map(a => a.startsWith('•') || a.startsWith('-') ? a : '• ' + a).join('\n')}`;
+      } else if (activeWork.desc) {
+        val = activeWork.desc;
+      } else if (activeWork.achievements && activeWork.achievements.length > 0) {
+        val = activeWork.achievements.map(a => a.startsWith('•') || a.startsWith('-') ? a : '• ' + a).join('\n');
+      } else {
+        val = '负责业务全链路统筹、核心指标达成及跨专业协同交付。';
+      }
+      return { category: '💼 工作经历', icon: '📝', fieldName: '工作描述/职责', value: val, key: 'workDesc' };
+    }
+
+    // 5. 工作时间与起止日期
+    if (/在职时间|工作时间|任职时间|起止时间|period/i.test(labelText)) {
+      const val = activeWork.period || '2022.09 - 2024.06';
+      return { category: '💼 工作经历', icon: '📅', fieldName: '工作起止时间', value: val, key: 'workPeriod' };
+    }
+    if (/入职时间|入职日期|开始时间|起始时间|start\s*date|^从$|^from$/i.test(text) && !/毕业|入学|项目/i.test(text)) {
+      const p = activeWork.period || '2022.09';
+      const start = p.split(/[-~至到]/)[0]?.trim() || '2022.09';
+      return { category: '💼 工作经历', icon: '📅', fieldName: '入职时间', value: start, key: 'workStartDate' };
+    }
+    if (/离职时间|离职日期|结束时间|终止时间|end\s*date|^到$|^至$|^to$/i.test(text) && !/毕业|入学|项目/i.test(text)) {
+      const p = activeWork.period || '2024.06';
+      const end = p.split(/[-~至到]/)[1]?.trim() || '2024.06';
+      return { category: '💼 工作经历', icon: '📅', fieldName: '离职时间', value: end, key: 'workEndDate' };
+    }
+
+    // 6. 独立年份选择框 (如 "2022" 或 "年份")
+    if (/^(?:20\d{2}|年份|年)$/i.test(labelText.trim()) || (/年份|年/i.test(labelText) && labelText.length <= 4)) {
+      const p = activeWork.period || '';
+      const yMatch = p.match(/(20\d{2})/);
+      const yearVal = yMatch ? yMatch[1] : (labelText.match(/20\d{2}/) ? labelText.match(/20\d{2}/)[0] : '2022');
+      return { category: '📅 时间/年份', icon: '📅', fieldName: '年份', value: yearVal, key: 'year' };
+    }
+
+    // 7. 独立月份选择框 (如 "9" 或 "月份")
+    if (/^(?:[1-9]|1[0-2]|月份|月)$/i.test(labelText.trim()) || (/月份|月/i.test(labelText) && labelText.length <= 4)) {
+      const p = activeWork.period || '';
+      const mMatch = p.match(/20\d{2}[.\-\/年](\d{1,2})/);
+      const monthVal = mMatch ? mMatch[1].padStart(2, '0') : (labelText.match(/^[1-9]$/) ? labelText : '09');
+      return { category: '📅 时间/月份', icon: '📅', fieldName: '月份', value: monthVal, key: 'month' };
+    }
+
+    // 8. 姓名
+    if (/姓名|真实姓名|候选人|申请人|your\s*name|^name$/i.test(text) &&
+        !/项目|学校|公司|岗位|职位|职务|微信号|紧急|联系人|推荐/i.test(text)) {
       const val = basic.name || prof.name || '王泽源';
       return { category: '👤 个人信息', icon: '👤', fieldName: '姓名', value: val, key: 'name' };
     }
 
-    // 2. 手机号码
-    if (/手机|电话|联系方式|phone|mobile|tel/i.test(text) && !/紧急|推荐/i.test(text)) {
+    // 9. 手机号码
+    if (/手机|电话|联系方式|phone|mobile|tel/i.test(text) && !/紧急|推荐|证明人/i.test(text)) {
       const val = basic.phone || prof.phone || '15339169128';
       return { category: '👤 个人信息', icon: '📱', fieldName: '手机号码', value: val, key: 'phone' };
     }
 
-    // 3. 电子邮箱
+    // 10. 电子邮箱
     if (/邮箱|邮件|email|mail/i.test(text)) {
       const val = basic.email || prof.email || '939431931@qq.com';
       return { category: '👤 个人信息', icon: '📧', fieldName: '电子邮箱', value: val, key: 'email' };
     }
 
-    // 4. 性别
+    // 11. 性别
     if (/性别|gender|sex/i.test(text)) {
       const val = prof.gender || '男';
       return { category: '👤 个人信息', icon: '🚻', fieldName: '性别', value: val, key: 'gender' };
     }
 
-    // 5. 出生日期 / 年龄
+    // 12. 出生日期 / 年龄
     if (/出生日期|出生年月|出生时间|生日|birthday|birth|dob/i.test(text) || (/年龄|^age$/i.test(text) && !/年限/i.test(text))) {
       const isPureAge = /年龄|^age$/i.test(text) && !/出生/i.test(text);
       let val = '';
@@ -466,200 +556,152 @@
       return { category: '👤 个人信息', icon: '🎂', fieldName: '出生日期 (年龄)', value: val, key: 'birthDate' };
     }
 
-    // 6. 工作经验年限
-    if (/工作经验|工作年限|从业年限|经验年限|experience\s*year/i.test(text)) {
-      const val = prof.workYears || '2 年';
-      return { category: '👤 个人信息', icon: '⏳', fieldName: '工作经验年限', value: val, key: 'workYears' };
-    }
-
-    // 7. 最高学历 / 学历层次
-    if (/最高学历|学历层次|文化程度|^学历$|^degree$/i.test(text) && !/学校|院校|专业/i.test(text)) {
-      const val = prof.degree || edu.degree || '本科';
-      return { category: '👤 个人信息', icon: '📜', fieldName: '最高学历', value: val, key: 'degree' };
-    }
-
-    // 8. 所在地 / 现居地
-    if (/所在地|现居地|居住地|现居住|现住址|现居|^城市$|^location$/i.test(text) && !/期望|意向|院校/i.test(text)) {
-      const val = prof.city || basic.city || '广东深圳';
-      return { category: '👤 个人信息', icon: '📍', fieldName: '所在地', value: val, key: 'city' };
-    }
-
-    // 9. 最近公司 / 上家单位
-    if (/最近公司|上一家|上家单位|现任公司|就任企业|当前公司|last\s*company|current\s*company/i.test(text)) {
-      const val = (works[0] && works[0].company) || '北京抖音信息服务有限公司';
-      return { category: '👤 个人信息', icon: '🏢', fieldName: '最近公司', value: val, key: 'recentCompany' };
-    }
-
-    // 10. 籍贯 / 生源地
-    if (/籍贯|生源地|出生地|native/i.test(text)) {
-      const val = prof.nativePlace || '广东深圳';
-      return { category: '👤 个人信息', icon: '🏡', fieldName: '籍贯', value: val, key: 'nativePlace' };
-    }
-
-    // 11. 政治面貌
-    if (/政治面貌|politics/i.test(text)) {
-      const val = prof.politics || '共青团员';
-      return { category: '👤 个人信息', icon: '🚩', fieldName: '政治面貌', value: val, key: 'politics' };
-    }
-
-    // 12. 微信号
-    if (/微信|wechat|wx/i.test(text) && !/紧急/i.test(text)) {
-      const val = prof.wechat || basic.phone || prof.phone || '15339169128';
-      return { category: '👤 个人信息', icon: '💬', fieldName: '微信号', value: val, key: 'wechat' };
-    }
-
-    // 13. 当前薪资
-    if (/当前薪资|目前薪资|现薪|current\s*salary/i.test(text)) {
-      const val = prof.currentSalary || '面议';
-      return { category: '🎯 求职意向', icon: '💳', fieldName: '当前薪资', value: val, key: 'currentSalary' };
-    }
-
-    // 14. 期望薪资
-    if (/期望薪资|期望月薪|目标薪资|期望薪酬|薪资要求|expected\s*salary|target\s*salary/i.test(text) || (/salary|薪资|月薪/i.test(text) && !/当前|现/i.test(text))) {
-      const val = prof.targetSalary || '10-20K';
-      return { category: '🎯 求职意向', icon: '💰', fieldName: '期望薪资', value: val, key: 'targetSalary' };
-    }
-
-    // 15. 期望城市
-    if (/期望城市|意向城市|期望地点|意向地点|工作城市|目标城市|target\s*city/i.test(text)) {
-      const val = prof.targetCity || prof.city || basic.city || '深圳';
-      return { category: '🎯 求职意向', icon: '🌆', fieldName: '期望城市', value: val, key: 'targetCity' };
-    }
-
-    // 16. 求职状态 / 到岗时间
-    if (/求职状态|到岗时间|入职时间|job\s*status/i.test(text)) {
-      const val = prof.jobStatus || '离职-随时到岗';
-      return { category: '🎯 求职意向', icon: '⏱️', fieldName: '求职状态', value: val, key: 'jobStatus' };
-    }
-
-    // 17. 期望岗位 / 目标职位
-    if (/期望职位|目标岗位|意向岗位|求职意向|target\s*role/i.test(text) && !/工作经历/i.test(section)) {
-      const val = prof.targetRole || basic.targetRole || '电商与达人运营专家';
-      return { category: '🎯 求职意向', icon: '🎯', fieldName: '期望职位', value: val, key: 'targetRole' };
-    }
-
-    // 18. 工作经历相关字段匹配 (上下文或字段明确指向工作)
-    const isWorkContext = /工作经历|工作经验|实习经历|工作实战/i.test(section) || /工作/i.test(text);
-
-    // 工作经历: 起止时间
-    if (isWorkContext && /起止时间|在职时间|工作时间|时间段|period/i.test(labelText)) {
-      const val = activeWork.period || '2025.03 - 2025.09';
-      return { category: '💼 工作经历', icon: '📅', fieldName: '工作起止时间', value: val, key: 'workPeriod' };
-    }
-
-    // 工作经历: 公司名称
-    if (isWorkContext && /公司名称|单位名称|企业名称|^公司$|company/i.test(labelText)) {
-      const val = activeWork.company || '北京抖音信息服务有限公司';
-      return { category: '💼 工作经历', icon: '🏢', fieldName: '公司名称', value: val, key: 'company' };
-    }
-
-    // 工作经历: 职位名称
-    if (isWorkContext && /职位名称|岗位名称|担任职位|职务|^职位$|^岗位$|role|title/i.test(labelText)) {
-      const val = activeWork.role || '运营/核心业务专家';
-      return { category: '💼 工作经历', icon: '💼', fieldName: '职位名称', value: val, key: 'role' };
-    }
-
-    // 工作经历: 工作职责 / 业绩 / 经历描述
-    if (isWorkContext && /职责|描述|内容|业绩|工作内容|工作职责|工作业绩|duty|responsibilit|achievement/i.test(labelText)) {
-      const descPart = activeWork.desc || '';
-      const achPart = (activeWork.achievements || []).map(a => '• ' + a).join('\n');
-      const val = descPart ? (achPart ? `${descPart}\n\n【核心量化业绩】:\n${achPart}` : descPart) : achPart;
-      return { category: '💼 工作经历', icon: '📝', fieldName: '工作职责/业绩', value: val, key: 'workDesc' };
-    }
-
-    // 19. 教育背景相关字段匹配
-    const isEduContext = /教育背景|教育经历|学习经历|学历/i.test(section) || /教育|学历|学校|院校/i.test(text);
-
-    // 毕业院校
-    if (/院校|学校|毕业学校|毕业院校|school|university|college/i.test(text) && !/专业/i.test(text)) {
+    // 13. 毕业院校
+    if (/院校|学校|毕业学校|毕业院校|就读学校|school|university|college/i.test(text) && !/专业/i.test(text)) {
       const val = edu.school || basic.school || prof.school || '深圳大学';
       return { category: '🎓 教育背景', icon: '🎓', fieldName: '毕业院校', value: val, key: 'school' };
     }
 
-    // 专业名称
-    if (/专业|major|所学专业/i.test(text)) {
+    // 14. 所学专业
+    if (/专业|major|所学专业|专业名称/i.test(text)) {
       const val = edu.major || prof.major || '数字媒体 / 运营策划';
       return { category: '🎓 教育背景', icon: '📚', fieldName: '所学专业', value: val, key: 'major' };
     }
 
-    // 毕业年份 / 届别
+    // 15. 最高学历 / 学历层次
+    if (/最高学历|学历层次|文化程度|^学历$|^degree$/i.test(text) && !/学校|院校|专业/i.test(text)) {
+      const val = prof.degree || edu.degree || '本科';
+      return { category: '🎓 教育背景', icon: '📜', fieldName: '最高学历', value: val, key: 'degree' };
+    }
+
+    // 16. 毕业年份 / 届别
     if (/毕业时间|毕业年份|届别|毕业年月|graduation/i.test(text)) {
       const val = prof.gradYear || '2024';
       return { category: '🎓 教育背景', icon: '📅', fieldName: '毕业年份/届别', value: val, key: 'gradYear' };
     }
 
-    // 教育起止时间
-    if (isEduContext && /起止时间|在校时间|时间/i.test(labelText)) {
+    // 17. 教育起止时间
+    if (/在校时间|教育时间|学习时间|就读起止/i.test(text)) {
       const val = edu.period || '2020.09 - 2024.06';
       return { category: '🎓 教育背景', icon: '📅', fieldName: '教育起止时间', value: val, key: 'eduPeriod' };
     }
 
-    // 20. 项目经验
-    const isProjContext = /项目经历|项目经验|核心项目/i.test(section) || /项目/i.test(text);
-    if (isProjContext && /项目名称|项目名|project\s*name/i.test(labelText)) {
+    // 18. 工作经验年限
+    if (/工作经验|工作年限|从业年限|经验年限|experience\s*year/i.test(text)) {
+      const val = prof.workYears || '2 年';
+      return { category: '👤 个人信息', icon: '⏳', fieldName: '工作经验年限', value: val, key: 'workYears' };
+    }
+
+    // 19. 所在地 / 现居地 / 城市
+    if (/所在地|现居地|居住地|现居住|现住址|现居|^城市$|^location$/i.test(text) && !/期望|意向|院校/i.test(text)) {
+      const val = prof.city || basic.city || '广东深圳';
+      return { category: '👤 个人信息', icon: '📍', fieldName: '所在地', value: val, key: 'city' };
+    }
+
+    // 20. 期望薪资 / 目标月薪
+    if (/期望薪资|期望月薪|目标薪资|期望薪酬|薪资要求|expected\s*salary|target\s*salary/i.test(text) || (/salary|薪资|月薪/i.test(text) && !/当前|现/i.test(text))) {
+      const val = prof.targetSalary || '10-20K';
+      return { category: '🎯 求职意向', icon: '💰', fieldName: '期望薪资', value: val, key: 'targetSalary' };
+    }
+
+    // 21. 期望城市 / 工作地点
+    if (/期望城市|意向城市|期望地点|意向地点|工作城市|目标城市|target\s*city/i.test(text)) {
+      const val = prof.targetCity || prof.city || basic.city || '深圳';
+      return { category: '🎯 求职意向', icon: '🌆', fieldName: '期望城市', value: val, key: 'targetCity' };
+    }
+
+    // 22. 期望职位 / 目标岗位
+    if (/期望职位|目标岗位|意向岗位|求职意向|target\s*role/i.test(text) && !/工作经历/i.test(section)) {
+      const val = prof.targetRole || basic.targetRole || '达人运营/电商运营专家';
+      return { category: '🎯 求职意向', icon: '🎯', fieldName: '期望职位', value: val, key: 'targetRole' };
+    }
+
+    // 23. 项目经历
+    if (/项目名称|项目名|project\s*name/i.test(text)) {
       const val = activeProj.name || '全域电商大促节点战役操盘';
       return { category: '🚀 项目经历', icon: '🚀', fieldName: '项目名称', value: val, key: 'projectName' };
     }
-    if (isProjContext && /角色|职务|role/i.test(labelText)) {
-      const val = activeProj.role || '项目总控';
-      return { category: '🚀 项目经历', icon: '💼', fieldName: '项目角色', value: val, key: 'projectRole' };
+    if (/项目描述|项目背景|项目内容|project\s*desc/i.test(text)) {
+      const val = activeProj.desc || '';
+      return { category: '🚀 项目经历', icon: '📋', fieldName: '项目描述', value: val, key: 'projectDesc' };
     }
-    if (isProjContext && /描述|内容|背景|职责|成果|业绩/i.test(labelText)) {
-      const val = activeProj.desc ? `【职责】: ${activeProj.desc}\n【成果】: ${activeProj.results}` : (activeProj.results || '');
-      return { category: '🚀 项目经历', icon: '📋', fieldName: '项目描述与成果', value: val, key: 'projectDesc' };
-    }
-
-    // 21. 作品集 / 个人链接
-    if (/作品集|portfolio|链接|主页|个人网站|url|github/i.test(text)) {
-      const val = basic.portfolioUrl || prof.portfolioUrl || '';
-      return { category: '🔗 作品与成果', icon: '🔗', fieldName: '作品集链接', value: val, key: 'portfolio' };
+    if (/项目业绩|项目成果|成果与产出|project\s*result/i.test(text)) {
+      const val = activeProj.results || '';
+      return { category: '🚀 项目经历', icon: '🏆', fieldName: '项目业绩', value: val, key: 'projectResults' };
     }
 
-    // 22. 自我评价 / 个人优势 / 自荐
-    if (/自我评价|个人总结|自荐|个人优势|自我介绍|自评|summary|about\s*me|intro/i.test(text)) {
+    // 24. 自我评价 / 个人优势 (严格限定：只有明确指向自我评价、优势、自荐时才填入！)
+    if (/自我评价|个人总结|自荐信?|个人优势|自我介绍|自评|核心亮点|优势与能力|summary|about\s*me|intro/i.test(text)) {
       const val = depot.selfIntro?.full || depot.selfIntro?.short || (depot.advantages || []).join('\n');
       return { category: '🌟 自我评价', icon: '🌟', fieldName: '自我评价与优势', value: val, key: 'selfIntro' };
     }
 
-    // 23. 专业技能
+    // 25. 专业技能
     if (/技能|专业技能|擅长|工具|软件|skills?|technolog/i.test(text)) {
       const val = (depot.skills || []).join(', ');
       return { category: '🛠️ 专业技能', icon: '🛠️', fieldName: '专业技能清单', value: val, key: 'skills' };
     }
 
-    // 24. 兴趣爱好
-    if (/爱好|兴趣|特长|hobb/i.test(text)) {
-      const val = (depot.hobbies || []).join(', ');
-      return { category: '🎨 兴趣爱好', icon: '🎨', fieldName: '兴趣特长', value: val, key: 'hobbies' };
+    // 26. 作品集链接
+    if (/作品集|portfolio|链接|主页|个人网站|url|github/i.test(text)) {
+      const val = basic.portfolioUrl || prof.portfolioUrl || '';
+      return { category: '🔗 作品与成果', icon: '🔗', fieldName: '作品集链接', value: val, key: 'portfolio' };
     }
 
-    // 通用兜底
-    const cleanLabel = (labelText || '表单输入项').slice(0, 20).trim();
-    const fallbackVal = depot.selfIntro?.short || (depot.advantages && depot.advantages[0]) || '';
-    return { category: '📝 其他输入项', icon: '📝', fieldName: cleanLabel, value: fallbackVal, key: 'generic' };
+    // 27. 推荐码 / 内推码
+    if (/内推码|推荐码|伯乐码|渠道码|referral|code/i.test(text)) {
+      return { category: '🏷️ 招聘渠道', icon: '🏷️', fieldName: '推荐码/内推码', value: '', key: 'referralCode' };
+    }
+
+    // 28. 通用兜底：未明确识别的输入项，绝对不能强加自我评价长文！value 留空
+    const cleanLabel = (labelText || '未识别输入项').slice(0, 20).trim();
+    return {
+      category: '📝 其他输入项',
+      icon: '📝',
+      fieldName: cleanLabel,
+      value: '', // 空值！杜绝乱填长文
+      key: 'generic'
+    };
   }
 
   function scanCurrentPageInputs() {
-    const selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="image"]):not([type="reset"]), textarea, select, [contenteditable="true"], [role="textbox"], [g_editable="true"]';
+    const selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="image"]):not([type="reset"]), textarea, select, [contenteditable="true"], [role="textbox"]';
     const allEls = document.querySelectorAll(selector);
     const scanned = [];
 
-    allEls.forEach((el, index) => {
-      // 排除插件自身元素与离屏隐藏元素
-      if (el.closest && el.closest('#jobcruise-quickfill-root')) return;
-      if (el.disabled || el.readOnly) return;
+    // 优先自动嗅探当前页面已填的公司名与简历库中哪一段经历最契合
+    autoDetectMatchingWorkIndex();
 
+    allEls.forEach((el, index) => {
+      // 排除插件自身元素
+      if (el.closest && el.closest('#jobcruise-quickfill-root')) return;
+
+      // 排除隐藏元素与离屏元素
+      if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
       const rect = el.getBoundingClientRect();
+      if (rect.width < 15 || rect.height < 15) return;
+      if (rect.bottom < 0 || rect.top > (window.innerHeight + 5000)) return;
+
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
-      if (rect.width === 0 && rect.height === 0) return;
 
-      // 排除顶部导航栏的全局搜索框
-      const inHeader = el.closest('header, nav, .header, .nav, .search-bar, .top-bar');
-      const isSearchOnly = (el.type === 'search' || /search/i.test(el.name || el.id || '')) && inHeader;
-      if (isSearchOnly) return;
+      // 排除日历弹窗、下拉弹窗、分页器中的辅助元素
+      if (el.closest('.ant-picker-dropdown, .el-picker-panel, .flatpickr-calendar, .datepicker, .el-select-dropdown, .ant-select-dropdown, .ant-pagination, .el-pagination, .pagination')) return;
+
+      // 排除顶部和底部非表单搜索区
+      if (el.closest('header, nav, footer, .header, .footer, .global-search, .search-bar')) return;
+
+      // 排除辅助/只读隐藏组件 (如 aria-hidden, tabindex=-1 且无 value)
+      if (el.getAttribute('aria-hidden') === 'true') return;
+      if (el.tabIndex === -1 && !el.value && !el.placeholder) return;
 
       const meta = extractFieldMetadata(el);
+
+      // 如果没有任何 label 且是纯数字或空，排除
+      if (!meta.label && !el.placeholder && !el.name && !el.id) return;
+      // 排除无意义的纯数字 label (如纯日历单元格 "9", "1", "2")
+      if (/^\d{1,2}$/.test(meta.label) && !el.placeholder && !/month|day|year|date|age/i.test(el.name || el.id || '')) return;
+
       const match = classifyAndMatchInput(el, meta);
       const currentVal = el.value !== undefined ? String(el.value).trim() : (el.innerText || el.textContent || '').trim();
 
@@ -1390,6 +1432,42 @@
         btnFillAll.innerHTML = `🚀 一键顺滑填入所有已匹配字段 (${matchedCount} 项)`;
         renderDrawerContent();
       };
+    }
+
+    // 经历全局切换栏 (当存在多段经历时，置顶展示当前对照段落，便于随时切换)
+    if (works && works.length > 1) {
+      const expBar = document.createElement('div');
+      expBar.style.cssText = `
+        background: rgba(30, 41, 59, 0.7);
+        border: 1px solid rgba(0, 242, 254, 0.25);
+        border-radius: 6px;
+        padding: 7px 10px;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11.5px;
+      `;
+      expBar.innerHTML = `
+        <div style="display:flex; align-items:center; gap:6px; color:#cbd5e1; font-weight:600;">
+          <span>💼 对照工作经历：</span>
+        </div>
+        <select id="global-work-exp-picker" style="background:#0b0f19; border:1px solid rgba(0,242,254,0.3); color:#00f2fe; border-radius:4px; font-size:11px; padding:3px 6px; outline:none; cursor:pointer; max-width:210px;">
+          ${works.map((w, idx) => `
+            <option value="${idx}" ${idx === selectedWorkIndex ? 'selected' : ''}>第 ${idx + 1} 段: ${escapeHtml((w.company || '重点企业').slice(0, 10))} (${escapeHtml((w.period || '').slice(0, 7))})</option>
+          `).join('')}
+        </select>
+      `;
+      const select = expBar.querySelector('#global-work-exp-picker');
+      if (select) {
+        select.onchange = (e) => {
+          selectedWorkIndex = parseInt(e.target.value, 10) || 0;
+          scanCurrentPageInputs();
+          renderDrawerContent();
+          showToast(`✓ 已切换为第 ${selectedWorkIndex + 1} 段工作经历材料`);
+        };
+      }
+      containerEl.appendChild(expBar);
     }
 
     // 按 Section 分组

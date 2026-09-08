@@ -1665,14 +1665,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (hasDate && (hasSplit || isCompanyEntity || line.length < 50)) {
           if (currentWork) depot.workExperiences.push(currentWork);
-          const parts = line.split(/[|｜]/).map(p => p.trim());
+          let parts = line.split(/[|｜]/).map(p => p.trim()).filter(Boolean);
+          if (parts.length === 1) {
+            if (/[\t]|\s{2,}/.test(line)) {
+              parts = line.split(/[\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
+            } else if (/\s+/.test(line)) {
+              parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
+            }
+          }
+
           let period = '';
           let company = '';
           let role = '';
 
           parts.forEach(p => {
-            if (/(20\d{2}|至今)/.test(p)) {
-              period = p;
+            if (/(20\d{2}|至今|现在)/.test(p)) {
+              period = period ? (period + ' ' + p) : p;
             } else if (!company && /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|网络|网络科技|信息科技|电子商务|文化传媒)/i.test(p)) {
               company = p;
             } else if (!role) {
@@ -1681,6 +1689,16 @@ document.addEventListener('DOMContentLoaded', () => {
               company = p;
             }
           });
+
+          // 智能正则兜底提取
+          if (!period) {
+            const dateMatch = line.match(/(?:20\d{2}[.\-\/年]\d{1,2}\s*(?:[-–—~至到]\s*(?:20\d{2}[.\-\/年]\d{1,2}|至今|现在))?)/);
+            if (dateMatch) period = dateMatch[0].trim();
+          }
+          if (!company) {
+            const compMatch = line.match(/(?:[\u4e00-\u9fa5A-Za-z0-9]+(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司))/);
+            if (compMatch) company = compMatch[0].trim();
+          }
 
           currentWork = {
             id: 'w_' + Math.random().toString(36).substr(2, 6),
@@ -1710,7 +1728,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isProjStart && line.length < 70) {
           if (currentProj) depot.projects.push(currentProj);
-          const parts = line.split(/[|｜]/).map(p => p.trim());
+          let parts = line.split(/[|｜]/).map(p => p.trim()).filter(Boolean);
+          if (parts.length === 1) {
+            if (/[\t]|\s{2,}/.test(line)) {
+              parts = line.split(/[\t]|\s{2,}/).map(p => p.trim()).filter(Boolean);
+            } else if (/\s+/.test(line)) {
+              parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
+            }
+          }
           let name = '';
           let role = '';
           let period = '';
