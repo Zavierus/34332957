@@ -2572,6 +2572,9 @@
             const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
             siteCounts.boss = todayCount;
             const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+            config.todayCount = totalCount;
+            config.siteTodayCounts = siteCounts;
+            config.lastActiveDate = today;
             chrome.storage.local.set({
               config: { 
                 ...config, 
@@ -2841,29 +2844,49 @@
         return true;
       }
 
+      // 5.2 检查按钮文本是否已变更为已沟通状态
       const curTxt = btnChat ? btnChat.textContent.trim() : '';
-      if (curTxt === '继续沟通' || curTxt === '已沟通' || curTxt === '已聊过') {
+      if (curTxt === '继续沟通' || curTxt === '已沟通' || curTxt === '已聊过' || curTxt.includes('继续沟通') || curTxt.includes('已沟通')) {
         return true;
       }
+
+      // 5.3 检查卡片整体原始文本，防止DOM重构或嵌套标签导致精确匹配漏判
+      const cardRawText = (card.innerText || card.textContent || '');
+      if (
+        cardRawText.includes('继续沟通') ||
+        cardRawText.includes('已沟通') ||
+        cardRawText.includes('已聊过') ||
+        cardRawText.includes('已聊')
+      ) {
+        return true;
+      }
+
       const cardBtns = card.querySelectorAll('a, button, span');
       for (const b of cardBtns) {
         const t = b.textContent.trim();
-        if (t === '继续沟通' || t === '已沟通' || t === '已聊过') {
+        if (t === '继续沟通' || t === '已沟通' || t === '已聊过' || t.includes('继续沟通') || t.includes('已沟通')) {
           return true;
         }
       }
-      const toasts = document.querySelectorAll('.toast, .boss-toast, [class*="toast"], .message-wrap, .ant-message');
+
+      // 5.4 检查页面Toast提示 (涵盖“打招呼成功”、“还可以与...聊”等常见回执)
+      const toasts = document.querySelectorAll('.toast, .boss-toast, [class*="toast"], .message-wrap, .ant-message, [class*="message-notice"]');
       for (const t of toasts) {
         const txt = t.textContent.trim();
         if (
           txt.includes('打招呼成功') ||
           txt.includes('消息已发送') ||
-          txt.includes('已向对方发送招呼') ||
-          txt.includes('沟通成功')
+          txt.includes('已向对方发送') ||
+          txt.includes('沟通成功') ||
+          txt.includes('发送成功') ||
+          (txt.includes('还可以') && txt.includes('聊')) ||
+          (txt.includes('还可') && txt.includes('沟通'))
         ) {
           return true;
         }
       }
+
+      // 5.5 检查IM聊天小窗/抽屉
       const imDialog = document.querySelector('.chat-conversation, .chat-box, .im-chat, .geek-chat-dialog');
       if (imDialog && (imDialog.offsetWidth > 0 || imDialog.offsetHeight > 0)) {
         return true;
@@ -2890,12 +2913,25 @@
       return { success: false, reason: 'captcha_triggered', message: '触发平台安全滑块验证' };
     }
 
+    let isSuccess = false;
+
     // 关键防跳盾：杜绝 <a> 标签原生导航跳转至 /web/geek/chat 破坏主检索流
     const linkEl = btnChat.tagName === 'A' ? btnChat : btnChat.closest('a');
+    let origHref = '';
     if (linkEl) {
       linkEl.removeAttribute('target');
-      linkEl.setAttribute('data-original-href', linkEl.getAttribute('href') || '');
-      linkEl.setAttribute('href', 'javascript:void(0);');
+      origHref = linkEl.getAttribute('href') || '';
+      if (origHref && !origHref.startsWith('javascript:')) {
+        linkEl.setAttribute('data-original-href', origHref);
+        linkEl.setAttribute('href', 'javascript:void(0);');
+        setTimeout(() => {
+          try {
+            if (linkEl && linkEl.isConnected && origHref) {
+              linkEl.setAttribute('href', origHref);
+            }
+          } catch (e) {}
+        }, 1200);
+      }
     }
     const preventJumpHandler = (e) => {
       if (linkEl) e.preventDefault();
@@ -2918,10 +2954,15 @@
       btnChat.click();
     } catch (e) {}
 
-    // 极速侦测并自动点击「留在此页」，坚决拦截弹窗跳转
-    for (let t = 0; t < 8; t++) {
+    // 极速侦测并自动点击「留在此页」，坚决拦截弹窗跳转与快速送达捕获
+    for (let t = 0; t < 10; t++) {
       if (handleBossAlreadySentDialog()) {
         logHUD('<span class="success">[弹窗捕获] 成功捕获「已向BOSS发送消息」！自动点击「留在此页」，清除阻挡遮罩</span>');
+        isSuccess = true;
+        break;
+      }
+      if (checkIsDeliverySuccess()) {
+        isSuccess = true;
         break;
       }
       await sleep(60);
@@ -2940,18 +2981,32 @@
     }
 
     // 处理自定义打招呼 textarea (若平台弹窗展示输入框)
-    await handleGreetingTextareaDialog();
+    if (await handleGreetingTextareaDialog()) {
+      isSuccess = true;
+    }
 
     // 检查并发送抽屉或聊天小窗中的输入框 (确保后台个性化自荐话术真实送达HR)
-    await handleChatDrawerOrBoxGreeting(greetingText);
+    if (await handleChatDrawerOrBoxGreeting(greetingText)) {
+      isSuccess = true;
+    }
 
     // 处理二次确认弹窗
-    await handleSecondaryConfirmDialog();
+    if (await handleSecondaryConfirmDialog()) {
+      await sleep(400);
+      if (handleBossAlreadySentDialog() || checkIsDeliverySuccess()) {
+        isSuccess = true;
+      }
+    }
+
+    // 若极速侦测或弹窗发送已锁定送达成功，立即返回，杜绝冗余无谓死等
+    if (isSuccess) {
+      try { sessionStorage.removeItem('ziaver_pending_chat_greeting'); } catch (e) {}
+      cleanModalMasks();
+      return { success: true, message: '已成功送达并确认回执' };
+    }
 
     // 轮询 3.5 秒严格校验送达回执
     const startTime = Date.now();
-    let isSuccess = false;
-
     while (Date.now() - startTime < 3500) {
       if (handleBossAlreadySentDialog()) {
         logHUD('<span class="success">[弹窗捕获] 轮询检测到「已向BOSS发送消息」！自动点击「留在此页」并清理遮罩</span>');
@@ -2970,13 +3025,13 @@
         isSuccess = true;
         break;
       }
-      await sleep(250);
+      await sleep(200);
     }
 
     if (isSuccess) {
       try { sessionStorage.removeItem('ziaver_pending_chat_greeting'); } catch (e) {}
       cleanModalMasks();
-      return { success: true };
+      return { success: true, message: '已成功送达并确认回执' };
     } else {
       try { sessionStorage.removeItem('ziaver_pending_chat_greeting'); } catch (e) {}
       // 未确认成功：安全关闭可能残留的弹窗，防止遮罩阻挡
