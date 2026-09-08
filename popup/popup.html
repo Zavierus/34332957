@@ -12,7 +12,7 @@
       <div class="brand">
         <div class="brand-avatar">⚡</div>
         <div>
-          <div class="brand-title">JobCruise 求职巡航 <span style="font-size:10px; background:rgba(0,242,254,0.15); color:#00f2fe; padding:1px 6px; border-radius:10px; margin-left:4px; font-weight:600;">v2.3</span></div>
+          <div class="brand-title">JobCruise 求职巡航 <span style="font-size:10px; background:rgba(0,242,254,0.15); color:#00f2fe; padding:1px 6px; border-radius:10px; margin-left:4px; font-weight:600;">v2.9</span></div>
           <div class="brand-sub">高亮词条匹配 · 投递表格中心</div>
         </div>
       </div>
@@ -34,6 +34,24 @@
       <div class="stats-item">
         <div class="stats-num" id="stat-active-tags" style="color:#00f2fe;">0</div>
         <div class="stats-label">生效高亮词条</div>
+      </div>
+    </div>
+
+    <!-- 分时段投递额度与全天总计 -->
+    <div class="time-slot-strip" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 8px; padding: 6px 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+      <div style="text-align: center; flex: 1;">
+        <div style="color: #94a3b8; font-size: 10px;">🌅 上午 (06-12)</div>
+        <div style="font-weight: 700; color: #f8fafc; font-size: 12px;" id="pop-slot-morning">0/20</div>
+      </div>
+      <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.1);"></div>
+      <div style="text-align: center; flex: 1;">
+        <div style="color: #94a3b8; font-size: 10px;">☀️ 下午 (12-18)</div>
+        <div style="font-weight: 700; color: #f8fafc; font-size: 12px;" id="pop-slot-afternoon">0/30</div>
+      </div>
+      <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.1);"></div>
+      <div style="text-align: center; flex: 1;">
+        <div style="color: #94a3b8; font-size: 10px;">🌙 晚上 (18-24)</div>
+        <div style="font-weight: 700; color: #f8fafc; font-size: 12px;" id="pop-slot-evening">0/20</div>
       </div>
     </div>
 
@@ -106,6 +124,10 @@
       <button class="dash-hero-btn" id="btn-hero-resume-depot" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(6, 182, 212, 0.22) 100%); border-color: rgba(16, 185, 129, 0.5);">
         <span>📄 简历解析与网申速填武器库</span>
         <span style="font-size:11px; color:#34d399;">(上传解析简历 / 经历&项目&优势分类提取 / 一键速填) ↗</span>
+      </button>
+      <button class="dash-hero-btn" id="btn-hero-key-companies" style="background: linear-gradient(135deg, rgba(234, 179, 8, 0.22) 0%, rgba(249, 115, 22, 0.22) 100%); border-color: rgba(234, 179, 8, 0.5);">
+        <span>⭐ 重点企业与HR交流榜单</span>
+        <span style="font-size:11px; color:#fde047;">(HR互动频次高低排行 / 快捷聊天直达 / 重点标星置顶) ↗</span>
       </button>
     </div>
 
@@ -315,6 +337,36 @@
             <input type="number" id="cfg-daily-limit" min="5" max="999" value="60">
             <span class="unit">个 / 天</span>
           </div>
+        </div>
+
+        <div class="form-group" style="background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 8px; padding: 8px 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 0;">🕒 分时段安全投递额度</label>
+            <span style="font-size: 10px; color: #94a3b8;">全天合计: <b id="cfg-slot-sum" style="color: #00f2fe;">70</b></span>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <div style="flex: 1;">
+              <span style="font-size: 10px; color: #94a3b8;">🌅 上午</span>
+              <input type="number" id="cfg-slot-morning" min="1" max="200" value="20" style="width: 100%; box-sizing: border-box; padding: 4px 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(0,242,254,0.3); border-radius: 4px; color: #fff; font-size: 11px;">
+            </div>
+            <div style="flex: 1;">
+              <span style="font-size: 10px; color: #94a3b8;">☀️ 下午</span>
+              <input type="number" id="cfg-slot-afternoon" min="1" max="200" value="30" style="width: 100%; box-sizing: border-box; padding: 4px 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(0,242,254,0.3); border-radius: 4px; color: #fff; font-size: 11px;">
+            </div>
+            <div style="flex: 1;">
+              <span style="font-size: 10px; color: #94a3b8;">🌙 晚上</span>
+              <input type="number" id="cfg-slot-evening" min="1" max="200" value="20" style="width: 100%; box-sizing: border-box; padding: 4px 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(0,242,254,0.3); border-radius: 4px; color: #fff; font-size: 11px;">
+            </div>
+          </div>
+          <div style="font-size: 10px; color: #64748b; margin-top: 4px;">各时段耗尽自动暂停，严防账号风控</div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 10px;">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #38bdf8; cursor: pointer; margin-bottom: 0;">
+            <input type="checkbox" id="cfg-accept-page-filter" checked style="accent-color: #00f2fe;">
+            <span>页面筛选放行模式 (严防只滚动不投递)</span>
+          </label>
+          <div style="font-size: 10px; color: #64748b; margin-top: 2px;">当页面上有学历/经验筛选时自动放行，保障持续高效投递。</div>
         </div>
 
         <div class="form-group">

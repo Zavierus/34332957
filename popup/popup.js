@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const heroOpenBtn = document.getElementById('btn-hero-dashboard');
   const heroRetroBtn = document.getElementById('btn-hero-retro');
   const heroResumeDepotBtn = document.getElementById('btn-hero-resume-depot');
+  const heroKeyCompaniesBtn = document.getElementById('btn-hero-key-companies');
 
   if (topOpenBtn) topOpenBtn.addEventListener('click', openDashboard);
   if (heroOpenBtn) heroOpenBtn.addEventListener('click', openDashboard);
@@ -37,6 +38,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (heroResumeDepotBtn) {
     heroResumeDepotBtn.addEventListener('click', () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-resume-depot') });
+    });
+  }
+  if (heroKeyCompaniesBtn) {
+    heroKeyCompaniesBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html?tab=view-key-companies') });
     });
   }
 
@@ -55,7 +61,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const dailyLimitEl = document.getElementById('stat-daily-limit');
   const activeTagsEl = document.getElementById('stat-active-tags');
 
+  const popSlotMorning = document.getElementById('pop-slot-morning');
+  const popSlotAfternoon = document.getElementById('pop-slot-afternoon');
+  const popSlotEvening = document.getElementById('pop-slot-evening');
+
   const inputDailyLimit = document.getElementById('cfg-daily-limit');
+  const inputSlotMorning = document.getElementById('cfg-slot-morning');
+  const inputSlotAfternoon = document.getElementById('cfg-slot-afternoon');
+  const inputSlotEvening = document.getElementById('cfg-slot-evening');
+  const cfgSlotSum = document.getElementById('cfg-slot-sum');
+  const inputAcceptPageFilter = document.getElementById('cfg-accept-page-filter');
+
   const inputMinDelay = document.getElementById('cfg-min-delay');
   const inputMaxDelay = document.getElementById('cfg-max-delay');
   const inputMinSalary = document.getElementById('cfg-min-salary');
@@ -76,6 +92,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${year}-${month}-${day}`;
   }
 
+  function updateSlotSumDisplay() {
+    const m = parseInt(inputSlotMorning?.value || 20, 10) || 0;
+    const a = parseInt(inputSlotAfternoon?.value || 30, 10) || 0;
+    const e = parseInt(inputSlotEvening?.value || 20, 10) || 0;
+    const sum = m + a + e;
+    if (cfgSlotSum) cfgSlotSum.textContent = sum;
+  }
+
+  [inputSlotMorning, inputSlotAfternoon, inputSlotEvening].forEach(inp => {
+    if (inp) inp.addEventListener('input', updateSlotSumDisplay);
+  });
+
   chrome.storage.local.get(['config', 'jobTags', 'applyLog'], (res) => {
     const config = res.config || {};
     const tags = res.jobTags || [];
@@ -89,10 +117,18 @@ document.addEventListener('DOMContentLoaded', () => {
       config.lastActiveDate = today;
       config.todayCount = 0;
       config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
       chrome.storage.local.set({ config });
     }
-    const currentLimit = config.dailyLimit || 30;
+    const currentLimit = config.dailyLimit || 70;
     dailyLimitEl.textContent = currentLimit;
+
+    // 分时段统计展示
+    const slotLimits = config.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
+    const slotCounts = config.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
+    if (popSlotMorning) popSlotMorning.textContent = `${slotCounts.morning || 0}/${slotLimits.morning || 20}`;
+    if (popSlotAfternoon) popSlotAfternoon.textContent = `${slotCounts.afternoon || 0}/${slotLimits.afternoon || 30}`;
+    if (popSlotEvening) popSlotEvening.textContent = `${slotCounts.evening || 0}/${slotLimits.evening || 20}`;
 
     // 动态同步全网巡航下拉选项与安全上限联动
     const optFollow = document.querySelector('#pipe-target-select option[value="follow_limit"]');
@@ -108,6 +144,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (inputStrictCity) inputStrictCity.checked = config.strictCityFilter !== false;
     if (inputCampusProtection) inputCampusProtection.checked = config.enableCampus2024Protection !== false;
     if (config.dailyLimit !== undefined) inputDailyLimit.value = config.dailyLimit;
+    if (inputSlotMorning) inputSlotMorning.value = slotLimits.morning || 20;
+    if (inputSlotAfternoon) inputSlotAfternoon.value = slotLimits.afternoon || 30;
+    if (inputSlotEvening) inputSlotEvening.value = slotLimits.evening || 20;
+    if (inputAcceptPageFilter) inputAcceptPageFilter.checked = config.acceptAllInPageFilter !== false;
+    updateSlotSumDisplay();
+
     if (config.minDelaySec !== undefined) inputMinDelay.value = config.minDelaySec;
     if (config.maxDelaySec !== undefined) inputMaxDelay.value = config.maxDelaySec;
     if (config.minSalaryK !== undefined) inputMinSalary.value = config.minSalaryK;
@@ -148,12 +190,22 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('settings-form').addEventListener('submit', (e) => {
     e.preventDefault();
 
+    const m = parseInt(inputSlotMorning ? inputSlotMorning.value : 20, 10) || 20;
+    const a = parseInt(inputSlotAfternoon ? inputSlotAfternoon.value : 30, 10) || 30;
+    const ev = parseInt(inputSlotEvening ? inputSlotEvening.value : 20, 10) || 20;
+
     const newConfig = {
       targetCity: (inputTargetCity ? inputTargetCity.value.trim() : '') || '深圳',
       strictCityFilter: inputStrictCity ? inputStrictCity.checked : true,
       gradYear: '2024',
       enableCampus2024Protection: inputCampusProtection ? inputCampusProtection.checked : true,
-      dailyLimit: parseInt(inputDailyLimit.value, 10) || 30,
+      dailyLimit: parseInt(inputDailyLimit.value, 10) || (m + a + ev) || 70,
+      timeSlotLimits: {
+        morning: m,
+        afternoon: a,
+        evening: ev
+      },
+      acceptAllInPageFilter: inputAcceptPageFilter ? inputAcceptPageFilter.checked : true,
       minDelaySec: parseInt(inputMinDelay.value, 10) || 9,
       maxDelaySec: parseInt(inputMaxDelay.value, 10) || 15,
       minSalaryK: parseInt(inputMinSalary.value, 10) || 9,
@@ -174,6 +226,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 1500);
 
         dailyLimitEl.textContent = merged.dailyLimit;
+        const slotCounts = merged.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
+        if (popSlotMorning) popSlotMorning.textContent = `${slotCounts.morning || 0}/${m}`;
+        if (popSlotAfternoon) popSlotAfternoon.textContent = `${slotCounts.afternoon || 0}/${a}`;
+        if (popSlotEvening) popSlotEvening.textContent = `${slotCounts.evening || 0}/${ev}`;
+
         const optFollowUpdate = document.querySelector('#pipe-target-select option[value="follow_limit"]');
         if (optFollowUpdate) {
           optFollowUpdate.textContent = `🔄 跟随设定上限 (${merged.dailyLimit}个/站)`;

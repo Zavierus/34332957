@@ -31,7 +31,10 @@
 
   let activeTags = []; // 当前在后台勾选高亮生效的职业词条
   let config = {
-    dailyLimit: 30,
+    dailyLimit: 70,
+    timeSlotLimits: { morning: 20, afternoon: 30, evening: 20 },
+    timeSlotCounts: { morning: 0, afternoon: 0, evening: 0 },
+    acceptAllInPageFilter: true,
     minDelaySec: 9,
     maxDelaySec: 15,
     minSalaryK: 9,
@@ -54,6 +57,107 @@
     return `${year}-${month}-${day}`;
   }
 
+  // ================= 分时段定义 (上午 06:00-12:00 | 下午 12:00-18:00 | 晚上 18:00-24:00/06:00) =================
+  function getCurrentTimeSlot(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const hour = d.getHours();
+    if (hour >= 6 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 18) return 'afternoon';
+    return 'evening';
+  }
+
+  function getTimeSlotDisplayName(slot) {
+    if (slot === 'morning') return '🌅 上午 (06:00-12:00)';
+    if (slot === 'afternoon') return '☀️ 下午 (12:00-18:00)';
+    return '🌙 晚上 (18:00-24:00)';
+  }
+
+  // ================= BOSS 直聘顶部筛选自动化感知引擎 =================
+  function getBossCurrentFilters() {
+    let exp = '';
+    let edu = '';
+    let salary = '';
+    let jobType = '';
+    let city = '';
+    let activeTab = '';
+    let filterDetails = [];
+
+    // 1. 扫描页面顶部筛选项按钮文字 (如 "工作经验 (1)", "学历要求 (1)")
+    const filterElements = document.querySelectorAll(
+      '.filter-select-box, .condition-filter-select, .current-select, [class*="filter-select"], [class*="condition-filter"], .search-condition-wrapper div, .search-condition-wrapper span, .condition-box div, .condition-box span, .filter-item, .dropdown-select'
+    );
+    for (const el of filterElements) {
+      const txt = (el.textContent || '').trim();
+      if (!txt) continue;
+      if (/工作经验\s*\(\d+\)/.test(txt)) {
+        exp = txt;
+        filterDetails.push(txt);
+      }
+      if (/学历要求\s*\(\d+\)/.test(txt)) {
+        edu = txt;
+        filterDetails.push(txt);
+      }
+      if (/薪资待遇\s*\(\d+\)/.test(txt)) {
+        salary = txt;
+        filterDetails.push(txt);
+      }
+      if (/求职类型\s*\(\d+\)/.test(txt)) {
+        jobType = txt;
+        filterDetails.push(txt);
+      }
+      if (txt.includes('深圳') && (el.classList.contains('city-label') || el.classList.contains('active') || el.classList.contains('selected') || txt === '深圳')) {
+        city = '深圳';
+      }
+    }
+
+    // 2. 检查 URL 参数
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (!exp && params.get('experience')) {
+        exp = `工作经验(代码${params.get('experience')})`;
+        filterDetails.push(exp);
+      }
+      if (!edu && params.get('degree')) {
+        edu = `学历要求(代码${params.get('degree')})`;
+        filterDetails.push(edu);
+      }
+      if (!salary && params.get('salary')) {
+        salary = `薪资(代码${params.get('salary')})`;
+        filterDetails.push(salary);
+      }
+      if (!jobType && params.get('jobType')) {
+        jobType = `求职类型(代码${params.get('jobType')})`;
+        filterDetails.push(jobType);
+      }
+      if (!city && (params.get('city') === '101280600' || window.location.href.includes('101280600'))) {
+        city = '深圳';
+      }
+    } catch (e) {}
+
+    // 3. 检查顶部活跃的子标签 (如 "兼职", "游戏运营(深圳)", "内容运营(深圳)")
+    const activeTabEl = document.querySelector('.recommend-job-nav .active, .job-tab-box .active, .sub-nav .active, .tab-item.active, [class*="tab"][class*="active"]');
+    if (activeTabEl) {
+      activeTab = activeTabEl.textContent.trim();
+      if (activeTab && activeTab !== '推荐') {
+        filterDetails.push(`分类:${activeTab}`);
+      }
+    }
+
+    const hasFilters = filterDetails.length > 0 || !!(exp || edu || salary || jobType);
+    const summary = filterDetails.join(' · ') || (hasFilters ? '已开启页面精选筛选' : '未选(全量推荐)');
+
+    return {
+      hasFilters,
+      exp,
+      edu,
+      salary,
+      jobType,
+      city,
+      activeTab,
+      summary
+    };
+  }
+
   function refreshConfig(callback) {
     if (!chrome.storage || !chrome.storage.local) {
       if (callback) callback();
@@ -63,6 +167,16 @@
       const today = getLocalDateStr();
       if (res && res.config) {
         config = { ...config, ...res.config };
+        if (!config.timeSlotLimits) {
+          config.timeSlotLimits = { morning: 20, afternoon: 30, evening: 20 };
+        }
+        if (!config.timeSlotCounts) {
+          config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
+        }
+        if (config.acceptAllInPageFilter === undefined) {
+          config.acceptAllInPageFilter = true;
+        }
+
         if (config.lastActiveDate === today) {
           const counts = config.siteTodayCounts || {};
           todayCount = counts.boss !== undefined ? counts.boss : (config.todayCount || 0);
@@ -73,6 +187,7 @@
           config.lastActiveDate = today;
           config.todayCount = 0;
           config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+          config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
           chrome.storage.local.set({
             config: { ...config }
           });
@@ -143,6 +258,11 @@
       const detectedOther = OTHER_CITIES.find(c => jobArea.includes(c));
       if (detectedOther) {
         return { pass: false, reason: `[异地跳过] 岗位地点为「${jobArea}」，明确归属异地城市(${detectedOther})，非${targetCity}` };
+      }
+      // 若页面当前已经锁定了目标城市（例如在深圳站 101280600 / 页面已选深圳），且未命中异地城市，放行商圈与地铁站地点
+      const pageFilters = getBossCurrentFilters();
+      if (pageFilters.city.includes(targetCity) || window.location.href.includes('101280600')) {
+        return { pass: true, jobArea: `${targetCity}·${jobArea}` };
       }
       // 若未标明目标城市，且非远程/全国，视为异地跳过
       if (!jobArea.includes('远程') && !jobArea.includes('全国')) {
@@ -251,6 +371,7 @@
 
     // 2. 检查是否命中用户高亮选中的职业词条
     let matchedTag = null;
+    let matchType = '词条高亮精准命中';
     for (const tag of activeTags) {
       if (title.toLowerCase().includes(tag.toLowerCase())) {
         matchedTag = tag;
@@ -260,6 +381,25 @@
     // 若常规词条未直接完全匹配，但该岗位属于 2024届校招/应届宝藏，赋予专属标签放行
     if (!matchedTag && campusCheck.isCampus2024) {
       matchedTag = campusCheck.tag;
+      matchType = '🎓24届校招宝藏专场命中';
+    }
+
+    // 2.1 页面精选筛选自适应放行模式 (解决用户在页面勾选工作经验/学历等条件后只滚动不投递的问题)
+    const curFilters = getBossCurrentFilters();
+    if (!matchedTag && config.acceptAllInPageFilter !== false) {
+      if (curFilters.hasFilters) {
+        // 用户已在页面设置了筛选条件（如工作经验/学历/兼职），说明列表展示的正是用户所需的目标岗位
+        const broadKeywords = [
+          '运营', '专员', '助理', '电商', '视觉', '设计', '摄影', '策划', '新媒体',
+          '短视频', '商务', '媒介', '渠道', '投放', '店长', '执行', '游戏', '兼职',
+          '内容', '推广', '自媒体', '剪辑', '文案', '管培生', '实习', '应届'
+        ];
+        const rawLower = (title + ' ' + tags + ' ' + rawCardText).toLowerCase();
+        if (broadKeywords.some(k => rawLower.includes(k)) || curFilters.activeTab) {
+          matchedTag = activeTags[0] || (curFilters.activeTab ? curFilters.activeTab.replace(/[\(（].*?[\)）]/g, '') : '综合运营');
+          matchType = `页面筛选放行 (${curFilters.summary})`;
+        }
+      }
     }
 
     if (!matchedTag) {
@@ -284,25 +424,29 @@
       }
     }
 
-    // 4. 经验要求拦截 (校招应届岗位自动豁免)
-    if (!campusCheck.isCampus2024 && /5-10年|10年以上|8-10年|8年以上/i.test(tags)) {
+    // 4. 经验要求拦截 (若用户在页面顶栏已选择「工作经验」，说明页面已由平台过滤，豁免本地正则拦截)
+    const isExpPageFiltered = !!(curFilters.exp);
+    if (!campusCheck.isCampus2024 && !isExpPageFiltered && /5-10年|10年以上|8-10年|8年以上/i.test(tags)) {
       return { pass: false, reason: `[经验过高跳过] ${tags}` };
     }
 
-    // 5. 薪资门槛过滤 (若是2024届大厂校招或面议，给予保护)
-    const match = salary.match(/(\d+)(?:-(\d+))?K/i);
-    if (match) {
-      const maxK = match[2] ? parseInt(match[2], 10) : parseInt(match[1], 10);
-      if (maxK < config.minSalaryK) {
-        if (!campusCheck.isCampus2024) {
-          return { pass: false, reason: `[低薪跳过] ${salary} 未达 ${config.minSalaryK}K` };
+    // 5. 薪资门槛过滤 (若是2024届大厂校招、兼职/实习/日薪、或页面已设定经验/学历筛选，给予自适应保护)
+    const isPartTimeOrDaily = salary.includes('天') || salary.includes('时') || (curFilters.activeTab && curFilters.activeTab.includes('兼职'));
+    if (!isPartTimeOrDaily) {
+      const match = salary.match(/(\d+)(?:-(\d+))?K/i);
+      if (match) {
+        const maxK = match[2] ? parseInt(match[2], 10) : parseInt(match[1], 10);
+        if (maxK < config.minSalaryK) {
+          if (!campusCheck.isCampus2024 && !curFilters.hasFilters) {
+            return { pass: false, reason: `[低薪跳过] ${salary} 未达 ${config.minSalaryK}K` };
+          }
         }
       }
     }
 
     return {
       pass: true,
-      data: { title, salary, company, tags, matchedTag, isCampus2024: campusCheck.isCampus2024, jobArea: locResult.jobArea }
+      data: { title, salary, company, tags, matchedTag, matchType, isCampus2024: campusCheck.isCampus2024, jobArea: locResult.jobArea }
     };
   }
 
@@ -929,6 +1073,33 @@
             </div>
           </div>
 
+          <!-- 分时段额度指示器 (上午 06:00-12:00 | 下午 12:00-18:00 | 晚上 18:00-24:00) -->
+          <div class="time-slot-grid" id="hud-time-slot-grid" style="display: flex; gap: 4px; margin-bottom: 6px;">
+            <div class="slot-pill" id="slot-pill-morning" style="flex: 1; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 4px 2px; text-align: center; font-size: 10px;">
+              <div style="color: #94a3b8; font-size: 9.5px;">🌅 上午</div>
+              <div style="font-weight: 700; color: #38bdf8;" id="val-slot-morning">0/20</div>
+            </div>
+            <div class="slot-pill" id="slot-pill-afternoon" style="flex: 1; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 4px 2px; text-align: center; font-size: 10px;">
+              <div style="color: #94a3b8; font-size: 9.5px;">☀️ 下午</div>
+              <div style="font-weight: 700; color: #38bdf8;" id="val-slot-afternoon">0/30</div>
+            </div>
+            <div class="slot-pill" id="slot-pill-evening" style="flex: 1; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 4px 2px; text-align: center; font-size: 10px;">
+              <div style="color: #94a3b8; font-size: 9.5px;">🌙 晚上</div>
+              <div style="font-weight: 700; color: #38bdf8;" id="val-slot-evening">0/20</div>
+            </div>
+          </div>
+
+          <!-- 重点跟进企业榜单条目 -->
+          <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; font-size: 10px;">
+            <span style="color: #fbbf24; font-weight: 600;">⭐ 重点跟进: <b id="hud-key-companies-count">0</b> 家高频交流企业</span>
+            <span class="tag-link" id="btn-hud-open-key-companies" style="color: #f59e0b; cursor: pointer; text-decoration: underline;">查看榜单 ↗</span>
+          </div>
+
+          <!-- 页面筛选自适应放行指示器 -->
+          <div id="hud-page-filter-status" style="display: none; background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 4px 8px; margin-bottom: 6px; font-size: 10px; color: #34d399;">
+            <span>🎯 页面筛选已激活：<b id="hud-page-filter-summary">已开启</b> (自适应放行)</span>
+          </div>
+
           <div class="tag-indicator">
             <span>🎯 当前生效词条: <b id="active-tag-count" style="color:#00f2fe;">8</b> 个</span>
             <span class="tag-link" id="btn-open-dashboard">打开完整后台管理 ↗</span>
@@ -1059,6 +1230,14 @@
       chrome.runtime.sendMessage({
         type: 'OPEN_PAGE',
         url: chrome.runtime.getURL('dashboard/dashboard.html')
+      });
+    });
+
+    // 打开重点跟进企业榜单
+    shadowRoot.getElementById('btn-hud-open-key-companies')?.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'OPEN_PAGE',
+        url: chrome.runtime.getURL('dashboard/dashboard.html#key-companies')
       });
     });
 
@@ -1290,6 +1469,47 @@
 
     const cityEl = shadowRoot.getElementById('hud-city-name');
     if (cityEl) cityEl.textContent = config.targetCity || '深圳';
+
+    // 分时段额度指示器实时更新与当前活跃时段高亮
+    const slotCounts = config.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
+    const slotLimits = config.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
+    const curSlot = getCurrentTimeSlot();
+
+    const mVal = shadowRoot.getElementById('val-slot-morning');
+    const aVal = shadowRoot.getElementById('val-slot-afternoon');
+    const eVal = shadowRoot.getElementById('val-slot-evening');
+    if (mVal) mVal.textContent = `${slotCounts.morning || 0}/${slotLimits.morning || 20}`;
+    if (aVal) aVal.textContent = `${slotCounts.afternoon || 0}/${slotLimits.afternoon || 30}`;
+    if (eVal) eVal.textContent = `${slotCounts.evening || 0}/${slotLimits.evening || 20}`;
+
+    const pillM = shadowRoot.getElementById('slot-pill-morning');
+    const pillA = shadowRoot.getElementById('slot-pill-afternoon');
+    const pillE = shadowRoot.getElementById('slot-pill-evening');
+    if (pillM) pillM.style.borderColor = curSlot === 'morning' ? '#00f2fe' : 'rgba(255,255,255,0.12)';
+    if (pillA) pillA.style.borderColor = curSlot === 'afternoon' ? '#00f2fe' : 'rgba(255,255,255,0.12)';
+    if (pillE) pillE.style.borderColor = curSlot === 'evening' ? '#00f2fe' : 'rgba(255,255,255,0.12)';
+
+    // 页面筛选状态感知与自适应放行条
+    const pageFilterStatusEl = shadowRoot.getElementById('hud-page-filter-status');
+    const pageFilterSummaryEl = shadowRoot.getElementById('hud-page-filter-summary');
+    const curFilters = getBossCurrentFilters();
+    if (pageFilterStatusEl && pageFilterSummaryEl) {
+      if (curFilters.hasFilters) {
+        pageFilterStatusEl.style.display = 'block';
+        pageFilterSummaryEl.textContent = curFilters.summary;
+      } else {
+        pageFilterStatusEl.style.display = 'none';
+      }
+    }
+
+    // 重点跟进企业数异步读取
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['keyCompanies'], (kRes) => {
+        const kList = Array.isArray(kRes.keyCompanies) ? kRes.keyCompanies : [];
+        const kcEl = shadowRoot.getElementById('hud-key-companies-count');
+        if (kcEl) kcEl.textContent = kList.length;
+      });
+    }
   }
 
   // ================= HR 回复与私信多维强提醒引擎 (严格未读、防误报、防循环、精准系统消息过滤) =================
@@ -1380,6 +1600,52 @@
     return true;
   }
 
+  // 自动扫描 BOSS 聊天左侧联系人列表，提取与 HR 交流较多的重点企业
+  function scanAndSyncBossKeyCompanies() {
+    if (!window.location.pathname.startsWith('/web/geek/chat')) return;
+    const chatItems = document.querySelectorAll(
+      '.user-list li, .chat-user-list li, [class*="conversation-item"], [class*="chat-user-item"]'
+    );
+    if (!chatItems || chatItems.length === 0) return;
+
+    chatItems.forEach((item, index) => {
+      if (index > 30) return; // 扫描最近 30 个活跃会话
+      try {
+        const textAll = item.textContent || '';
+        const nameEl = item.querySelector('.name-wrap, .name-box, [class*="name-text"], .title-text, .user-name');
+        const hrName = nameEl ? nameEl.textContent.trim() : '';
+
+        const compEl = item.querySelector('.company-name, [class*="company"], .source-name');
+        let company = compEl ? compEl.textContent.trim() : '';
+
+        const jobEl = item.querySelector('.job-name, [class*="job-name"], .position-name');
+        const jobTitle = jobEl ? jobEl.textContent.trim() : '运营';
+
+        const lastMsgEl = item.querySelector('.last-msg, [class*="last-msg"], [class*="msg-preview"], p');
+        const lastMsg = lastMsgEl ? lastMsgEl.textContent.trim() : '';
+
+        if (!company) {
+          const mComp = textAll.match(/(?:·|\s)([^\s·•|]{2,18}(?:科技|网络|文化|传媒|游戏|互动|电商|信息|实业|商贸|咨询|贸易|集团|公司))/);
+          if (mComp) company = mComp[1];
+        }
+
+        if (company && company.length >= 2 && !company.includes('系统') && !company.includes('助手')) {
+          chrome.runtime.sendMessage({
+            type: 'UPDATE_KEY_COMPANY',
+            data: {
+              company,
+              jobTitle,
+              hrName: hrName || '招聘顾问',
+              lastMessage: lastMsg || '沟通交流中',
+              platform: 'BOSS直聘',
+              chatUrl: window.location.href
+            }
+          });
+        }
+      } catch (e) {}
+    });
+  }
+
   function startHRReplyWatcher() {
     // 岗位详情页 (/job_detail/) 与非主要页面不启动 HR 监听，防止批量打开职位标签页时产生并发提醒
     if (window.location.pathname.includes('/job_detail/') || window.location.pathname.includes('/user/')) {
@@ -1416,6 +1682,12 @@
     setInterval(() => {
       checkAllHRMessageSources();
     }, 4500);
+
+    // 4. 在聊天界面自动解析并同步高频交流重点企业
+    if (window.location.pathname.startsWith('/web/geek/chat')) {
+      setTimeout(() => { scanAndSyncBossKeyCompanies(); }, 2500);
+      setInterval(() => { scanAndSyncBossKeyCompanies(); }, 15000);
+    }
   }
 
   function getHRAlertCooldownMs() {
@@ -1918,6 +2190,15 @@
         continue;
       }
 
+      const currentSlot = getCurrentTimeSlot();
+      const currentSlotLimit = (config.timeSlotLimits && config.timeSlotLimits[currentSlot]) || 20;
+      const currentSlotCount = (config.timeSlotCounts && config.timeSlotCounts[currentSlot]) || 0;
+
+      if (currentSlotCount >= currentSlotLimit) {
+        logHUD(`<span class="highlight">[时段额度达标]</span> ${getTimeSlotDisplayName(currentSlot)} 额度已完成 (${currentSlotCount}/${currentSlotLimit})！今日全天已投 ${todayCount}/${config.dailyLimit}。为防风控已暂停本时段。`);
+        break;
+      }
+
       if (todayCount >= config.dailyLimit) {
         logHUD(`<span class="highlight">[上限熔断]</span> 今日已达安全上限 ${config.dailyLimit} 个！建议切换至其他平台。`);
         break;
@@ -1964,6 +2245,13 @@
       for (let i = 0; i < jobCards.length; i++) {
         if (!isRunning) break;
         while (isPaused) await sleep(1000);
+        const loopSlot = getCurrentTimeSlot();
+        const loopSlotLimit = (config.timeSlotLimits && config.timeSlotLimits[loopSlot]) || 20;
+        const loopSlotCount = (config.timeSlotCounts && config.timeSlotCounts[loopSlot]) || 0;
+        if (loopSlotCount >= loopSlotLimit) {
+          logHUD(`<span class="highlight">[时段额度达标]</span> ${getTimeSlotDisplayName(loopSlot)} 额度已完成 (${loopSlotCount}/${loopSlotLimit})，暂停投递。`);
+          break;
+        }
         if (todayCount >= config.dailyLimit) break;
         if (pipelineMode && sessionCount >= pipelineTarget) break;
 
@@ -2078,16 +2366,27 @@
         if (chatResult.success) {
           todayCount++;
           sessionCount++;
+          const currentSlot = getCurrentTimeSlot();
+          if (!config.timeSlotCounts) {
+            config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
+          }
+          config.timeSlotCounts[currentSlot] = (config.timeSlotCounts[currentSlot] || 0) + 1;
           updateHUD();
 
-          // 独立持久化 BOSS 今日投递数据
+          // 独立持久化 BOSS 今日投递数据与分时段数据
           if (chrome.storage && chrome.storage.local) {
             const today = getLocalDateStr();
             const siteCounts = config.siteTodayCounts || { boss: 0, liepin: 0, lagou: 0, ats: 0 };
             siteCounts.boss = todayCount;
             const totalCount = Object.values(siteCounts).reduce((a, b) => a + (Number(b) || 0), 0);
             chrome.storage.local.set({
-              config: { ...config, todayCount: totalCount, siteTodayCounts: siteCounts, lastActiveDate: today }
+              config: { 
+                ...config, 
+                todayCount: totalCount, 
+                siteTodayCounts: siteCounts, 
+                timeSlotCounts: config.timeSlotCounts,
+                lastActiveDate: today 
+              }
             });
           }
 

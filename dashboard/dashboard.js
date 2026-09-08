@@ -17,10 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot 或 #daily-digest)
+  // 检查 URL 是否指定直接打开某个视图 (例如 ?tab=view-resume-depot 或 #view-resume-depot 或 #daily-digest 或 #key-companies)
   const urlParams = new URLSearchParams(window.location.search);
   let targetViewName = urlParams.get('tab') || window.location.hash.replace('#', '');
   if (targetViewName === 'daily-digest') targetViewName = 'view-daily-digest';
+  if (targetViewName === 'key-companies') targetViewName = 'view-key-companies';
   if (targetViewName) {
     const targetNavItem = document.querySelector(`.nav-item[data-view="${targetViewName}"]`);
     if (targetNavItem) {
@@ -31,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('hashchange', () => {
     let hash = window.location.hash.replace('#', '');
     if (hash === 'daily-digest') hash = 'view-daily-digest';
+    if (hash === 'key-companies') hash = 'view-key-companies';
     const item = document.querySelector(`.nav-item[data-view="${hash}"]`);
     if (item) item.click();
   });
@@ -39,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentTags = [];
   let currentLogs = [];
   let currentConfig = {};
+  let currentKeyCompanies = [];
 
   // ================= 本地日历日期工具函数 (适配时区，杜绝 UTC 早晨滞后) =================
   function getLocalDateStr(date = new Date()) {
@@ -51,13 +54,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 3. 数据初始化
   function loadAllData() {
-    chrome.storage.local.get(['jobTags', 'applyLog', 'config'], (res) => {
+    chrome.storage.local.get(['jobTags', 'applyLog', 'config', 'keyCompanies'], (res) => {
       currentTags = res.jobTags || [];
       currentLogs = res.applyLog || [];
       currentConfig = res.config || {};
+      currentKeyCompanies = Array.isArray(res.keyCompanies) ? res.keyCompanies : [];
 
       renderTagsLibrary();
       renderLogTable();
+      renderKeyCompanies();
       populateSettings();
       updateBadges();
     });
@@ -67,6 +72,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeCount = currentTags.filter(t => t.active).length;
     document.getElementById('sidebar-tag-count').textContent = activeCount;
     document.getElementById('sidebar-log-count').textContent = currentLogs.length;
+    const kcCountEl = document.getElementById('sidebar-kc-count');
+    if (kcCountEl) kcCountEl.textContent = currentKeyCompanies.length;
 
     const dashPipeTagsEl = document.getElementById('dash-pipe-active-tags-num');
     if (dashPipeTagsEl) dashPipeTagsEl.textContent = activeCount;
@@ -305,6 +312,204 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ================= 重点跟进企业与 HR 高频互动中心 =================
+  const kcTableBody = document.getElementById('key-companies-table-body');
+  const kcSearchInput = document.getElementById('kc-search-input');
+  const kcSortSelect = document.getElementById('kc-sort-select');
+
+  function renderKeyCompanies() {
+    if (!kcTableBody) return;
+    const query = (kcSearchInput ? kcSearchInput.value : '').trim().toLowerCase();
+    const sortMode = kcSortSelect ? kcSortSelect.value : 'replies_desc';
+
+    let list = [...currentKeyCompanies];
+
+    // 搜索过滤
+    if (query) {
+      list = list.filter(item => {
+        return (item.company || '').toLowerCase().includes(query) ||
+               (item.jobTitle || '').toLowerCase().includes(query) ||
+               (item.hrName || '').toLowerCase().includes(query) ||
+               (item.lastMessage || '').toLowerCase().includes(query);
+      });
+    }
+
+    // 排序
+    if (sortMode === 'pinned_first') {
+      list = list.filter(item => item.isPinned);
+    } else if (sortMode === 'time_desc') {
+      list.sort((a, b) => (b.lastTime || '').localeCompare(a.lastTime || ''));
+    } else {
+      // 默认 replies_desc: 优先按置顶，其次按互动频次降序
+      list.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return (b.replyCount || 0) - (a.replyCount || 0);
+      });
+    }
+
+    // 更新统计指示牌
+    const totalCount = currentKeyCompanies.length;
+    const deepCount = currentKeyCompanies.filter(c => (c.replyCount || 0) >= 3).length;
+    const pinnedCount = currentKeyCompanies.filter(c => c.isPinned).length;
+
+    if (document.getElementById('stat-kc-total')) document.getElementById('stat-kc-total').textContent = totalCount;
+    if (document.getElementById('stat-kc-deep')) document.getElementById('stat-kc-deep').textContent = deepCount;
+    if (document.getElementById('stat-kc-pinned')) document.getElementById('stat-kc-pinned').textContent = pinnedCount;
+    if (document.getElementById('sidebar-kc-count')) document.getElementById('sidebar-kc-count').textContent = totalCount;
+
+    if (list.length === 0) {
+      kcTableBody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align: center; color: #64748b; padding: 48px 16px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">🏢</div>
+            <div style="font-size: 13px; font-weight: 600; color: #cbd5e1;">暂无重点跟进企业记录</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">在巡航过程中与 HR 互动交流或收到私信回复时，系统将自动汇总在此！</div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    kcTableBody.innerHTML = '';
+    list.forEach(item => {
+      const tr = document.createElement('tr');
+      if (item.isPinned) tr.style.background = 'rgba(245, 158, 11, 0.05)';
+
+      const replies = item.replyCount || 1;
+      let replyBadge = `<span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">${replies} 次</span>`;
+      if (replies >= 5) {
+        replyBadge = `<span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%); color: #fff; box-shadow: 0 0 10px rgba(245,158,11,0.4);">🔥 ${replies} 次深度</span>`;
+      } else if (replies >= 3) {
+        replyBadge = `<span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">⚡ ${replies} 次互动</span>`;
+      }
+
+      const pinIcon = item.isPinned ? '⭐' : '☆';
+      const pinTitle = item.isPinned ? '取消置顶' : '置顶关注';
+      const chatTargetUrl = item.chatUrl || 'https://www.zhipin.com/web/geek/chat';
+
+      tr.innerHTML = `
+        <td style="text-align: center;">
+          <button class="btn-pin-kc" data-id="${item.id}" data-company="${escapeHtml(item.company)}" title="${pinTitle}" style="background:none; border:none; cursor:pointer; font-size:16px; color:${item.isPinned ? '#fbbf24' : '#64748b'};">
+            ${pinIcon}
+          </button>
+        </td>
+        <td>
+          <div style="font-weight: 700; color: #fff;">${escapeHtml(item.company)}</div>
+          <div style="font-size: 10px; color: #64748b;">${escapeHtml(item.platform || 'BOSS直聘')}</div>
+        </td>
+        <td><span style="color: #38bdf8; font-weight: 600;">${escapeHtml(item.jobTitle || '运营')}</span></td>
+        <td><span style="color: #cbd5e1;">${escapeHtml(item.hrName || '招聘顾问')}</span></td>
+        <td style="text-align: center;">${replyBadge}</td>
+        <td>
+          <div style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e2e8f0; font-size: 11px;" title="${escapeHtml(item.lastMessage || '')}">
+            ${escapeHtml(item.lastMessage || '已打招呼建联')}
+          </div>
+        </td>
+        <td><span style="font-size: 11px; color: #94a3b8;">${escapeHtml(item.lastTime || '--')}</span></td>
+        <td style="text-align: center;">
+          <div style="display: flex; gap: 6px; justify-content: center;">
+            <button class="btn-open-kc-chat" data-url="${chatTargetUrl}" style="padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: #0b0f19; border: none; cursor: pointer;">
+              💬 直达
+            </button>
+            <button class="btn-delete-kc" data-id="${item.id}" data-company="${escapeHtml(item.company)}" style="padding: 4px 6px; border-radius: 6px; font-size: 11px; background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); cursor: pointer;" title="从重点企业移除">
+              🗑️
+            </button>
+          </div>
+        </td>
+      `;
+      kcTableBody.appendChild(tr);
+    });
+
+    // 绑定直达与置顶、删除事件
+    kcTableBody.querySelectorAll('.btn-open-kc-chat').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const url = btn.getAttribute('data-url');
+        if (url) window.open(url, '_blank');
+      });
+    });
+
+    kcTableBody.querySelectorAll('.btn-pin-kc').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        const company = btn.getAttribute('data-company');
+        chrome.runtime.sendMessage({
+          type: 'TOGGLE_PIN_KEY_COMPANY',
+          id,
+          company
+        }, () => {
+          chrome.storage.local.get(['keyCompanies'], (r) => {
+            currentKeyCompanies = Array.isArray(r.keyCompanies) ? r.keyCompanies : [];
+            renderKeyCompanies();
+          });
+        });
+      });
+    });
+
+    kcTableBody.querySelectorAll('.btn-delete-kc').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        const company = btn.getAttribute('data-company');
+        if (!confirm(`确定将「${company}」从重点跟进企业榜单移除吗？`)) return;
+        chrome.runtime.sendMessage({
+          type: 'DELETE_KEY_COMPANY',
+          id,
+          company
+        }, () => {
+          chrome.storage.local.get(['keyCompanies'], (r) => {
+            currentKeyCompanies = Array.isArray(r.keyCompanies) ? r.keyCompanies : [];
+            renderKeyCompanies();
+          });
+        });
+      });
+    });
+  }
+
+  // 搜索与排序筛选事件
+  if (kcSearchInput) kcSearchInput.addEventListener('input', renderKeyCompanies);
+  if (kcSortSelect) kcSortSelect.addEventListener('change', renderKeyCompanies);
+  const btnRefreshKc = document.getElementById('btn-refresh-key-companies');
+  if (btnRefreshKc) {
+    btnRefreshKc.addEventListener('click', () => {
+      chrome.storage.local.get(['keyCompanies'], (res) => {
+        currentKeyCompanies = Array.isArray(res.keyCompanies) ? res.keyCompanies : [];
+        renderKeyCompanies();
+      });
+    });
+  }
+
+  // 导出重点企业 CSV
+  const btnExportKc = document.getElementById('btn-export-key-companies');
+  if (btnExportKc) {
+    btnExportKc.addEventListener('click', () => {
+      if (currentKeyCompanies.length === 0) {
+        alert('暂无重点企业数据可导出！');
+        return;
+      }
+      let csvContent = '\uFEFF企业名称,平台,沟通岗位,HR姓名,互动频次,最新消息,最近互动时间,直达链接\n';
+      currentKeyCompanies.forEach(item => {
+        const row = [
+          `"${(item.company || '').replace(/"/g, '""')}"`,
+          `"${(item.platform || 'BOSS直聘').replace(/"/g, '""')}"`,
+          `"${(item.jobTitle || '').replace(/"/g, '""')}"`,
+          `"${(item.hrName || '').replace(/"/g, '""')}"`,
+          `"${item.replyCount || 1}"`,
+          `"${(item.lastMessage || '').replace(/"/g, '""')}"`,
+          `"${item.lastTime || ''}"`,
+          `"${item.chatUrl || ''}"`
+        ];
+        csvContent += row.join(',') + '\n';
+      });
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `JobCruise_重点跟进企业榜单_${getLocalDateStr()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
   // ================= 6. 跨网页调度中心 =================
   document.querySelectorAll('.launch-site-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -323,6 +528,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cfg.targetCity !== undefined && document.getElementById('set-target-city')) document.getElementById('set-target-city').value = cfg.targetCity;
     if (cfg.strictCityFilter !== undefined && document.getElementById('set-strict-city')) document.getElementById('set-strict-city').checked = cfg.strictCityFilter;
     if (cfg.enableCampus2024Protection !== undefined && document.getElementById('set-campus-protection')) document.getElementById('set-campus-protection').checked = cfg.enableCampus2024Protection;
+    if (document.getElementById('set-accept-page-filter')) document.getElementById('set-accept-page-filter').checked = cfg.acceptAllInPageFilter !== false;
+
+    // 分时段额度回填与求和计算
+    const slotLimits = cfg.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
+    if (document.getElementById('set-slot-morning')) document.getElementById('set-slot-morning').value = slotLimits.morning || 20;
+    if (document.getElementById('set-slot-afternoon')) document.getElementById('set-slot-afternoon').value = slotLimits.afternoon || 30;
+    if (document.getElementById('set-slot-evening')) document.getElementById('set-slot-evening').value = slotLimits.evening || 20;
+
+    const calcSlotSum = () => {
+      const m = parseInt(document.getElementById('set-slot-morning')?.value, 10) || 0;
+      const a = parseInt(document.getElementById('set-slot-afternoon')?.value, 10) || 0;
+      const e = parseInt(document.getElementById('set-slot-evening')?.value, 10) || 0;
+      const sum = m + a + e;
+      const disp = document.getElementById('display-slot-total');
+      if (disp) disp.textContent = sum;
+      return sum;
+    };
+    calcSlotSum();
+
+    ['set-slot-morning', 'set-slot-afternoon', 'set-slot-evening'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', () => {
+        const sum = calcSlotSum();
+        const limitInput = document.getElementById('set-daily-limit');
+        if (limitInput) limitInput.value = sum;
+      });
+    });
+
     if (cfg.dailyLimit !== undefined) document.getElementById('set-daily-limit').value = cfg.dailyLimit;
     if (cfg.minSalaryK !== undefined) document.getElementById('set-min-salary').value = cfg.minSalaryK;
     if (cfg.minDelaySec !== undefined) document.getElementById('set-min-delay').value = cfg.minDelaySec;
@@ -391,15 +623,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const useCustomVal = document.getElementById('set-use-custom-greeting')?.checked ?? true;
     const targetCityVal = document.getElementById('set-target-city')?.value.trim() || '深圳';
     const strictCityVal = document.getElementById('set-strict-city')?.checked ?? true;
+    const acceptPageFilterVal = document.getElementById('set-accept-page-filter')?.checked ?? true;
     const campusProtectionVal = document.getElementById('set-campus-protection')?.checked ?? true;
+
+    const morningVal = parseInt(document.getElementById('set-slot-morning')?.value, 10) || 20;
+    const afternoonVal = parseInt(document.getElementById('set-slot-afternoon')?.value, 10) || 30;
+    const eveningVal = parseInt(document.getElementById('set-slot-evening')?.value, 10) || 20;
+    const sumDaily = morningVal + afternoonVal + eveningVal;
 
     const newConfig = {
       ...currentConfig,
       targetCity: targetCityVal,
       strictCityFilter: strictCityVal,
+      acceptAllInPageFilter: acceptPageFilterVal,
       enableCampus2024Protection: campusProtectionVal,
       gradYear: '2024',
-      dailyLimit: parseInt(document.getElementById('set-daily-limit').value, 10) || 30,
+      timeSlotLimits: {
+        morning: morningVal,
+        afternoon: afternoonVal,
+        evening: eveningVal
+      },
+      dailyLimit: parseInt(document.getElementById('set-daily-limit').value, 10) || sumDaily,
       minSalaryK: parseInt(document.getElementById('set-min-salary').value, 10) || 9,
       minDelaySec: parseInt(document.getElementById('set-min-delay').value, 10) || 9,
       maxDelaySec: parseInt(document.getElementById('set-max-delay').value, 10) || 15,

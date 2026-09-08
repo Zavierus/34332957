@@ -92,6 +92,21 @@ function getLocalDateStr(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+// ================= 分时段定义 (上午 06:00-12:00 | 下午 12:00-18:00 | 晚上 18:00-24:00/06:00) =================
+function getCurrentTimeSlot(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const hour = d.getHours();
+  if (hour >= 6 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 18) return 'afternoon';
+  return 'evening';
+}
+
+function getTimeSlotDisplayName(slot) {
+  if (slot === 'morning') return '上午时段 (06:00-12:00)';
+  if (slot === 'afternoon') return '下午时段 (12:00-18:00)';
+  return '晚上时段 (18:00-24:00)';
+}
+
 // 广播消息至所有激活标签页 (HUD 与 Dashboard 即时无感同步)
 function broadcastToAllTabs(message) {
   if (!chrome.tabs || !chrome.tabs.query) return;
@@ -110,10 +125,13 @@ function broadcastToAllTabs(message) {
 }
 
 function initOrUpdateStorage() {
-  chrome.storage.local.get(['config', 'jobTags', 'applyLog'], (res) => {
+  chrome.storage.local.get(['config', 'jobTags', 'applyLog', 'keyCompanies'], (res) => {
     const today = getLocalDateStr();
     const initialConfig = {
-      dailyLimit: 30,
+      dailyLimit: 70,
+      timeSlotLimits: { morning: 20, afternoon: 30, evening: 20 },
+      timeSlotCounts: { morning: 0, afternoon: 0, evening: 0 },
+      acceptAllInPageFilter: true,
       minDelaySec: 9,
       maxDelaySec: 15,
       minSalaryK: 9,
@@ -146,11 +164,20 @@ function initOrUpdateStorage() {
       if (mergedConfig.gradYear === undefined) mergedConfig.gradYear = '2024';
       if (mergedConfig.enableCampus2024Protection === undefined) mergedConfig.enableCampus2024Protection = true;
       if (mergedConfig.hrAlertCooldownMinutes === undefined) mergedConfig.hrAlertCooldownMinutes = 5;
+      if (mergedConfig.acceptAllInPageFilter === undefined) mergedConfig.acceptAllInPageFilter = true;
+      if (!mergedConfig.timeSlotLimits) {
+        mergedConfig.timeSlotLimits = { morning: 20, afternoon: 30, evening: 20 };
+      }
+      if (!mergedConfig.timeSlotCounts) {
+        mergedConfig.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
+      }
+
       if (mergedConfig.lastActiveDate !== today) {
         console.log(`[ZIAVER Autopilot] 存储初始化检测到新的一天: 上次活跃「${mergedConfig.lastActiveDate || '无'}」-> 今日「${today}」，执行清零`);
         mergedConfig.lastActiveDate = today;
         mergedConfig.todayCount = 0;
         mergedConfig.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+        mergedConfig.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
       } else if (!mergedConfig.siteTodayCounts) {
         mergedConfig.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
       }
@@ -811,17 +838,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   } else if (request.type === 'APPLY_LOG') {
-    // 写入投递记录表格
-    chrome.storage.local.get(['config', 'applyLog'], (res) => {
+    // 写入投递记录表格与分时段统计
+    chrome.storage.local.get(['config', 'applyLog', 'keyCompanies'], (res) => {
       const config = res.config || {};
       const today = getLocalDateStr();
       if (config.lastActiveDate !== today) {
         config.lastActiveDate = today;
         config.todayCount = 0;
         config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+        config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
       }
       if (!config.siteTodayCounts) {
         config.siteTodayCounts = { boss: 0, liepin: 0, lagou: 0, ats: 0 };
+      }
+      if (!config.timeSlotCounts) {
+        config.timeSlotCounts = { morning: 0, afternoon: 0, evening: 0 };
+      }
+      if (!config.timeSlotLimits) {
+        config.timeSlotLimits = { morning: 20, afternoon: 30, evening: 20 };
       }
 
       // 区分平台进行独立今日计数
@@ -843,16 +877,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // 汇总各站总和为全网总计数
       config.todayCount = Object.values(config.siteTodayCounts).reduce((a, b) => a + (Number(b) || 0), 0);
       
-      const log = res.applyLog || [];
+      // 更新当前时段计数
       const now = new Date();
+      const currentSlot = getCurrentTimeSlot(now);
+      config.timeSlotCounts[currentSlot] = (config.timeSlotCounts[currentSlot] || 0) + 1;
+
+      const log = res.applyLog || [];
       const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
       
+      const compName = request.data && request.data.company ? request.data.company.trim() : '企业';
+      const jobTitle = request.data && request.data.title ? request.data.title.trim() : '运营';
+
       log.unshift({
         id: Date.now(),
         time: timeStr,
         platform: request.data.platform || 'BOSS直聘',
-        company: request.data.company || '企业',
-        title: request.data.title || '运营',
+        company: compName,
+        title: jobTitle,
         salary: request.data.salary || '面议',
         matchedTag: request.data.matchedTag || '综合匹配',
         greeting: request.data.greeting || '',
@@ -862,8 +903,120 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // 保持最近 500 条详尽记录
       if (log.length > 500) log.pop();
 
-      chrome.storage.local.set({ config, applyLog: log }, () => {
-        sendResponse({ success: true, count: config.todayCount, siteCount: config.siteTodayCounts[siteKey], siteKey });
+      // 自动维护重点企业库中的基础初次联系记录
+      let keyCompanies = Array.isArray(res.keyCompanies) ? res.keyCompanies : [];
+      if (compName && compName !== '未知企业' && compName !== '企业') {
+        const existIdx = keyCompanies.findIndex(item => item.company === compName);
+        if (existIdx === -1) {
+          keyCompanies.unshift({
+            id: 'kc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+            company: compName,
+            jobTitle: jobTitle,
+            hrName: '招聘负责人',
+            replyCount: 1,
+            lastMessage: request.data.greeting || '已发送初次打招呼沟通',
+            lastTime: timeStr,
+            chatUrl: request.data.chatUrl || (siteKey === 'liepin' ? 'https://www.liepin.com/im/' : siteKey === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' : 'https://www.zhipin.com/web/geek/chat'),
+            platform: request.data.platform || 'BOSS直聘',
+            isPinned: false,
+            notes: ''
+          });
+          if (keyCompanies.length > 200) keyCompanies.pop();
+        }
+      }
+
+      chrome.storage.local.set({ config, applyLog: log, keyCompanies }, () => {
+        sendResponse({ 
+          success: true, 
+          count: config.todayCount, 
+          siteCount: config.siteTodayCounts[siteKey], 
+          siteKey,
+          timeSlot: currentSlot,
+          timeSlotCount: config.timeSlotCounts[currentSlot],
+          timeSlotLimit: config.timeSlotLimits[currentSlot]
+        });
+      });
+    });
+    return true;
+  } else if (request.type === 'UPDATE_KEY_COMPANY') {
+    // 动态维护与 HR 交流高频的重点公司记录
+    chrome.storage.local.get(['keyCompanies'], (res) => {
+      let list = Array.isArray(res.keyCompanies) ? res.keyCompanies : [];
+      const data = request.data || {};
+      const compName = (data.company || '').trim();
+      if (!compName || compName === '未知企业' || compName === '企业') {
+        sendResponse({ success: false, reason: 'invalid_company_name' });
+        return;
+      }
+      const existingIdx = list.findIndex(item => item.company === compName);
+      const now = new Date();
+      const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      
+      if (existingIdx !== -1) {
+        const item = list[existingIdx];
+        item.replyCount = (item.replyCount || 0) + (data.replyIncrement || 1);
+        if (data.jobTitle) item.jobTitle = data.jobTitle;
+        if (data.hrName) item.hrName = data.hrName;
+        if (data.lastMessage) item.lastMessage = data.lastMessage;
+        if (data.chatUrl) item.chatUrl = data.chatUrl;
+        if (data.platform) item.platform = data.platform;
+        item.lastTime = timeStr;
+      } else {
+        list.push({
+          id: 'kc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          company: compName,
+          jobTitle: data.jobTitle || '运营',
+          hrName: data.hrName || '招聘顾问',
+          replyCount: data.replyIncrement || 1,
+          lastMessage: data.lastMessage || 'HR 发来新沟通信息',
+          lastTime: timeStr,
+          chatUrl: data.chatUrl || 'https://www.zhipin.com/web/geek/chat',
+          platform: data.platform || 'BOSS直聘',
+          isPinned: false,
+          notes: ''
+        });
+      }
+
+      // 按置顶与互动频次排序
+      list.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return (b.replyCount || 0) - (a.replyCount || 0);
+      });
+
+      if (list.length > 200) list = list.slice(0, 200);
+
+      chrome.storage.local.set({ keyCompanies: list }, () => {
+        sendResponse({ success: true, count: list.length });
+      });
+    });
+    return true;
+  } else if (request.type === 'TOGGLE_PIN_KEY_COMPANY') {
+    chrome.storage.local.get(['keyCompanies'], (res) => {
+      let list = Array.isArray(res.keyCompanies) ? res.keyCompanies : [];
+      const id = request.id;
+      const target = list.find(item => item.id === id || item.company === request.company);
+      if (target) {
+        target.isPinned = !target.isPinned;
+        list.sort((a, b) => {
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          return (b.replyCount || 0) - (a.replyCount || 0);
+        });
+        chrome.storage.local.set({ keyCompanies: list }, () => {
+          sendResponse({ success: true, isPinned: target.isPinned });
+        });
+      } else {
+        sendResponse({ success: false, reason: 'not_found' });
+      }
+    });
+    return true;
+  } else if (request.type === 'DELETE_KEY_COMPANY') {
+    chrome.storage.local.get(['keyCompanies'], (res) => {
+      let list = Array.isArray(res.keyCompanies) ? res.keyCompanies : [];
+      list = list.filter(item => item.id !== request.id && item.company !== request.company);
+      chrome.storage.local.set({ keyCompanies: list }, () => {
+        sendResponse({ success: true });
       });
     });
     return true;
