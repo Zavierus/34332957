@@ -1524,24 +1524,75 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 纯文本分段切分器 (自然段落/空行分段，用于手动快速选中复制与算法兜底)
+  // 纯文本自然智能分段切分器 (智能识别大标题、经历行，按模块精准拆分)
   function splitRawParagraphs(rawText) {
     if (!rawText || !rawText.trim()) return [];
-    // 按双换行或明显模块分割
-    const blocks = rawText.split(/\r?\n\s*\r?\n+/).map(b => b.trim()).filter(Boolean);
+    const rawLines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const segments = [];
+    let currentBlock = [];
+    let currentTitle = '';
 
-    blocks.forEach((block, idx) => {
-      const firstLine = block.split(/\r?\n/)[0].replace(/^[\d+•\-\*、. 【】\[\]]+/, '').trim();
-      const title = firstLine.length > 25 ? firstLine.slice(0, 25) + '...' : firstLine || `段落 ${idx + 1}`;
-      segments.push({
-        id: 'seg_' + (idx + 1),
-        index: idx + 1,
-        title: title,
-        charCount: block.length,
-        text: block
-      });
+    const isHeading = (line) => {
+      if (/(?:基本信息|个人信息|联系方式)/i.test(line) && line.length < 25) return '👤 个人基本信息';
+      if (/(?:工作经历|工作经验|职业经历|从业经历|实习经历)/i.test(line) && line.length < 25) return '💼 工作经历概览';
+      if (/(?:项目经历|项目经验|业务项目|核心项目|主要经历)/i.test(line) && line.length < 25) return '🚀 核心项目经历';
+      if (/(?:个人优势|自我评价|个人总结|核心亮点|自评)/i.test(line) && line.length < 25) return '🌟 个人优势与自评';
+      if (/(?:教育背景|教育经历|学历情况)/i.test(line) && line.length < 25) return '🎓 教育背景';
+      if (/(?:专业技能|掌握技能|技能清单|技术栈)/i.test(line) && line.length < 25) return '🛠️ 专业技能清单';
+      if (/(?:兴趣爱好|生活方式|业余爱好)/i.test(line) && line.length < 25) return '🎨 兴趣爱好与生活方式';
+      if (/(?:组织与研究|LEADERSHIP)/i.test(line) && line.length < 25) return '👥 组织与领导力';
+
+      const hasDate = /(?:20\d{2}[.\-\/年—–-]\d{1,2}|至今|现在)/.test(line);
+      const hasCompany = /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|宣传部|融媒体|中心|医院)/i.test(line);
+      const hasProject = /(?:好物节|培训营|POC|PORTFOLIO|大赛|计划|操盘|战役)/i.test(line);
+
+      if (hasDate && (hasCompany || line.includes('·') || line.includes('|'))) {
+        const clean = line.replace(/^(?:ADDITIONAL\s*EXPERIENCE\s*\/)?\s*(?:补充经历|工作经历|实习经历|兼职经历|项目经历|主要经历)[：:\s]*/i, '').trim();
+        const compMatch = clean.split(/[|｜·•●◆\t]/)[0]?.trim();
+        return `💼 工作: ${(compMatch || clean).slice(0, 18)}`;
+      }
+
+      if (hasDate && hasProject) {
+        const clean = line.replace(/^(?:SELECTED\s*BUSINESS\s*PROJECTS\s*\/)?\s*(?:业务项目|核心项目|项目经历)[：:\s]*/i, '').trim();
+        const projMatch = clean.split(/[|｜·•●◆\t]/)[0]?.trim();
+        return `🚀 项目: ${(projMatch || clean).slice(0, 18)}`;
+      }
+
+      return null;
+    };
+
+    rawLines.forEach((line) => {
+      const heading = isHeading(line);
+      if (heading) {
+        if (currentBlock.length > 0) {
+          segments.push({
+            id: 'seg_' + (segments.length + 1),
+            index: segments.length + 1,
+            title: currentTitle || `段落 #${segments.length + 1}`,
+            charCount: currentBlock.join('\n').length,
+            text: currentBlock.join('\n')
+          });
+          currentBlock = [];
+        }
+        currentTitle = heading;
+        currentBlock.push(line);
+      } else {
+        if (currentBlock.length === 0) {
+          currentTitle = line.length > 25 ? line.slice(0, 25) + '...' : line;
+        }
+        currentBlock.push(line);
+      }
     });
+
+    if (currentBlock.length > 0) {
+      segments.push({
+        id: 'seg_' + (segments.length + 1),
+        index: segments.length + 1,
+        title: currentTitle || `段落 #${segments.length + 1}`,
+        charCount: currentBlock.join('\n').length,
+        text: currentBlock.join('\n')
+      });
+    }
 
     return segments;
   }
@@ -2000,8 +2051,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // 8. 原始段落自由复制渲染
-    const rawSegments = depot.rawSegments || splitRawParagraphs(document.getElementById('raw-resume-text')?.value || '');
+    // 8. 原始段落自由复制渲染 (智能拆解多模块)
+    let rawSegments = (depot.rawSegments && depot.rawSegments.length > 1) ? depot.rawSegments : splitRawParagraphs(document.getElementById('raw-resume-text')?.value || depot?.rawSegments?.[0]?.text || '');
+    if (rawSegments && rawSegments.length > 1 && (!depot.rawSegments || depot.rawSegments.length <= 1)) {
+      depot.rawSegments = rawSegments;
+      try { chrome.storage.local.set({ resumeDepot: depot }); } catch (e) {}
+    }
     renderRawSegments(rawSegments);
 
     // 绑定所有的 data-copy 点击复制事件
@@ -2405,7 +2460,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 切换时如果尚未渲染原始段落，根据当前文本重新生成
         const rawText = rawTextEl?.value || '';
-        const segments = currentResumeDepot?.rawSegments?.length ? currentResumeDepot.rawSegments : splitRawParagraphs(rawText);
+        let segments = (currentResumeDepot?.rawSegments && currentResumeDepot.rawSegments.length > 1) ? currentResumeDepot.rawSegments : splitRawParagraphs(rawText || currentResumeDepot?.rawSegments?.[0]?.text || '');
+        if (segments && segments.length > 1 && (!currentResumeDepot?.rawSegments || currentResumeDepot.rawSegments.length <= 1)) {
+          if (currentResumeDepot) {
+            currentResumeDepot.rawSegments = segments;
+            try { chrome.storage.local.set({ resumeDepot: currentResumeDepot }); } catch (e) {}
+          }
+        }
         renderRawSegments(segments, document.getElementById('raw-segments-search')?.value.trim() || '');
       });
     }
@@ -2415,7 +2476,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (rawSearchInput) {
       rawSearchInput.addEventListener('input', (e) => {
         const query = e.target.value.trim();
-        const segments = currentResumeDepot?.rawSegments?.length ? currentResumeDepot.rawSegments : splitRawParagraphs(rawTextEl?.value || '');
+        const segments = (currentResumeDepot?.rawSegments && currentResumeDepot.rawSegments.length > 1) ? currentResumeDepot.rawSegments : splitRawParagraphs(rawTextEl?.value || currentResumeDepot?.rawSegments?.[0]?.text || '');
         renderRawSegments(segments, query);
       });
     }
@@ -2467,7 +2528,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCopyAllRawSegments = document.getElementById('btn-copy-all-raw-segments');
     if (btnCopyAllRawSegments) {
       btnCopyAllRawSegments.addEventListener('click', () => {
-        const segments = currentResumeDepot?.rawSegments?.length ? currentResumeDepot.rawSegments : splitRawParagraphs(rawTextEl?.value || '');
+        const segments = (currentResumeDepot?.rawSegments && currentResumeDepot.rawSegments.length > 1) ? currentResumeDepot.rawSegments : splitRawParagraphs(rawTextEl?.value || currentResumeDepot?.rawSegments?.[0]?.text || '');
         if (!segments.length) {
           alert('当前暂无简历段落！');
           return;

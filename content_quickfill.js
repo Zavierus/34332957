@@ -14,6 +14,7 @@
   let isDrawerPinned = false;
   let searchQuery = '';
   let currentDrawerTab = 'form-match'; // 'form-match' | 'structured' | 'raw'
+  let currentMatchFilter = 'unfilled'; // 'unfilled' (默认仅看待填) | 'all' (全部输入项) | 'filled' (网页已填)
   let selectedWorkIndex = 0;
   let selectedProjectIndex = 0;
   let currentScannedPageFields = [];
@@ -300,9 +301,10 @@
     if (!shadowRoot) return;
     const badge = shadowRoot.getElementById('form-match-tab-count');
     if (badge) {
-      const count = currentScannedPageFields.length;
-      badge.textContent = count > 0 ? `${count}` : '0';
-      badge.style.display = count > 0 ? 'inline-block' : 'none';
+      const unfilledCount = currentScannedPageFields.filter(f => !f.isFilled).length;
+      badge.textContent = unfilledCount > 0 ? `${unfilledCount}待填` : '0';
+      badge.style.display = currentScannedPageFields.length > 0 ? 'inline-block' : 'none';
+      badge.style.background = unfilledCount > 0 ? '#10b981' : '#64748b';
     }
   }
 
@@ -315,6 +317,13 @@
       isRequired = true;
     }
 
+    const isGoodLabel = (str) => {
+      if (!str) return false;
+      const t = str.trim();
+      if (!t || /^\d{1,4}$/.test(t)) return false; // 排除纯年份/日期/数字如 "2025", "2023", "9"
+      return true;
+    };
+
     // 1. 显式关联的 label：<label for="...">
     if (el.id) {
       try {
@@ -323,7 +332,7 @@
           const lt = (explicitLabel.innerText || explicitLabel.textContent || '').trim();
           if (lt.includes('*')) isRequired = true;
           const clean = lt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
-          if (clean) itemLabels.push(clean);
+          if (isGoodLabel(clean)) itemLabels.push(clean);
         }
       } catch (e) {}
     }
@@ -334,7 +343,7 @@
       const plt = (parentLabel.innerText || parentLabel.textContent || '').trim();
       if (plt.includes('*')) isRequired = true;
       const clean = plt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
-      if (clean && clean !== el.value) itemLabels.push(clean);
+      if (isGoodLabel(clean) && clean !== el.value) itemLabels.push(clean);
     }
 
     // 3. 常见UI组件库专属容器提取专属label (Ant Design, Element UI, TDesign, Arco, Moka, Beisen)
@@ -345,18 +354,18 @@
         const lt = (labelEl.innerText || labelEl.textContent || '').trim();
         if (lt.includes('*')) isRequired = true;
         const clean = lt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
-        if (clean) itemLabels.push(clean);
+        if (isGoodLabel(clean)) itemLabels.push(clean);
       }
     }
 
-    // 4. 前驱兄弟元素 label (排除纯数字如日历中的天数 "9", "2022")
+    // 4. 前驱兄弟元素 label (排除纯数字如日历中的天数 "9", "2025")
     if (itemLabels.length === 0) {
       const prev = el.previousElementSibling || (el.parentElement && el.parentElement.previousElementSibling);
       if (prev) {
         const pt = (prev.innerText || prev.textContent || '').trim();
         if (pt.includes('*')) isRequired = true;
         const clean = pt.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim();
-        if (clean && !/^\d{1,4}$/.test(clean) && clean.length < 35) {
+        if (isGoodLabel(clean) && clean.length < 35) {
           itemLabels.push(clean);
         }
       }
@@ -370,11 +379,11 @@
     const name = el.getAttribute('name') || '';
 
     if (itemLabels.length === 0) {
-      if (ph) itemLabels.push(ph.replace(/请输入|请选择|请填写/g, '').trim());
-      else if (aria) itemLabels.push(aria);
-      else if (title) itemLabels.push(title);
-      else if (dataLabel) itemLabels.push(dataLabel);
-      else if (name && !/^\d+$/.test(name)) itemLabels.push(name);
+      if (isGoodLabel(ph)) itemLabels.push(ph.replace(/请输入|请选择|请填写/g, '').trim());
+      else if (isGoodLabel(aria)) itemLabels.push(aria);
+      else if (isGoodLabel(title)) itemLabels.push(title);
+      else if (isGoodLabel(dataLabel)) itemLabels.push(dataLabel);
+      else if (isGoodLabel(name) && !/^\d+$/.test(name)) itemLabels.push(name);
     }
 
     // 探测 Section 区域标题
@@ -398,14 +407,177 @@
       depth++;
     }
 
-    const firstLabel = itemLabels[0] || '';
-    const cleanLabel = firstLabel.replace(/[\*\:：\s\r\n\t]+/g, ' ').trim();
+    const cleanList = itemLabels
+      .map(l => l.replace(/[\*\:：\s\r\n\t]+/g, ' ').replace(/\(必填\)|（必填）/g, '').trim())
+      .filter(l => l && !/^\d{1,4}$/.test(l));
+
+    const cleanLabel = cleanList[0] || '';
 
     return {
       label: cleanLabel,
       isRequired,
       section: detectedSection || '📝 表单信息'
     };
+  }
+
+  // 纯文本自然智能分段器 (智能识别大标题、日期经历行，按模块精准拆分)
+  function splitIntelligentSegments(rawText) {
+    if (!rawText || !rawText.trim()) return [];
+    const rawLines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const segments = [];
+    let currentBlock = [];
+    let currentTitle = '';
+
+    const isHeading = (line) => {
+      if (/(?:基本信息|个人信息|联系方式)/i.test(line) && line.length < 25) return '👤 个人基本信息';
+      if (/(?:工作经历|工作经验|职业经历|从业经历|实习经历)/i.test(line) && line.length < 25) return '💼 工作经历概览';
+      if (/(?:项目经历|项目经验|业务项目|核心项目|主要经历)/i.test(line) && line.length < 25) return '🚀 核心项目经历';
+      if (/(?:个人优势|自我评价|个人总结|核心亮点|自评)/i.test(line) && line.length < 25) return '🌟 个人优势与自评';
+      if (/(?:教育背景|教育经历|学历情况)/i.test(line) && line.length < 25) return '🎓 教育背景';
+      if (/(?:专业技能|掌握技能|技能清单|技术栈)/i.test(line) && line.length < 25) return '🛠️ 专业技能清单';
+      if (/(?:兴趣爱好|生活方式|业余爱好)/i.test(line) && line.length < 25) return '🎨 兴趣爱好与生活方式';
+      if (/(?:组织与研究|LEADERSHIP)/i.test(line) && line.length < 25) return '👥 组织与领导力';
+
+      const hasDate = /(?:20\d{2}[.\-\/年—–-]\d{1,2}|至今|现在)/.test(line);
+      const hasCompany = /(?:公司|科技|企业|集团|工作室|品牌|互娱|传媒|Studio|Club|有限公司|宣传部|融媒体|中心|医院)/i.test(line);
+      const hasProject = /(?:好物节|培训营|POC|PORTFOLIO|大赛|计划|操盘|战役)/i.test(line);
+
+      if (hasDate && (hasCompany || line.includes('·') || line.includes('|'))) {
+        const clean = line.replace(/^(?:ADDITIONAL\s*EXPERIENCE\s*\/)?\s*(?:补充经历|工作经历|实习经历|兼职经历|项目经历|主要经历)[：:\s]*/i, '').trim();
+        const compMatch = clean.split(/[|｜·•●◆\t]/)[0]?.trim();
+        return `💼 工作: ${(compMatch || clean).slice(0, 18)}`;
+      }
+
+      if (hasDate && hasProject) {
+        const clean = line.replace(/^(?:SELECTED\s*BUSINESS\s*PROJECTS\s*\/)?\s*(?:业务项目|核心项目|项目经历)[：:\s]*/i, '').trim();
+        const projMatch = clean.split(/[|｜·•●◆\t]/)[0]?.trim();
+        return `🚀 项目: ${(projMatch || clean).slice(0, 18)}`;
+      }
+
+      return null;
+    };
+
+    rawLines.forEach((line) => {
+      const heading = isHeading(line);
+      if (heading) {
+        if (currentBlock.length > 0) {
+          segments.push({
+            id: 'seg_' + (segments.length + 1),
+            index: segments.length + 1,
+            title: currentTitle || `段落 #${segments.length + 1}`,
+            charCount: currentBlock.join('\n').length,
+            text: currentBlock.join('\n')
+          });
+          currentBlock = [];
+        }
+        currentTitle = heading;
+        currentBlock.push(line);
+      } else {
+        if (currentBlock.length === 0) {
+          currentTitle = line.length > 25 ? line.slice(0, 25) + '...' : line;
+        }
+        currentBlock.push(line);
+      }
+    });
+
+    if (currentBlock.length > 0) {
+      segments.push({
+        id: 'seg_' + (segments.length + 1),
+        index: segments.length + 1,
+        title: currentTitle || `段落 #${segments.length + 1}`,
+        charCount: currentBlock.join('\n').length,
+        text: currentBlock.join('\n')
+      });
+    }
+
+    return segments;
+  }
+
+  // 智能原始分段获取与模块合成兜底 (若已存储的 rawSegments 仅有 1 段，则动态重切或从模块生成高可用分段)
+  function getIntelligentRawSegments(depot) {
+    if (!depot) return [];
+
+    // 1. 如果已有切分良好的 rawSegments (数量大于 1)，直接使用
+    if (Array.isArray(depot.rawSegments) && depot.rawSegments.length > 1) {
+      return depot.rawSegments;
+    }
+
+    // 2. 如果 rawSegments 只有 1 个大段，尝试对它的全文文本进行智能拆解
+    const rawText = (depot.rawSegments && depot.rawSegments[0] && depot.rawSegments[0].text) || '';
+    if (rawText && rawText.length > 200) {
+      const parsedSegs = splitIntelligentSegments(rawText);
+      if (parsedSegs && parsedSegs.length > 1) {
+        return parsedSegs;
+      }
+    }
+
+    // 3. 兜底与结构化生成：直接从 depot 的各模块合成高可用自然分段
+    const segs = [];
+    function addS(title, text) {
+      if (!text || !text.trim()) return;
+      segs.push({
+        id: 'seg_' + (segs.length + 1),
+        index: segs.length + 1,
+        title: title,
+        charCount: text.trim().length,
+        text: text.trim()
+      });
+    }
+
+    // 基本信息
+    const b = depot.basicInfo || {};
+    const basicLines = [
+      b.name ? `${b.name} ${b.targetRole ? '· ' + b.targetRole : ''}` : '',
+      [b.phone, b.email, b.school].filter(Boolean).join(' | '),
+      b.portfolioUrl ? `作品集链接: ${b.portfolioUrl}` : '',
+      b.oneLiner ? `个人定位: ${b.oneLiner}` : ''
+    ].filter(Boolean);
+    if (basicLines.length > 0) {
+      addS('👤 个人基本信息与定位', basicLines.join('\n'));
+    }
+
+    // 各段工作经历
+    (depot.workExperiences || []).forEach((w) => {
+      const lines = [
+        `${w.company || '企业'} · ${w.role || '职位'} · ${w.period || '任职期间'}`,
+        w.desc || '',
+        (w.achievements && w.achievements.length > 0) ? w.achievements.map(a => `• ${a}`).join('\n') : ''
+      ].filter(Boolean);
+      addS(`💼 工作经历: ${(w.company || '重点企业').slice(0, 16)}`, lines.join('\n'));
+    });
+
+    // 各段项目经历
+    (depot.projects || []).forEach((p) => {
+      const lines = [
+        `${p.name || '项目'} · ${p.role || '角色'} · ${p.period || '周期'}`,
+        p.desc || '',
+        p.results ? `【成果】: ${p.results}` : ''
+      ].filter(Boolean);
+      addS(`🚀 项目经历: ${(p.name || '核心项目').slice(0, 16)}`, lines.join('\n'));
+    });
+
+    // 教育背景
+    (depot.education || []).forEach(e => {
+      addS('🎓 教育背景: ' + (e.school || '院校'), `${e.school || ''} · ${e.major || ''} · ${e.degree || ''} (${e.period || ''})\n${e.highlights || ''}`);
+    });
+
+    // 自我评价
+    if (depot.selfIntro?.full || (depot.advantages && depot.advantages.length > 0)) {
+      const introText = depot.selfIntro?.full || depot.advantages.join('\n');
+      addS('🌟 个人优势与自我评价', introText);
+    }
+
+    // 专业技能
+    if (depot.skills && depot.skills.length > 0) {
+      addS('🛠️ 专业技能清单', depot.skills.join('、'));
+    }
+
+    // 兴趣爱好
+    if (depot.hobbies && depot.hobbies.length > 0) {
+      addS('🎨 兴趣特长与生活方式', depot.hobbies.join('、'));
+    }
+
+    return segs;
   }
 
   // 经历行智能拆解器 (支持 · | ｜ • ● ◆ \t 及各类空格格式，并剥除前缀噪声)
@@ -774,7 +946,23 @@
       if (/^\d{1,2}$/.test(meta.label) && !el.placeholder && !/month|day|year|date|age/i.test(el.name || el.id || '')) return;
 
       const match = classifyAndMatchInput(el, meta);
-      const currentVal = el.value !== undefined ? String(el.value).trim() : (el.innerText || el.textContent || '').trim();
+      let currentVal = el.value !== undefined ? String(el.value).trim() : (el.innerText || el.textContent || '').trim();
+
+      // 针对 Ant Design / Element UI / Arco 等前端框架的 Select / DatePicker 容器穿透检测已填值
+      if (!currentVal) {
+        const pickerOrSelect = el.closest && el.closest('.ant-select, .el-select, .arco-select, .t-select, .ant-picker, .el-date-editor, .arco-picker, .date-picker');
+        if (pickerOrSelect) {
+          const valEl = pickerOrSelect.querySelector('.ant-select-selection-item, .el-select__selected-item, .el-select__tags-text, .arco-select-view-value, .ant-picker-input input');
+          if (valEl) {
+            const nestedVal = valEl.value !== undefined ? String(valEl.value).trim() : (valEl.innerText || valEl.textContent || '').trim();
+            if (nestedVal) currentVal = nestedVal;
+          }
+        }
+      }
+
+      // 判断是否已填：非空且不是提示占位符
+      const isPlaceholderVal = /^(?:请选择|请填写|请输入|选择年份|选择月份|选择日期)$/.test(currentVal);
+      const isFilled = !!currentVal && !isPlaceholderVal;
 
       scanned.push({
         id: `page_field_${index}`,
@@ -783,8 +971,8 @@
         isRequired: meta.isRequired,
         section: meta.section,
         matched: match,
-        currentValue: currentVal,
-        isFilled: !!currentVal
+        currentValue: isPlaceholderVal ? '' : currentVal,
+        isFilled: isFilled
       });
     });
 
@@ -1171,6 +1359,50 @@
         background: #10b981;
         color: #0b0f19;
       }
+      .action-mini-btn.warning {
+        background: rgba(245, 158, 11, 0.15);
+        border-color: rgba(245, 158, 11, 0.4);
+        color: #fbbf24;
+      }
+      .action-mini-btn.warning:hover {
+        background: #f59e0b;
+        color: #0b0f19;
+      }
+
+      /* 实时对照筛选 Pills (仅看待填 / 全部 / 已填) */
+      .match-filter-pills {
+        display: flex;
+        gap: 6px;
+        margin: 4px 0 6px 0;
+      }
+      .filter-pill {
+        flex: 1;
+        padding: 5px 6px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.04);
+        color: #94a3b8;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .filter-pill:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #e2e8f0;
+      }
+      .filter-pill.active {
+        background: rgba(0, 242, 254, 0.16);
+        border-color: #00f2fe;
+        color: #00f2fe;
+        font-weight: 700;
+        box-shadow: 0 0 8px rgba(0, 242, 254, 0.25);
+      }
 
       /* 技能 & 爱好 药丸胶囊 */
       .chips-grid {
@@ -1315,7 +1547,7 @@
         <!-- 底部栏 -->
         <div class="drawer-footer">
           <button class="btn-open-dash" id="btn-open-depot-settings">⚙️ 上传新简历 / 重新解析 ↗</button>
-          <span style="color:#10b981; font-weight:700; font-size:10.5px;">v2.11.0 最新引擎已激活</span>
+          <span style="color:#10b981; font-weight:700; font-size:10.5px;">v2.11.1 最新引擎已激活</span>
         </div>
 
         <!-- 浮动通知 Toast -->
@@ -1393,19 +1625,15 @@
     const works = depot.workExperiences || [];
     const projects = depot.projects || [];
 
-    const matchedCount = fields.filter(f => f.matched && f.matched.value).length;
-    if (summaryTag) {
-      summaryTag.textContent = `${fields.length}表单项 · ${matchedCount}匹配`;
-    }
+    const unfilledFields = fields.filter(f => !f.isFilled);
+    const filledFields = fields.filter(f => f.isFilled);
+    const unfilledMatched = unfilledFields.filter(f => f.matched && f.matched.value);
+    const unfilledMatchedCount = unfilledMatched.length;
+    const totalMatchedCount = fields.filter(f => f.matched && f.matched.value).length;
 
-    // 搜索过滤
-    const filteredFields = fields.filter(f => {
-      if (!q) return true;
-      return (f.labelText || '').toLowerCase().includes(q) ||
-             (f.section || '').toLowerCase().includes(q) ||
-             (f.matched?.fieldName || '').toLowerCase().includes(q) ||
-             String(f.matched?.value || '').toLowerCase().includes(q);
-    });
+    if (summaryTag) {
+      summaryTag.textContent = `${unfilledFields.length}待填 / 共${fields.length}项`;
+    }
 
     if (fields.length === 0) {
       containerEl.innerHTML = `
@@ -1453,25 +1681,53 @@
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     `;
 
-    const matchRate = Math.round((matchedCount / fields.length) * 100);
+    const matchRate = fields.length > 0 ? Math.round((totalMatchedCount / fields.length) * 100) : 0;
     topBar.innerHTML = `
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:6px;">
           <span style="font-size:13px; font-weight:700; color:#00f2fe;">🎯 网页表单实时对齐</span>
-          <span style="font-size:10.5px; background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:10px; font-weight:600;">匹配率 ${matchRate}%</span>
+          <span style="font-size:10.5px; background:rgba(16,185,129,0.15); color:#10b981; padding:2px 7px; border-radius:10px; font-weight:600;">待填 ${unfilledFields.length} · 已填 ${filledFields.length}</span>
         </div>
         <button class="action-mini-btn" id="btn-rescan-page-fields" title="重新遍历页面 DOM 嗅探最新表单项" style="font-size:11px; padding:3px 8px;">
           🔄 重新嗅探
         </button>
       </div>
-      <div style="font-size:11px; color:#94a3b8; display:flex; justify-content:space-between; align-items:center;">
-        <span>共识别到 <b style="color:#fff;">${fields.length}</b> 个输入项，已精准匹配 <b style="color:#a7f3d0;">${matchedCount}</b> 项简历材料</span>
+
+      <!-- 视图筛选 Pills: 默认仅看待填项 -->
+      <div class="match-filter-pills">
+        <button type="button" class="filter-pill ${currentMatchFilter === 'unfilled' ? 'active' : ''}" data-filter="unfilled" id="pill-filter-unfilled">
+          ⚡ 仅看待填 (${unfilledFields.length})
+        </button>
+        <button type="button" class="filter-pill ${currentMatchFilter === 'all' ? 'active' : ''}" data-filter="all" id="pill-filter-all">
+          📋 全部输入项 (${fields.length})
+        </button>
+        <button type="button" class="filter-pill ${currentMatchFilter === 'filled' ? 'active' : ''}" data-filter="filled" id="pill-filter-filled">
+          🟢 网页已填 (${filledFields.length})
+        </button>
       </div>
-      <button class="action-mini-btn primary" id="btn-fill-all-matched" style="width:100%; padding:8px 12px; justify-content:center; font-size:12px; font-weight:700; background:linear-gradient(135deg, #10b981 0%, #00f2fe 100%); color:#0b0f19; border:none; border-radius:6px; box-shadow:0 2px 10px rgba(0,242,254,0.3); cursor:pointer;">
-        🚀 一键顺滑填入所有已匹配字段 (${matchedCount} 项)
+
+      <div style="font-size:11px; color:#94a3b8; display:flex; justify-content:space-between; align-items:center;">
+        <span>待填匹配 <b style="color:#a7f3d0;">${unfilledMatchedCount}</b> 项 · 严格防覆盖</span>
+        <span style="color:#64748b; font-size:10px;">点击卡片可单独填入</span>
+      </div>
+
+      <button class="action-mini-btn primary" id="btn-fill-all-matched" style="width:100%; padding:8px 12px; justify-content:center; font-size:12px; font-weight:700; background:${unfilledMatchedCount > 0 ? 'linear-gradient(135deg, #10b981 0%, #00f2fe 100%)' : 'rgba(255,255,255,0.08)'}; color:${unfilledMatchedCount > 0 ? '#0b0f19' : '#94a3b8'}; border:none; border-radius:6px; box-shadow:${unfilledMatchedCount > 0 ? '0 2px 10px rgba(0,242,254,0.3)' : 'none'}; cursor:${unfilledMatchedCount > 0 ? 'pointer' : 'default'};">
+        ${unfilledMatchedCount > 0 ? `🚀 一键顺滑填入待填项 (${unfilledMatchedCount} 项)` : `✅ 待填项已全部填完或无匹配`}
       </button>
     `;
     containerEl.appendChild(topBar);
+
+    // 绑定筛选 Pills
+    topBar.querySelectorAll('.filter-pill').forEach(pill => {
+      pill.onclick = (e) => {
+        e.stopPropagation();
+        const f = pill.getAttribute('data-filter');
+        if (f && f !== currentMatchFilter) {
+          currentMatchFilter = f;
+          renderDrawerContent();
+        }
+      };
+    });
 
     // 绑定重新嗅探与一键填入
     const btnRescan = topBar.querySelector('#btn-rescan-page-fields');
@@ -1484,11 +1740,12 @@
     }
 
     const btnFillAll = topBar.querySelector('#btn-fill-all-matched');
-    if (btnFillAll) {
+    if (btnFillAll && unfilledMatchedCount > 0) {
       btnFillAll.onclick = async () => {
         btnFillAll.disabled = true;
-        btnFillAll.innerHTML = '⏳ 正在拟人化顺滑填入中...';
-        const targets = currentScannedPageFields.filter(f => f.matched && f.matched.value && f.element && document.body.contains(f.element));
+        btnFillAll.innerHTML = '⏳ 正在拟人化顺滑填入待填项...';
+        // 关键防护：仅填入真正未填写的项 (!f.isFilled)，绝不覆盖网页原有内容！
+        const targets = currentScannedPageFields.filter(f => !f.isFilled && f.matched && f.matched.value && f.element && document.body.contains(f.element));
         let filledCount = 0;
         for (const item of targets) {
           const ok = fillAndHighlightElement(item.element, item.matched.value);
@@ -1499,9 +1756,8 @@
           }
           await new Promise(r => setTimeout(r, 120));
         }
-        showToast(`🎉 成功填入 ${filledCount} 个匹配字段！`);
+        showToast(`🎉 成功填入 ${filledCount} 个待填字段！`);
         btnFillAll.disabled = false;
-        btnFillAll.innerHTML = `🚀 一键顺滑填入所有已匹配字段 (${matchedCount} 项)`;
         renderDrawerContent();
       };
     }
@@ -1540,6 +1796,45 @@
         };
       }
       containerEl.appendChild(expBar);
+    }
+
+    // 根据当前筛选状态选择要展示的输入项列表
+    let displayedFields = fields;
+    if (currentMatchFilter === 'unfilled') {
+      displayedFields = unfilledFields;
+    } else if (currentMatchFilter === 'filled') {
+      displayedFields = filledFields;
+    }
+
+    // 搜索过滤
+    const filteredFields = displayedFields.filter(f => {
+      if (!q) return true;
+      return (f.labelText || '').toLowerCase().includes(q) ||
+             (f.section || '').toLowerCase().includes(q) ||
+             (f.matched?.fieldName || '').toLowerCase().includes(q) ||
+             String(f.matched?.value || '').toLowerCase().includes(q);
+    });
+
+    if (filteredFields.length === 0) {
+      const emptyTip = document.createElement('div');
+      emptyTip.style.cssText = 'padding:28px 16px; text-align:center; color:#94a3b8; font-size:12px; background:rgba(255,255,255,0.02); border-radius:8px; border:1px dashed rgba(255,255,255,0.1); margin-bottom:12px;';
+      if (currentMatchFilter === 'unfilled') {
+        emptyTip.innerHTML = `
+          <div style="font-size:24px; margin-bottom:8px;">🎉</div>
+          <div style="font-weight:700; color:#34d399; margin-bottom:4px;">页面输入项已全部填好，暂无待填项！</div>
+          <div style="color:#64748b; font-size:11px;">您可以点击上方「📋 全部输入项」或「🟢 网页已填」查看详情或覆盖更新。</div>
+        `;
+      } else if (currentMatchFilter === 'filled') {
+        emptyTip.innerHTML = `
+          <div style="font-size:24px; margin-bottom:8px;">📝</div>
+          <div style="font-weight:700; color:#e2e8f0; margin-bottom:4px;">当前网页暂无已填写内容</div>
+          <div style="color:#64748b; font-size:11px;">点击上方「⚡ 仅看待填」查看所有待填写的表单输入项。</div>
+        `;
+      } else {
+        emptyTip.innerHTML = `未搜索到匹配的表单输入项`;
+      }
+      containerEl.appendChild(emptyTip);
+      return;
     }
 
     // 按 Section 分组
@@ -1639,7 +1934,7 @@
             <div>
               ${curWebVal ? `
                 <span style="font-size:10px; background:rgba(16,185,129,0.15); color:#34d399; padding:1px 6px; border-radius:10px;" title="网页当前值: ${escapeHtml(curWebVal)}">
-                  🟢 网页已填: ${escapeHtml(curWebVal.slice(0, 8))}${curWebVal.length > 8 ? '...' : ''}
+                  🟢 网页已填: ${escapeHtml(curWebVal.slice(0, 10))}${curWebVal.length > 10 ? '...' : ''}
                 </span>
               ` : `
                 <span style="font-size:10px; background:rgba(56,189,248,0.12); color:#38bdf8; padding:1px 6px; border-radius:10px;">
@@ -1650,10 +1945,13 @@
           </div>
           <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:6px 8px; margin:4px 0; font-size:11.5px; color:${hasVal ? '#a7f3d0' : '#64748b'}; line-height:1.45; max-height:85px; overflow-y:auto; white-space:pre-wrap;">${hasVal ? escapeHtml(valText) : '（未找到对应的简历匹配项，可手动点选或复制）'}</div>
           <div class="item-actions" style="margin-top:6px;">
-            ${hasVal ? `
+            ${hasVal ? (item.isFilled ? `
+              <button class="action-mini-btn warning btn-fill-single" data-idx="${item.id}" title="当前输入框已有内容，点击将覆盖网页现有内容">⚠️ 覆盖更新此项</button>
+              <button class="action-mini-btn btn-copy-single" data-text="${encodeURIComponent(valText)}">📋 复制材料</button>
+            ` : `
               <button class="action-mini-btn primary btn-fill-single" data-idx="${item.id}">✨ 填入此项</button>
-              <button class="action-mini-btn btn-copy-single" data-text="${encodeURIComponent(valText)}">📋 复制</button>
-            ` : ''}
+              <button class="action-mini-btn btn-copy-single" data-text="${encodeURIComponent(valText)}">📋 仅复制材料</button>
+            `) : ''}
             <button class="action-mini-btn btn-locate-single" data-idx="${item.id}">🎯 定位输入框</button>
           </div>
         `;
@@ -1677,7 +1975,7 @@
           }
         });
 
-        // 绑定单项填入
+        // 绑定单项填入 (包括覆盖更新)
         const btnFill = card.querySelector('.btn-fill-single');
         if (btnFill) {
           btnFill.onclick = (e) => {
@@ -1787,11 +2085,11 @@
       return;
     }
 
-    // 模式 B: 原始分段直达视图
+    // 模式 B: 原始分段直达视图 (智能拆解多模块卡片，支持单段复制与填入)
     if (currentDrawerTab === 'raw') {
-      const segments = depot.rawSegments || [];
-      const matched = segments.filter(s => matchesSearch(s.text));
-      if (summaryTag) summaryTag.textContent = `${matched.length}段落`;
+      const segments = getIntelligentRawSegments(depot);
+      const matched = segments.filter(s => matchesSearch(s.title, s.text));
+      if (summaryTag) summaryTag.textContent = `${matched.length}个模块段落`;
 
       if (matched.length === 0) {
         containerEl.innerHTML = `
@@ -1808,7 +2106,7 @@
         card.style.marginBottom = '10px';
         card.innerHTML = `
           <div class="item-top-row">
-            <span class="item-title">📄 段落 #${seg.index}</span>
+            <span class="item-title" style="color:#38bdf8;">${escapeHtml(seg.title || `📄 段落 #${seg.index}`)}</span>
             <span class="item-sub">${seg.charCount} 字</span>
           </div>
           <div class="item-body-text" style="line-height:1.5; font-size:11.5px; max-height:140px; overflow-y:auto; margin:6px 0;">${escapeHtml(seg.text)}</div>
