@@ -875,6 +875,43 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // 测试 HR 提醒声音与系统弹窗
+  document.getElementById('btn-test-hr-alert')?.addEventListener('click', () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const playTone = (freq, start, duration) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+          gain.gain.setValueAtTime(0.28, ctx.currentTime + start);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + start);
+          osc.stop(ctx.currentTime + start + duration);
+        };
+        playTone(587.33, 0, 0.20);
+        playTone(880.00, 0.22, 0.38);
+      }
+    } catch (e) {}
+
+    chrome.runtime.sendMessage({
+      type: 'HR_REPLY_ALERT',
+      platform: 'boss',
+      isTest: true,
+      text: '【测试通知】恭喜！HR新回复提醒与桌面通知功能一切正常。'
+    }, () => {
+      const tip = document.getElementById('test-alert-tip');
+      if (tip) {
+        tip.style.display = 'inline-block';
+        setTimeout(() => { tip.style.display = 'none'; }, 4000);
+      }
+    });
+  });
+
   // ================= 7.1 跨账户全量配置与数据迁移 =================
   document.getElementById('btn-export-full-backup')?.addEventListener('click', () => {
     chrome.storage.local.get(['jobTags', 'config', 'applicantProfile', 'resumeDepot', 'applyLog'], (res) => {

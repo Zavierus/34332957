@@ -889,19 +889,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      const cooldownMins = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0)
-        ? Number(cfg.hrAlertCooldownMinutes)
-        : 5;
-      const cooldownMs = cooldownMins * 60 * 1000;
-      const now = Date.now();
-      const lastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
+      // 如果是手动测试触发，无视任何冷却
+      if (!request.isTest) {
+        const cooldownMins = (cfg.hrAlertCooldownMinutes !== undefined && Number(cfg.hrAlertCooldownMinutes) > 0)
+          ? Number(cfg.hrAlertCooldownMinutes)
+          : 1;
+        // 防瞬间多标签并发堆叠：设置 20 秒去重窗口，杜绝 5 分钟超长锁死导致错失重要消息
+        const cooldownMs = Math.min(cooldownMins * 60 * 1000, 20 * 1000);
+        const now = Date.now();
+        const lastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
 
-      if (now - lastAlert < cooldownMs && lastAlert > 0) {
-        console.log(`[ZIAVER Background] ⏳ HR 提醒处于全局防打扰冷却期 (${cooldownMins}分钟内仅弹一次)，已持久化拦截去重`);
-        sendResponse({ status: 'cooldown_suppressed' });
-        return;
+        if (now - lastAlert < cooldownMs && lastAlert > 0) {
+          console.log(`[ZIAVER Background] ⏳ HR 提醒处于全局防打扰去重期 (${cooldownMs / 1000}秒内仅弹一次)，已拦截去重`);
+          sendResponse({ status: 'cooldown_suppressed' });
+          return;
+        }
       }
 
+      const now = Date.now();
       // 立即持久化记录本次提醒触发时间戳
       chrome.storage.local.set({ lastGlobalHRAlertTimestamp: now });
 

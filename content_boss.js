@@ -1706,12 +1706,8 @@
   let watcherInitTimestamp = Date.now();
 
   const SYSTEM_REPLY_BLACKLIST = [
-    '附件简历', '简历请求', '已发送', '已投递', '对方已同意', '交换了', '联系方式',
-    '已查看', '已读', '送达', '系统消息', '打招呼', '已接受', '已拒绝', '已同意',
-    '请求已发送', '简历已发送', '发起了', '开通了', '完成了', '已过期',
-    '面试邀请', '点击预览', '收到你的', '不合适', '查看简历', '牛人已同意',
-    '附件已送达', '直聘小秘书', '安全中心', '平台提示', '直聘助手', '职位已停招',
-    '以下是系统', '温馨提示', '安全提示', '沟通记录'
+    '直聘小秘书', '安全中心', '平台提示', '直聘助手', '以下是系统消息',
+    '安全防诈提醒', '谨防求职诈骗', '请勿轻易提供', '温馨提示：'
   ];
 
   function isSystemMessageText(text) {
@@ -1739,8 +1735,8 @@
       return false;
     }
 
-    // 2. 如果最后一条消息是系统提示/状态卡片/简历卡片 -> 绝不报警
-    if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('status') || cls.includes('card') || cls.includes('resume')) {
+    // 2. 如果最后一条消息是系统提示标签 (item-system / system-notice) -> 绝不报警
+    if (cls.includes('item-system') || cls.includes('system-notice')) {
       return false;
     }
 
@@ -1765,23 +1761,14 @@
     if (unreadUserItems.length > 0) {
       let hasRealHRUnread = false;
       unreadUserItems.forEach(item => {
-        const preview = item.querySelector('[class*="last-msg"], [class*="msg-preview"], [class*="text"], p');
-        const text = preview ? preview.textContent.trim() : item.textContent.trim();
-        if (!isSystemMessageText(text)) {
-          hasRealHRUnread = true;
+        const nameEl = item.querySelector('.name-wrap, .name-box, [class*="name"], .user-name');
+        const name = nameEl ? nameEl.textContent.trim() : '';
+        if (name.includes('小秘书') || name.includes('助手') || name.includes('系统通知') || name.includes('安全中心')) {
+          return;
         }
+        hasRealHRUnread = true;
       });
       return hasRealHRUnread;
-    }
-
-    // 检查列表第一项（最新发生变动项）
-    const firstUserItem = document.querySelector('.user-list li, [class*="conversation-item"], [class*="chat-item"]');
-    if (firstUserItem) {
-      const preview = firstUserItem.querySelector('[class*="last-msg"], [class*="msg-preview"], [class*="text"], p');
-      const text = preview ? preview.textContent.trim() : '';
-      if (text && isSystemMessageText(text)) {
-        return false;
-      }
     }
 
     return true;
@@ -1841,10 +1828,9 @@
 
     watcherInitTimestamp = Date.now();
 
-    // 1. 初始化时先从持久化存储获取全局未读基准与上次提醒时间戳
+    // 1. 初始化时读取上次提醒时间戳
     if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['globalHRUnreadBaseline', 'lastGlobalHRAlertTimestamp'], (res) => {
-        lastUnreadCount = Number(res.globalHRUnreadBaseline) || 0;
+      chrome.storage.local.get(['lastGlobalHRAlertTimestamp'], (res) => {
         lastAlertTimestamp = Number(res.lastGlobalHRAlertTimestamp) || 0;
         isWatcherInitialized = true;
       });
@@ -1865,10 +1851,10 @@
       }
     } catch (e) {}
 
-    // 3. 周期性巡检：每 4.5 秒探测一次，且首屏 6 秒内处于稳态基准期
+    // 3. 周期性巡检：每 3.5 秒探测一次顶栏和会话未读
     setInterval(() => {
       checkAllHRMessageSources();
-    }, 4500);
+    }, 3500);
 
     // 4. 在聊天界面自动解析并同步高频交流重点企业
     if (window.location.pathname.startsWith('/web/geek/chat')) {
@@ -1877,9 +1863,23 @@
     }
   }
 
-  function getHRAlertCooldownMs() {
-    const mins = (config && config.hrAlertCooldownMinutes) ? Number(config.hrAlertCooldownMinutes) : 5;
-    return Math.max(1, mins) * 60 * 1000;
+  function extractUnreadCountFromTitle(title) {
+    if (!title) return 0;
+    if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return 0;
+
+    // 全面兼容匹配：如 (1), (2), （1）, [1], 【1】, 【1条新消息】, 1条新消息 等
+    const m = title.match(/[\(（](\d+)[\)）]/) ||
+              title.match(/【(\d+)条?(?:新消息)?】/) ||
+              title.match(/\[(\d+)\]/) ||
+              title.match(/(\d+)条新消息/);
+    if (m) {
+      const count = parseInt(m[1], 10);
+      if (!isNaN(count) && count > 0 && count <= 999) return count;
+    }
+    if (title.includes('新消息') || title.includes('HR回复') || title.includes('有新招呼')) {
+      return 1;
+    }
+    return 0;
   }
 
   function checkTitleForHRMessage() {
@@ -1887,15 +1887,12 @@
     const title = document.title || '';
     if (title.includes('🔔') || title.includes('JobCruise') || title.includes('ZIAVER')) return;
 
-    // 页面加载前 6 秒处于稳态基准期，不触发弹窗
-    if (Date.now() - watcherInitTimestamp < 6000) return;
+    // 页面加载前 4 秒处于稳态基准期，避免刚打开页面就误弹
+    if (Date.now() - watcherInitTimestamp < 4000) return;
 
-    // 必须匹配带有真实未读数字的标题，例如 "【1条新消息】" 或 "(2) BOSS直聘"
-    const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*BOSS/);
-    if (m) {
-      const count = parseInt(m[1], 10);
-      if (count > 0 && isWatcherInitialized && count > lastUnreadCount) {
-        // 二次深度验证：如果最新消息是系统消息或来自自己，坚决不触发
+    const count = extractUnreadCountFromTitle(title);
+    if (count > 0 && isWatcherInitialized && count > lastUnreadCount) {
+      if (window.location.pathname.startsWith('/web/geek/chat')) {
         if (!checkCurrentChatLastBubbleIsRealHR() || !checkSidebarUnreadIsRealHR()) {
           lastUnreadCount = count;
           if (chrome.storage && chrome.storage.local) {
@@ -1903,95 +1900,144 @@
           }
           return;
         }
+      }
 
+      const now = Date.now();
+      if (now - lastAlertTimestamp > 12000 || count > lastUnreadCount) {
+        lastAlertTimestamp = now;
+        lastUnreadCount = count;
         if (chrome.storage && chrome.storage.local) {
-          chrome.storage.local.get(['lastGlobalHRAlertTimestamp', 'globalHRUnreadBaseline'], (res) => {
-            const storedLastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
-            const storedBaseline = Number(res.globalHRUnreadBaseline) || 0;
-
-            if (count <= storedBaseline) {
-              lastUnreadCount = Math.max(lastUnreadCount, storedBaseline);
-              return;
-            }
-
-            const now = Date.now();
-            const cooldownMs = getHRAlertCooldownMs();
-            if (now - storedLastAlert > cooldownMs) {
-              lastAlertTimestamp = now;
-              lastUnreadCount = count;
-              chrome.storage.local.set({
-                lastGlobalHRAlertTimestamp: now,
-                globalHRUnreadBaseline: count
-              });
-
-              dispatchHRReplyNotification({
-                title: '🔔 BOSS 直聘 · HR 新回复/私信！',
-                desc: `有企业 HR 正在期待您的回复 (${count} 条未读)，请及时跟进！`,
-                count
-              });
-            } else {
-              console.log(`[ZIAVER Autopilot] ⏳ BOSS 处于防打扰冷却期 (${(config.hrAlertCooldownMinutes || 5)}分钟内仅提醒一次)，静默同步基准`);
-              lastUnreadCount = count;
-              chrome.storage.local.set({ globalHRUnreadBaseline: count });
-            }
+          chrome.storage.local.set({
+            lastGlobalHRAlertTimestamp: now,
+            globalHRUnreadBaseline: count
           });
         }
+
+        dispatchHRReplyNotification({
+          title: '🔔 BOSS 直聘 · HR 新回复/私信！',
+          desc: `有企业 HR 正在期待您的回复 (${count} 条未读)，请及时跟进！`,
+          count
+        });
+      }
+    } else if (count === 0 && lastUnreadCount > 0) {
+      // 标题未读数已清零（用户已阅），立即同步重置基线，绝不卡死在旧高位
+      lastUnreadCount = 0;
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ globalHRUnreadBaseline: 0 });
       }
     }
+  }
+
+  function extractHeaderUnreadCount() {
+    let count = 0;
+
+    // 1. 扫描专门的消息徽标类名
+    const badgeSelectors = [
+      '.nav-chat-num',
+      '.header-chat-count',
+      '.header-message-count',
+      '.msg-count',
+      '.header-msg-count',
+      '.nav-item-message .badge',
+      '.nav-item-chat .badge',
+      '.user-nav .badge',
+      '[class*="chat-num"]',
+      '[class*="msg-num"]',
+      'a[href*="/chat"] .badge',
+      'a[href*="/chat"] .nav-chat-num',
+      '[ka*="header-message"] .badge',
+      '[ka*="header-chat"] .badge',
+      '.nav-item-message [class*="num"]',
+      '.nav-item-chat [class*="num"]'
+    ];
+    const badges = document.querySelectorAll(badgeSelectors.join(', '));
+    badges.forEach(b => {
+      if (!b || b.offsetWidth <= 0 || b.offsetHeight <= 0) return;
+      const style = window.getComputedStyle(b);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      const txt = b.textContent.trim();
+      const m = txt.match(/(\d+)/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (!isNaN(n) && n > 0 && n <= 999) {
+          count = Math.max(count, n);
+        }
+      }
+    });
+
+    // 2. 扫描顶栏消息相关链接/容器内部的所有子节点与文本
+    const navItems = document.querySelectorAll(
+      '.nav-item-message, .nav-item-chat, a[href*="/web/geek/chat"], a[href*="/chat"], [ka*="header-message"], [ka*="header-chat"]'
+    );
+    navItems.forEach(item => {
+      if (!item || item.offsetWidth <= 0 || item.offsetHeight <= 0) return;
+      const style = window.getComputedStyle(item);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+
+      const innerSpans = item.querySelectorAll('span, i, em, b, strong');
+      innerSpans.forEach(sp => {
+        const txt = sp.textContent.trim();
+        const m = txt.match(/^(\d+)\+?$/);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (!isNaN(n) && n > 0 && n <= 999) {
+            count = Math.max(count, n);
+          }
+        }
+      });
+
+      const itemText = item.textContent || '';
+      const textMatch = itemText.match(/(?:消息|沟通|私信)[^\d]*(\d+)/);
+      if (textMatch) {
+        const n = parseInt(textMatch[1], 10);
+        if (!isNaN(n) && n > 0 && n <= 999) {
+          count = Math.max(count, n);
+        }
+      }
+    });
+
+    return count;
   }
 
   function checkAllHRMessageSources() {
     let detectedUnread = 0;
 
-    // A. 顶栏消息气泡扫描：仅匹配真正对应 /chat 且纯数字徽标的元素
-    const headerMsgLinks = document.querySelectorAll(
-      'a[href*="/web/geek/chat"], a[href*="/chat"], a[ka*="header-message"], a[ka*="header-chat"]'
-    );
+    // A. 顶栏消息气泡扫描
+    detectedUnread = Math.max(detectedUnread, extractHeaderUnreadCount());
 
-    headerMsgLinks.forEach(link => {
-      const badges = link.querySelectorAll(
-        '.nav-chat-num, .badge, .header-chat-count, .header-message-count, .msg-count'
-      );
-      badges.forEach(b => {
-        if (b.offsetWidth > 0 && b.offsetHeight > 0 && window.getComputedStyle(b).display !== 'none' && window.getComputedStyle(b).visibility !== 'hidden') {
-          const txt = b.textContent.trim();
-          const num = parseInt(txt, 10);
-          if (!isNaN(num) && num > 0 && String(num) === txt) {
-            detectedUnread = Math.max(detectedUnread, num);
-          }
-        }
-      });
-    });
+    // B. 页面标题扫描兜底
+    detectedUnread = Math.max(detectedUnread, extractUnreadCountFromTitle(document.title));
 
-    // B. 聊天页面内部深度扫描 (/web/geek/chat)
+    // C. 聊天页面内部深度扫描 (/web/geek/chat)
     let inChatNewMessage = false;
     if (window.location.pathname.startsWith('/web/geek/chat')) {
-      // 1. 左侧联系人列表：必须是真实带有未读数字 > 0 的徽标
       const chatUserListBadges = document.querySelectorAll(
-        '.user-list .unread, .user-list .badge, .chat-conversation .unread-num'
+        '.user-list .unread, .user-list .badge, .chat-conversation .unread-num, [class*="unread-count"], [class*="badge"]'
       );
       chatUserListBadges.forEach(el => {
         if (el.offsetWidth > 0 && el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none') {
-          const num = parseInt(el.textContent.trim(), 10);
-          if (!isNaN(num) && num > 0) {
-            detectedUnread = Math.max(detectedUnread, num);
+          const m = el.textContent.trim().match(/(\d+)/);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (!isNaN(num) && num > 0) {
+              detectedUnread = Math.max(detectedUnread, num);
+            }
           }
         }
       });
 
-      // 2. 当前对话框实时新气泡：必须排除系统消息气泡
       const allCandidates = document.querySelectorAll(
         '.chat-conversation .item-friend, .chat-message-list .item-friend, [class*="item-friend"], [class*="friend-message"], [class*="item-boss"]'
       );
       let realFriendCount = 0;
       allCandidates.forEach(el => {
         const cls = (el.className || '').toLowerCase();
-        if (cls.includes('system') || cls.includes('tip') || cls.includes('notice') || cls.includes('event') || cls.includes('notification') || cls.includes('resume') || cls.includes('card')) return;
+        if (cls.includes('system') || cls.includes('tip') || cls.includes('notice')) return;
         const txt = (el.textContent || '').trim();
-        if (txt.length === 0 || isSystemMessageText(txt)) return;
+        if (txt.length === 0) return;
         realFriendCount++;
       });
-      if (isWatcherInitialized && lastFriendMsgCount > 0 && realFriendCount > lastFriendMsgCount) {
+      if (isWatcherInitialized && lastFriendMsgCount >= 0 && realFriendCount > lastFriendMsgCount) {
         if (checkCurrentChatLastBubbleIsRealHR()) {
           inChatNewMessage = true;
         }
@@ -1999,75 +2045,64 @@
       lastFriendMsgCount = realFriendCount;
     }
 
-    // 首次扫描或前 6 秒稳态期：仅初始化基准值，首屏坚决不弹窗打扰！
-    if (!isWatcherInitialized || (Date.now() - watcherInitTimestamp < 6000)) {
+    // 首次扫描或前 4 秒稳态期：仅初始化基准值，首屏坚决不弹窗打扰！
+    if (!isWatcherInitialized || (Date.now() - watcherInitTimestamp < 4000)) {
+      lastUnreadCount = detectedUnread;
       if (chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(['globalHRUnreadBaseline'], (res) => {
-          const stored = Number(res.globalHRUnreadBaseline) || 0;
-          lastUnreadCount = Math.max(stored, detectedUnread);
-          chrome.storage.local.set({ globalHRUnreadBaseline: lastUnreadCount });
-        });
+        chrome.storage.local.set({ globalHRUnreadBaseline: detectedUnread });
       }
       isWatcherInitialized = true;
       return;
     }
 
-    // 只有当未读数真正产生增量，或者当前会话收到对方新气泡时，才做深度二次验证
+    // 若未读已归零（用户阅读了消息），即刻重置基准！杜绝卡在旧高位
+    if (detectedUnread === 0 && lastUnreadCount > 0) {
+      lastUnreadCount = 0;
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ globalHRUnreadBaseline: 0 });
+      }
+      return;
+    }
+
     const hasIncreasedUnread = detectedUnread > lastUnreadCount;
     const now = Date.now();
 
     if (hasIncreasedUnread || inChatNewMessage) {
-      // 深度二次校验：如果最新消息是系统消息，直接拦截！
-      const isRealHR = checkCurrentChatLastBubbleIsRealHR() && checkSidebarUnreadIsRealHR();
-      if (!isRealHR) {
-        console.log(`[ZIAVER Autopilot] ⏭ BOSS 未读增量被深度二次验证拦截（命中系统消息/简历状态），静默跳过`);
-        lastUnreadCount = detectedUnread;
-        if (chrome.storage && chrome.storage.local) {
-          chrome.storage.local.set({ globalHRUnreadBaseline: detectedUnread });
-        }
-        return;
-      }
-
-      if (chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(['lastGlobalHRAlertTimestamp', 'globalHRUnreadBaseline'], (res) => {
-          const storedLastAlert = Number(res.lastGlobalHRAlertTimestamp) || 0;
-          const storedBaseline = Number(res.globalHRUnreadBaseline) || 0;
-
-          if (!inChatNewMessage && detectedUnread <= storedBaseline) {
-            lastUnreadCount = Math.max(lastUnreadCount, storedBaseline);
-            return;
-          }
-
-          const cooldownMs = getHRAlertCooldownMs();
-          if (now - storedLastAlert > cooldownMs) {
-            lastAlertTimestamp = now;
-            lastUnreadCount = detectedUnread;
-            chrome.storage.local.set({
-              lastGlobalHRAlertTimestamp: now,
-              globalHRUnreadBaseline: detectedUnread
-            });
-
-            console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
-
-            dispatchHRReplyNotification({
-              title: '🔔 BOSS 直聘 · HR 新回复/私信！',
-              desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${detectedUnread} 条未读)，请及时跟进！`,
-              count: detectedUnread || 1
-            });
-          } else {
-            console.log(`[ZIAVER Autopilot] ⏳ BOSS 处于防打扰冷却期 (${(config.hrAlertCooldownMinutes || 5)}分钟内仅提醒一次)，静默更新未读数`);
-            lastUnreadCount = detectedUnread;
+      if (window.location.pathname.startsWith('/web/geek/chat')) {
+        if (!checkCurrentChatLastBubbleIsRealHR() || !checkSidebarUnreadIsRealHR()) {
+          lastUnreadCount = detectedUnread;
+          if (chrome.storage && chrome.storage.local) {
             chrome.storage.local.set({ globalHRUnreadBaseline: detectedUnread });
           }
+          return;
+        }
+      }
+
+      if (now - lastAlertTimestamp > 12000 || hasIncreasedUnread) {
+        lastAlertTimestamp = now;
+        lastUnreadCount = detectedUnread;
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({
+            lastGlobalHRAlertTimestamp: now,
+            globalHRUnreadBaseline: detectedUnread
+          });
+        }
+
+        console.log(`[ZIAVER Autopilot] 🔔 BOSS 侦测到真实的 HR 新未读！未读数: ${detectedUnread}, 上次: ${lastUnreadCount}, 聊天内新气泡: ${inChatNewMessage}`);
+
+        dispatchHRReplyNotification({
+          title: '🔔 BOSS 直聘 · HR 新回复/私信！',
+          desc: inChatNewMessage ? 'HR 正在当前会话窗口中发来新消息！' : `有企业 HR 正在与您互动 (${detectedUnread} 条未读)，请及时跟进！`,
+          count: detectedUnread || 1
         });
       }
     }
 
-    lastUnreadCount = Math.max(lastUnreadCount, detectedUnread);
+    lastUnreadCount = detectedUnread;
   }
 
   function dispatchHRReplyNotification(info = {}) {
-    // 1. 穿透式清脆提示音
+    // 1. 穿透式清脆提示音 (两连音叮咚)
     if (config.audioAlert !== false) {
       playDoubleChime();
     }
@@ -2088,6 +2123,7 @@
       chrome.runtime.sendMessage({
         type: 'HR_REPLY_ALERT',
         platform: 'boss',
+        isTest: !!info.isTest,
         chatUrl: 'https://www.zhipin.com/web/geek/chat',
         text: info.desc || `BOSS直聘有新的 HR 沟通回复 (${info.count || 1} 条未读)，请及时跟进！`
       });
@@ -2095,6 +2131,17 @@
 
     logHUD(`<span class="success" style="font-weight: bold;">🔔 检测到 HR 新回复！请查看顶栏私信或聊天界面。</span>`);
   }
+
+  // 提供全局测试接口：允许用户在控制台随时执行 window.__testHRReplyAlert() 验证提示音与弹窗
+  window.__testHRReplyAlert = function() {
+    dispatchHRReplyNotification({
+      title: '🔔 [测试] BOSS 直聘 · HR 回复提醒',
+      desc: '这是一条测试通知！验证提示音、页面 Toast 与桌面通知是否正常触发。',
+      count: 1,
+      isTest: true
+    });
+    console.log('[ZIAVER Autopilot] ✅ 已手动触发 HR 回复提醒测试！');
+  };
 
   // ================= 登录状态智能识别 =================
   function checkIsLoggedIn() {

@@ -682,7 +682,7 @@
 
     if (Date.now() - lagouWatcherInitTimestamp < 4000) return;
 
-    const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*拉勾/);
+    const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
     if (m) {
       const count = parseInt(m[1], 10);
       if (count > 0 && isLagouWatcherInitialized && count > lastLagouUnreadCount) {
@@ -701,6 +701,8 @@
         }
         lastLagouUnreadCount = count;
       }
+    } else if (lastLagouUnreadCount > 0) {
+      lastLagouUnreadCount = 0;
     }
   }
 
@@ -766,6 +768,11 @@
     if (!isLagouWatcherInitialized || (Date.now() - lagouWatcherInitTimestamp < 4000)) {
       lastLagouUnreadCount = detectedUnread;
       isLagouWatcherInitialized = true;
+      return;
+    }
+
+    if (detectedUnread === 0 && lastLagouUnreadCount > 0) {
+      lastLagouUnreadCount = 0;
       return;
     }
 

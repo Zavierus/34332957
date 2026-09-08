@@ -850,7 +850,7 @@
 
     if (Date.now() - liepinWatcherInitTimestamp < 4000) return;
 
-    const m = title.match(/【(\d+)条新消息】/) || title.match(/\((\d+)\)\s*猎聘/);
+    const m = title.match(/[\(（](\d+)[\)）]/) || title.match(/【(\d+)条?(?:新消息)?】/);
     if (m) {
       const count = parseInt(m[1], 10);
       if (count > 0 && isLiepinWatcherInitialized && count > lastLiepinUnreadCount) {
@@ -869,6 +869,8 @@
         }
         lastLiepinUnreadCount = count;
       }
+    } else if (lastLiepinUnreadCount > 0) {
+      lastLiepinUnreadCount = 0;
     }
   }
 
@@ -934,6 +936,11 @@
     if (!isLiepinWatcherInitialized || (Date.now() - liepinWatcherInitTimestamp < 4000)) {
       lastLiepinUnreadCount = detectedUnread;
       isLiepinWatcherInitialized = true;
+      return;
+    }
+
+    if (detectedUnread === 0 && lastLiepinUnreadCount > 0) {
+      lastLiepinUnreadCount = 0;
       return;
     }
 
