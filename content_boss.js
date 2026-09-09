@@ -653,21 +653,19 @@
 
   function startTitleFlashing(alertTitle = '【🔔 HR来新消息了!】') {
     if (titleFlashInterval) clearInterval(titleFlashInterval);
-    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR') || originalDocTitle.includes('🔔')) {
-      originalDocTitle = 'BOSS直聘';
-    }
+    const baseTitle = document.title || 'BOSS直聘';
     let flag = true;
     let count = 0;
     isSelfFlashingTitle = true;
     titleFlashInterval = setInterval(() => {
-      document.title = flag ? alertTitle : originalDocTitle;
+      document.title = flag ? alertTitle : baseTitle;
       flag = !flag;
       count++;
-      if (count > 16) { // 约 12 秒后停止闪烁
+      if (count > 10) { // 约 8 秒后自动平滑停止
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
-        document.title = originalDocTitle;
-        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
+        document.title = baseTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1500);
       }
     }, 800);
 
@@ -675,15 +673,15 @@
       if (titleFlashInterval) {
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
-        document.title = originalDocTitle;
-        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
+        document.title = baseTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1500);
       }
       window.removeEventListener('focus', onFocus);
     };
     window.addEventListener('focus', onFocus);
   }
 
-  // ================= 页面内高可见度浮动 Toast 弹窗 (3.5s轻量淡出，支持悬停暂停与✕立即关闭) =================
+  // ================= 页面内 mini 紧凑胶囊 Toast (轻巧小巧，不占屏幕，3.5s优雅淡出) =================
   function showHRReplyToast(info = {}) {
     let toast = document.getElementById('ziaver-hr-reply-toast');
     if (!toast) {
@@ -691,22 +689,22 @@
       toast.id = 'ziaver-hr-reply-toast';
       toast.style.cssText = `
         position: fixed;
-        top: 24px;
-        right: 24px;
+        top: 16px;
+        right: 16px;
         z-index: 2147483647;
-        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-        border: 1.5px solid #00f2fe;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(0, 242, 254, 0.4);
-        border-radius: 12px;
-        padding: 12px 16px;
+        background: rgba(15, 23, 42, 0.96);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(0, 242, 254, 0.45);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(0, 242, 254, 0.15);
+        border-radius: 8px;
+        padding: 6px 12px;
         color: #fff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
         display: flex;
         align-items: center;
-        gap: 12px;
-        min-width: 300px;
-        max-width: 420px;
-        animation: ziaverSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        gap: 8px;
+        max-width: 280px;
+        animation: ziaverSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         cursor: pointer;
         user-select: none;
       `;
@@ -716,10 +714,6 @@
           from { transform: translateX(110%); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
         }
-        @keyframes ziaverPulse {
-          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(0,242,254,0.6)); }
-          50% { transform: scale(1.1); filter: drop-shadow(0 0 16px rgba(0,242,254,0.95)); }
-        }
       `;
       document.head.appendChild(styleTag);
       document.body.appendChild(toast);
@@ -727,54 +721,51 @@
 
     const unreadCount = info.count || 1;
     const title = info.title || 'BOSS 直聘 · HR 新回复';
-    const desc = info.desc || `检测到企业 HR 正在与您互动，请及时跟进沟通！`;
+    const desc = info.desc || `企业 HR 正在与您互动，请及时跟进！`;
     const chatUrl = info.chatUrl || 'https://www.zhipin.com/web/geek/chat';
 
     toast.innerHTML = `
-      <div style="font-size: 24px; line-height: 1; animation: ziaverPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="font-size: 15px; line-height: 1;">🔔</div>
       <div style="flex: 1; overflow: hidden;">
-        <div style="font-size: 13px; font-weight: 700; color: #00f2fe; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+        <div style="font-size: 11.5px; font-weight: 700; color: #00f2fe; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
           <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span>
-          <span style="font-size: 10.5px; background: rgba(0,242,254,0.2); color:#38bdf8; padding: 2px 6px; border-radius: 10px; font-weight:600; white-space: nowrap;">${unreadCount} 条未读</span>
+          <span style="font-size: 9.5px; background: rgba(0,242,254,0.2); color:#38bdf8; padding: 1px 5px; border-radius: 8px; font-weight:600; white-space: nowrap;">${unreadCount}条未读</span>
         </div>
-        <div style="font-size: 11.5px; color: #cbd5e1; margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${desc}</div>
+        <div style="font-size: 10px; color: #cbd5e1; margin-top: 1px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${desc}</div>
       </div>
-      <div style="display: flex; align-items: center; gap: 6px;">
+      <div style="display: flex; align-items: center; gap: 4px;">
         <button id="ziaver-toast-goto-btn" style="
-          background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+          background: #00f2fe;
           border: none;
-          border-radius: 6px;
+          border-radius: 4px;
           color: #0f172a;
           font-weight: 700;
-          font-size: 11px;
-          padding: 5px 10px;
+          font-size: 10px;
+          padding: 3px 7px;
           cursor: pointer;
           white-space: nowrap;
-          box-shadow: 0 4px 12px rgba(0, 242, 254, 0.3);
-        ">查看 ↗</button>
+        ">查看</button>
         <button id="ziaver-toast-close-btn" style="
-          background: rgba(255, 255, 255, 0.1);
+          background: transparent;
           border: none;
-          border-radius: 6px;
           color: #94a3b8;
-          font-size: 12px;
-          width: 24px;
-          height: 24px;
+          font-size: 11px;
+          width: 18px;
+          height: 18px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: all 0.15s;
         " title="关闭通知">✕</button>
       </div>
     `;
 
     const closeToast = () => {
       if (toast && toast.parentNode) {
-        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        toast.style.transition = 'opacity 0.25s, transform 0.25s';
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-20px)';
-        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 300);
+        toast.style.transform = 'translateY(-10px)';
+        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 250);
       }
     };
 
@@ -800,7 +791,6 @@
       };
     }
 
-    // 自动 3.5 秒轻量淡出，悬停暂停
     const startDismissTimer = (delay = 3500) => {
       if (toast._timer) clearTimeout(toast._timer);
       toast._timer = setTimeout(closeToast, delay);
@@ -811,7 +801,7 @@
     };
 
     toast.onmouseleave = () => {
-      startDismissTimer(1800);
+      startDismissTimer(1500);
     };
 
     startDismissTimer(3500);
@@ -1877,9 +1867,11 @@
         });
       }
     } else {
-      // 标题已经恢复正常，重置状态
-      lastTitleHasMessage = false;
-      lastTitleUnreadCount = 0;
+      // 只有在顶栏也无未读、且当前非闪烁状态时，才真正重置标题状态（防止闪烁和切页伪重置导致死循环）
+      if (!isSelfFlashingTitle && lastHeaderUnreadCount === 0 && !lastHeaderHasRedDot) {
+        lastTitleHasMessage = false;
+        lastTitleUnreadCount = 0;
+      }
     }
   }
 
@@ -2014,10 +2006,6 @@
       alertReason = `顶栏出现新消息红点标记`;
       alertCount = headerInfo.count || 1;
     }
-    // 当未读被用户点开清零时，通知后台中枢重置未读计数，使后续新消息不必死等冷却期
-    if (headerInfo.count === 0 && !headerInfo.hasRedDot && (lastHeaderUnreadCount > 0 || lastHeaderHasRedDot)) {
-      chrome.runtime.sendMessage({ type: 'HR_UNREAD_CLEARED', platform: 'boss' }).catch(() => {});
-    }
     lastHeaderUnreadCount = headerInfo.count;
     lastHeaderHasRedDot = headerInfo.hasRedDot;
 
@@ -2111,11 +2099,19 @@
     }
   }
 
+  let lastLocalDispatchTime = 0;
   function dispatchHRReplyNotification(info = {}) {
+    const now = Date.now();
+    if (!info.isTest && (now - lastLocalDispatchTime < 30000)) {
+      console.log('[ZIAVER Autopilot] 🛡️ 命中当前页面 30 秒防抖锁，静默跳过重复上报');
+      return;
+    }
+    lastLocalDispatchTime = now;
+
     // 1. 穿透式提示音：统一交由 background.js 通过 offscreen 全局单例发声，杜绝多标签页本地声音混响
     // (仅在后台离线或测试模式异常时由本地 fallback)
 
-    // 2. 页面内高可见度浮动 Toast (带呼吸灯与直达跳转)
+    // 2. 页面内 mini 紧凑胶囊 Toast
     showHRReplyToast({
       title: info.title || 'BOSS 直聘 · HR 新回复',
       desc: info.desc || '检测到企业 HR 正在与您互动，请及时跟进！',

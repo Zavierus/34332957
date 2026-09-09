@@ -593,21 +593,19 @@
 
   function startTitleFlashing(alertTitle = '【🔔 猎聘HR来新消息了!】') {
     if (titleFlashInterval) clearInterval(titleFlashInterval);
-    if (!originalDocTitle || originalDocTitle.includes('新消息') || originalDocTitle.includes('HR') || originalDocTitle.includes('🔔')) {
-      originalDocTitle = '猎聘网';
-    }
+    const baseTitle = document.title || '猎聘网';
     let flag = true;
     let count = 0;
     isSelfFlashingTitle = true;
     titleFlashInterval = setInterval(() => {
-      document.title = flag ? alertTitle : originalDocTitle;
+      document.title = flag ? alertTitle : baseTitle;
       flag = !flag;
       count++;
-      if (count > 16) {
+      if (count > 10) {
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
-        document.title = originalDocTitle;
-        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
+        document.title = baseTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1500);
       }
     }, 800);
 
@@ -615,15 +613,15 @@
       if (titleFlashInterval) {
         clearInterval(titleFlashInterval);
         titleFlashInterval = null;
-        document.title = originalDocTitle;
-        setTimeout(() => { isSelfFlashingTitle = false; }, 1000);
+        document.title = baseTitle;
+        setTimeout(() => { isSelfFlashingTitle = false; }, 1500);
       }
       window.removeEventListener('focus', onFocus);
     };
     window.addEventListener('focus', onFocus);
   }
 
-  // ================= 页面内高可见度浮动 Toast 弹窗 (3.5s轻量淡出，支持悬停暂停与✕立即关闭) =================
+  // ================= 页面内 mini 紧凑胶囊 Toast (轻巧小巧，不占屏幕，3.5s优雅淡出) =================
   function showLiepinHRReplyToast(info = {}) {
     let toast = document.getElementById('ziaver-liepin-reply-toast');
     if (!toast) {
@@ -631,22 +629,22 @@
       toast.id = 'ziaver-liepin-reply-toast';
       toast.style.cssText = `
         position: fixed;
-        top: 24px;
-        right: 24px;
+        top: 16px;
+        right: 16px;
         z-index: 2147483647;
-        background: linear-gradient(135deg, #0f172a 0%, #2e1065 100%);
-        border: 1.5px solid #c084fc;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 30px rgba(168, 85, 247, 0.35);
-        border-radius: 12px;
-        padding: 12px 16px;
+        background: rgba(15, 23, 42, 0.96);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(192, 132, 252, 0.45);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(168, 85, 247, 0.2);
+        border-radius: 8px;
+        padding: 6px 12px;
         color: #fff;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
         display: flex;
         align-items: center;
-        gap: 12px;
-        min-width: 300px;
-        max-width: 420px;
-        animation: ziaverLiepinSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        gap: 8px;
+        max-width: 280px;
+        animation: ziaverLiepinSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         cursor: pointer;
         user-select: none;
       `;
@@ -656,10 +654,6 @@
           from { transform: translateX(110%); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
         }
-        @keyframes ziaverLiepinPulse {
-          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(168,85,247,0.6)); }
-          50% { transform: scale(1.1); filter: drop-shadow(0 0 16px rgba(168,85,247,0.95)); }
-        }
       `;
       document.head.appendChild(styleTag);
       document.body.appendChild(toast);
@@ -667,54 +661,51 @@
 
     const unreadCount = info.count || 1;
     const title = info.title || '猎聘网 · HR 新回复';
-    const desc = info.desc || `检测到猎聘企业 HR 正在与您互动沟通，请及时跟进！`;
+    const desc = info.desc || `企业 HR 正在与您互动，请及时跟进！`;
     const chatUrl = info.chatUrl || 'https://www.liepin.com/im/';
 
     toast.innerHTML = `
-      <div style="font-size: 24px; line-height: 1; animation: ziaverLiepinPulse 2s infinite ease-in-out;">🔔</div>
+      <div style="font-size: 15px; line-height: 1;">🔔</div>
       <div style="flex: 1; overflow: hidden;">
-        <div style="font-size: 13px; font-weight: 700; color: #c084fc; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+        <div style="font-size: 11.5px; font-weight: 700; color: #c084fc; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
           <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${title}</span>
-          <span style="font-size: 10.5px; background: rgba(168,85,247,0.25); color:#e9d5ff; padding: 2px 6px; border-radius: 10px; font-weight:600; white-space: nowrap;">${unreadCount} 条未读</span>
+          <span style="font-size: 9.5px; background: rgba(168,85,247,0.25); color:#e9d5ff; padding: 1px 5px; border-radius: 8px; font-weight:600; white-space: nowrap;">${unreadCount}条未读</span>
         </div>
-        <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${desc}</div>
+        <div style="font-size: 10px; color: #cbd5e1; margin-top: 1px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${desc}</div>
       </div>
-      <div style="display: flex; align-items: center; gap: 6px;">
+      <div style="display: flex; align-items: center; gap: 4px;">
         <button id="ziaver-liepin-toast-btn" style="
-          background: linear-gradient(135deg, #a855f7 0%, #c084fc 100%);
+          background: #a855f7;
           border: none;
-          border-radius: 6px;
+          border-radius: 4px;
           color: #fff;
           font-weight: 700;
-          font-size: 11px;
-          padding: 5px 10px;
+          font-size: 10px;
+          padding: 3px 7px;
           cursor: pointer;
           white-space: nowrap;
-          box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
-        ">查看 ↗</button>
+        ">查看</button>
         <button id="ziaver-liepin-close-btn" style="
-          background: rgba(255, 255, 255, 0.1);
+          background: transparent;
           border: none;
-          border-radius: 6px;
           color: #94a3b8;
-          font-size: 12px;
-          width: 24px;
-          height: 24px;
+          font-size: 11px;
+          width: 18px;
+          height: 18px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: all 0.15s;
         " title="关闭通知">✕</button>
       </div>
     `;
 
     const closeToast = () => {
       if (toast && toast.parentNode) {
-        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        toast.style.transition = 'opacity 0.25s, transform 0.25s';
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-20px)';
-        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 300);
+        toast.style.transform = 'translateY(-10px)';
+        setTimeout(() => { if (toast && toast.parentNode) toast.remove(); }, 250);
       }
     };
 
@@ -750,7 +741,7 @@
     };
 
     toast.onmouseleave = () => {
-      startDismissTimer(1800);
+      startDismissTimer(1500);
     };
 
     startDismissTimer(3500);
@@ -870,8 +861,11 @@
         });
       }
     } else {
-      lastLiepinTitleHasMessage = false;
-      lastLiepinTitleUnreadCount = 0;
+      // 只有在确定不是巡航插件正在闪烁标题，且顶栏真正没有未读消息时，才允许重置标题状态（防止闪烁和切页伪重置导致死循环）
+      if (!isSelfFlashingTitle && lastLiepinUnreadCount === 0) {
+        lastLiepinTitleHasMessage = false;
+        lastLiepinTitleUnreadCount = 0;
+      }
     }
   }
 
@@ -942,7 +936,10 @@
 
     if (detectedUnread === 0 && lastLiepinUnreadCount > 0) {
       lastLiepinUnreadCount = 0;
-      chrome.runtime.sendMessage({ type: 'HR_UNREAD_CLEARED', platform: 'liepin' }).catch(() => {});
+      // 仅在真实IM聊天页内且已读时，才告知后台重置基准，普通页面或偶发抓空绝不清空后台
+      if (window.location.pathname.includes('/im/') || window.location.pathname.includes('/chat/')) {
+        chrome.runtime.sendMessage({ type: 'HR_UNREAD_CLEARED', platform: 'liepin', verifiedActiveChat: true }).catch(() => {});
+      }
       return;
     }
 
@@ -969,9 +966,17 @@
     lastLiepinUnreadCount = detectedUnread;
   }
 
+  let lastLiepinLocalDispatch = 0;
   function dispatchLiepinHRReplyNotification(info = {}) {
+    const now = Date.now();
+    if (!info.isTest && (now - lastLiepinLocalDispatch < 30000)) {
+      console.log('[ZIAVER Liepin] ⏳ 本地标签页 30 秒内已提醒，跳过防重复弹窗');
+      return;
+    }
+    lastLiepinLocalDispatch = now;
+
     // 1. 穿透式提示音：统一由 background.js 通过 offscreen 全局单例发声，杜绝多标签页声音重叠
-    // 2. 页面内高可见度浮动 Toast
+    // 2. 页面内 mini 紧凑胶囊 Toast
     showLiepinHRReplyToast({
       title: info.title || '猎聘网 · HR 新回复',
       desc: info.desc || '检测到企业 HR 正在与您互动，请及时跟进！',

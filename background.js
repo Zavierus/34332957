@@ -921,15 +921,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'next_site_triggered' });
     return true;
   } else if (request.type === 'HR_UNREAD_CLEARED') {
-    // 某标签页已点开会话或顶栏未读清零，同步重置后台未读计数，确保下次新消息不被冷却阻断
-    const platform = request.platform || 'boss';
-    chrome.storage.local.get(['lastPlatformAlertState'], (res) => {
-      const platformState = res.lastPlatformAlertState || {};
-      if (platformState[platform]) {
-        platformState[platform].count = 0;
-        chrome.storage.local.set({ lastPlatformAlertState: platformState });
-      }
-    });
+    // 仅当由真正活跃在会话界面的标签页明确清零时才生效，避免子页面因无徽标而误清零引发死循环
+    if (request.verifiedActiveChat) {
+      const platform = request.platform || 'boss';
+      chrome.storage.local.get(['lastPlatformAlertState'], (res) => {
+        const platformState = res.lastPlatformAlertState || {};
+        if (platformState[platform]) {
+          platformState[platform].count = 0;
+          chrome.storage.local.set({ lastPlatformAlertState: platformState });
+        }
+      });
+    }
     sendResponse({ status: 'cleared' });
     return true;
   } else if (request.type === 'HR_REPLY_ALERT') {
@@ -948,9 +950,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const cooldownMs = cooldownMinutes * 60 * 1000;
 
       if (!request.isTest) {
-        // 1. 多标签并发爆发窗口拦截 (15秒内绝对防抖，彻底消除多标签打开同一站点时的阶梯式重复报警)
-        if (now - lastPlatformTime < 15000) {
-          console.log(`[ZIAVER Background] 🛡️ 拦截多标签并发重复告警 (${platform}): 距上次告警仅 ${((now - lastPlatformTime) / 1000).toFixed(1)}s (<15s)`);
+        // 1. 多标签并发爆发窗口拦截 (30秒内绝对防抖，彻底消除多标签打开同一站点时的阶梯式重复报警)
+        if (now - lastPlatformTime < 30000) {
+          console.log(`[ZIAVER Background] 🛡️ 拦截多标签并发重复告警 (${platform}): 距上次告警仅 ${((now - lastPlatformTime) / 1000).toFixed(1)}s (<30s)`);
           sendResponse({ status: 'multitab_burst_suppressed' });
           return;
         }
@@ -995,7 +997,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      const notifId = 'hr_reply_' + Date.now();
+      // 桌面通知使用全局固定单例 ID，彻底杜绝 Windows 桌面卡片堆叠！
+      // 无论发多少次，右下角永远只显示这 1 个最新卡片，用户点一次 ✕ 即可完全关闭！
+      const SINGLE_NOTIF_ID = 'hr_reply_singleton';
       const chatUrl = request.chatUrl || (
         platform === 'liepin' ? 'https://www.liepin.com/im/' :
         platform === 'lagou' ? 'https://easy.lagou.com/im/chat.htm' :
@@ -1004,26 +1008,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (!globalThis.notifChatTargetMap) {
         globalThis.notifChatTargetMap = new Map();
       }
-      globalThis.notifChatTargetMap.set(notifId, chatUrl);
+      globalThis.notifChatTargetMap.set(SINGLE_NOTIF_ID, chatUrl);
 
       let siteTitle = 'BOSS 直聘';
       if (platform === 'liepin') siteTitle = '猎聘网';
       else if (platform === 'lagou') siteTitle = '拉勾网';
 
-      // 桌面右下角强提醒系统通知：开启 requireInteraction: true，保持常驻桌面右下角，直到用户点击或手动关闭！
-      chrome.notifications.create(notifId, {
-        type: 'basic',
-        iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-        title: `🔔 ${siteTitle} · 检测到 HR 新回复！`,
-        message: request.text || '有企业 HR 正在与您互动，请切换回浏览器及时跟进！',
-        priority: 2,
-        requireInteraction: true
-      }, (createdId) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[Background Notification Error]', chrome.runtime.lastError);
-        } else {
-          console.log('[ZIAVER Background] 🔔 桌面右下角通知已成功发射:', createdId);
-        }
+      // 提取精简短文本，缩小系统弹窗占用，消除大面积遮挡
+      let briefMsg = (request.text || '收到 HR 新回复，点击立即查看')
+        .replace(/【.*?】/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (briefMsg.length > 36) briefMsg = briefMsg.slice(0, 36) + '...';
+
+      // 先清除可能存在的历史卡片，再创建紧凑单例卡片 (使用 48px 小图标，移除 requireInteraction 避免死锁)
+      chrome.notifications.clear(SINGLE_NOTIF_ID, () => {
+        chrome.notifications.create(SINGLE_NOTIF_ID, {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon_48.png'),
+          title: `🔔 ${siteTitle} · HR 新回复`,
+          message: briefMsg,
+          priority: 2,
+          requireInteraction: false
+        }, (createdId) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[Background Notification Error]', chrome.runtime.lastError);
+          } else {
+            console.log('[ZIAVER Background] 🔔 桌面右下角精简单例通知已发射:', createdId);
+          }
+        });
       });
 
       sendResponse({ status: 'ok', dispatched: true });
@@ -1467,6 +1480,7 @@ chrome.notifications.onClicked.addListener((notifId) => {
   }
 
   if (notifId && notifId.startsWith('hr_reply_')) {
+    chrome.notifications.clear(notifId);
     const targetUrl = (globalThis.notifChatTargetMap && globalThis.notifChatTargetMap.get(notifId)) || 'https://www.zhipin.com/web/geek/chat';
     if (globalThis.notifChatTargetMap) globalThis.notifChatTargetMap.delete(notifId);
 
