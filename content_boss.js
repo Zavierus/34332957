@@ -36,6 +36,7 @@
 
   let config = {
     dailyLimit: 70,
+    enableTimeSlotLimit: true,
     timeSlotLimits: { morning: 20, afternoon: 30, evening: 20 },
     timeSlotCounts: { morning: 0, afternoon: 0, evening: 0 },
     acceptAllInPageFilter: true,
@@ -289,6 +290,9 @@
 
       if (res && res.config) {
         config = { ...config, ...res.config };
+        if (config.enableTimeSlotLimit === undefined) {
+          config.enableTimeSlotLimit = true;
+        }
         if (!config.timeSlotLimits) {
           config.timeSlotLimits = { morning: 20, afternoon: 30, evening: 20 };
         }
@@ -1199,7 +1203,11 @@
           </div>
 
           <!-- 分时段额度指示器 (上午 06:00-12:00 | 下午 12:00-18:00 | 晚上 18:00-24:00) -->
-          <div class="time-slot-grid" id="hud-time-slot-grid" style="display: flex; gap: 4px; margin-bottom: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; font-size: 10px;">
+            <span style="color: #94a3b8;">🕒 分时段安全限制</span>
+            <span id="btn-toggle-slot-limit" style="color: #00f2fe; cursor: pointer; text-decoration: underline; font-weight: 600;" title="点击可开启/关闭分时段额度限制">已开启 (点击关闭)</span>
+          </div>
+          <div class="time-slot-grid" id="hud-time-slot-grid" style="display: flex; gap: 4px; margin-bottom: 6px; transition: opacity 0.2s;">
             <div class="slot-pill" id="slot-pill-morning" style="flex: 1; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 4px 2px; text-align: center; font-size: 10px;">
               <div style="color: #94a3b8; font-size: 9.5px;">🌅 上午</div>
               <div style="font-weight: 700; color: #38bdf8;" id="val-slot-morning">0/20</div>
@@ -1395,6 +1403,21 @@
         logHUD(`💾 <span class="success">[筛选已记忆]</span> 已保存当前页面筛选：【${cur.summary}】！后续全网巡航将自动采用此条件。`);
         updateHUD();
       });
+    });
+
+    // 快捷切换分时段额度限制开/关
+    shadowRoot.getElementById('btn-toggle-slot-limit')?.addEventListener('click', () => {
+      const nextState = config.enableTimeSlotLimit === false ? true : false;
+      config.enableTimeSlotLimit = nextState;
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['config'], (res) => {
+          const cfg = res.config || {};
+          cfg.enableTimeSlotLimit = nextState;
+          chrome.storage.local.set({ config: cfg });
+        });
+      }
+      logHUD(`<span class="highlight">[时段限制切换]</span> 已${nextState ? '开启分时段额度限制 (防风控模式)' : '关闭分时段限制 (全天自由巡航，仅受每日上限约束)'}`);
+      updateHUD();
     });
 
     // 打开手动投递偏好学习中心
@@ -1635,6 +1658,24 @@
     if (cityEl) cityEl.textContent = config.targetCity || '深圳';
 
     // 分时段额度指示器实时更新与当前活跃时段高亮
+    const isSlotLimitEnabled = config.enableTimeSlotLimit !== false;
+    const toggleSlotBtn = shadowRoot.getElementById('btn-toggle-slot-limit');
+    const slotGrid = shadowRoot.getElementById('hud-time-slot-grid');
+    if (toggleSlotBtn) {
+      if (isSlotLimitEnabled) {
+        toggleSlotBtn.textContent = '已开启 (点击关闭)';
+        toggleSlotBtn.style.color = '#00f2fe';
+        toggleSlotBtn.title = '当前已开启分时段额度限制，达到时段额度将自动暂停。点击可关闭时段限制。';
+      } else {
+        toggleSlotBtn.textContent = '已关闭 (全天自由)';
+        toggleSlotBtn.style.color = '#f59e0b';
+        toggleSlotBtn.title = '当前已关闭时段限制，全天自由巡航仅受总上限约束。点击可重新开启。';
+      }
+    }
+    if (slotGrid) {
+      slotGrid.style.opacity = isSlotLimitEnabled ? '1' : '0.55';
+    }
+
     const slotCounts = config.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
     const slotLimits = config.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
     const curSlot = getCurrentTimeSlot();
@@ -2434,11 +2475,12 @@
         continue;
       }
 
+      const isSlotLimitEnabled = config.enableTimeSlotLimit !== false;
       const currentSlot = getCurrentTimeSlot();
       const currentSlotLimit = (config.timeSlotLimits && config.timeSlotLimits[currentSlot]) || 20;
       const currentSlotCount = (config.timeSlotCounts && config.timeSlotCounts[currentSlot]) || 0;
 
-      if (currentSlotCount >= currentSlotLimit) {
+      if (isSlotLimitEnabled && currentSlotCount >= currentSlotLimit) {
         logHUD(`<span class="highlight">[时段额度达标]</span> ${getTimeSlotDisplayName(currentSlot)} 额度已完成 (${currentSlotCount}/${currentSlotLimit})！今日全天已投 ${todayCount}/${config.dailyLimit}。为防风控已暂停本时段。`);
         break;
       }
@@ -2489,10 +2531,11 @@
       for (let i = 0; i < jobCards.length; i++) {
         if (!isRunning) break;
         while (isPaused) await sleep(1000);
+        const isSlotLimitEnabled = config.enableTimeSlotLimit !== false;
         const loopSlot = getCurrentTimeSlot();
         const loopSlotLimit = (config.timeSlotLimits && config.timeSlotLimits[loopSlot]) || 20;
         const loopSlotCount = (config.timeSlotCounts && config.timeSlotCounts[loopSlot]) || 0;
-        if (loopSlotCount >= loopSlotLimit) {
+        if (isSlotLimitEnabled && loopSlotCount >= loopSlotLimit) {
           logHUD(`<span class="highlight">[时段额度达标]</span> ${getTimeSlotDisplayName(loopSlot)} 额度已完成 (${loopSlotCount}/${loopSlotLimit})，暂停投递。`);
           break;
         }

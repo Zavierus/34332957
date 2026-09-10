@@ -79,6 +79,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const popSlotEvening = document.getElementById('pop-slot-evening');
 
   const inputDailyLimit = document.getElementById('cfg-daily-limit');
+  const inputEnableTimeSlot = document.getElementById('cfg-enable-time-slot');
+  const slotInputsRow = document.getElementById('cfg-slot-inputs-row');
+  const slotHint = document.getElementById('cfg-slot-hint');
   const inputSlotMorning = document.getElementById('cfg-slot-morning');
   const inputSlotAfternoon = document.getElementById('cfg-slot-afternoon');
   const inputSlotEvening = document.getElementById('cfg-slot-evening');
@@ -95,6 +98,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputCampusProtection = document.getElementById('cfg-campus-protection');
 
   const logListEl = document.getElementById('log-list');
+
+  function syncTimeSlotEnabledUI(isEnabled) {
+    if (slotInputsRow) {
+      slotInputsRow.style.opacity = isEnabled ? '1' : '0.45';
+      slotInputsRow.style.pointerEvents = isEnabled ? 'auto' : 'none';
+    }
+    [inputSlotMorning, inputSlotAfternoon, inputSlotEvening].forEach(inp => {
+      if (inp) inp.disabled = !isEnabled;
+    });
+    if (slotHint) {
+      slotHint.textContent = isEnabled 
+        ? '开启后各时段耗尽自动暂停，严防账号风控' 
+        : '时段限制已关闭，全天自由巡航仅受每日总上限约束';
+      slotHint.style.color = isEnabled ? '#64748b' : '#f59e0b';
+    }
+  }
+
+  if (inputEnableTimeSlot) {
+    inputEnableTimeSlot.addEventListener('change', () => {
+      syncTimeSlotEnabledUI(inputEnableTimeSlot.checked);
+    });
+  }
 
   // 本地日历日期工具函数 (适配时区)
   function getLocalDateStr(date = new Date()) {
@@ -143,6 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (popSlotAfternoon) popSlotAfternoon.textContent = `${slotCounts.afternoon || 0}/${slotLimits.afternoon || 30}`;
     if (popSlotEvening) popSlotEvening.textContent = `${slotCounts.evening || 0}/${slotLimits.evening || 20}`;
 
+    const isSlotLimitEnabled = config.enableTimeSlotLimit !== false;
+    if (inputEnableTimeSlot) {
+      inputEnableTimeSlot.checked = isSlotLimitEnabled;
+      syncTimeSlotEnabledUI(isSlotLimitEnabled);
+    }
+
     // 动态同步全网巡航下拉选项与安全上限联动
     const optFollowLimit = document.querySelector('#pipe-target-select option[value="follow_limit"]');
     if (optFollowLimit) {
@@ -151,16 +182,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const optFollowSlot = document.querySelector('#pipe-target-select option[value="follow_slot"]');
     if (optFollowSlot) {
-      const now = new Date();
-      const h = now.getHours();
-      let curSlot = 'morning';
-      let curDisp = '上午';
-      if (h >= 12 && h < 18) { curSlot = 'afternoon'; curDisp = '下午'; }
-      else if (h >= 18 || h < 6) { curSlot = 'evening'; curDisp = '晚上'; }
-      const slotLimit = slotLimits[curSlot] || 20;
-      const slotCount = slotCounts[curSlot] || 0;
-      const slotRem = Math.max(0, slotLimit - slotCount);
-      optFollowSlot.textContent = `🕒 跟随当前时段 (${curDisp}剩余 ${slotRem} 个，推荐)`;
+      if (isSlotLimitEnabled) {
+        const now = new Date();
+        const h = now.getHours();
+        let curSlot = 'morning';
+        let curDisp = '上午';
+        if (h >= 12 && h < 18) { curSlot = 'afternoon'; curDisp = '下午'; }
+        else if (h >= 18 || h < 6) { curSlot = 'evening'; curDisp = '晚上'; }
+        const slotLimit = slotLimits[curSlot] || 20;
+        const slotCount = slotCounts[curSlot] || 0;
+        const slotRem = Math.max(0, slotLimit - slotCount);
+        optFollowSlot.textContent = `🕒 跟随当前时段 (${curDisp}剩余 ${slotRem} 个，推荐)`;
+      } else {
+        optFollowSlot.textContent = `🕒 跟随全天巡航 (时段限制已关闭)`;
+      }
     }
 
     // 回显记忆的 BOSS 直聘筛选概要
@@ -240,6 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
       gradYear: '2024',
       enableCampus2024Protection: inputCampusProtection ? inputCampusProtection.checked : true,
       dailyLimit: parseInt(inputDailyLimit.value, 10) || (m + a + ev) || 70,
+      enableTimeSlotLimit: inputEnableTimeSlot ? inputEnableTimeSlot.checked : true,
       timeSlotLimits: {
         morning: m,
         afternoon: a,

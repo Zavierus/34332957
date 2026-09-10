@@ -593,10 +593,13 @@
             <!-- 分时段投递额度精细化配置 -->
             <div style="background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.25); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <div style="font-size: 13px; font-weight: 700; color: #00f2fe;">⏱️ 分时段投递额度精细化控制 (上午 / 下午 / 晚上)</div>
+                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 0; cursor: pointer;">
+                  <input type="checkbox" id="set-enable-time-slot" checked style="accent-color: #00f2fe; width: 16px; height: 16px;">
+                  <span style="font-size: 13px; font-weight: 700; color: #00f2fe;">⏱️ 启用分时段投递额度精细化控制</span>
+                </label>
                 <div style="font-size: 11.5px; color: #94a3b8;">全天自动汇总上限: <b id="display-slot-total" style="color: #38bdf8; font-size: 13px;">70</b> 个</div>
               </div>
-              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+              <div id="set-slot-grid-container" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; transition: opacity 0.2s;">
                 <div class="form-field" style="margin-bottom: 0;">
                   <label for="set-slot-morning" style="font-size: 12px; color: #cbd5e1;">🌅 上午时段 (06:00 - 12:00)</label>
                   <div class="input-unit">
@@ -619,8 +622,8 @@
                   </div>
                 </div>
               </div>
-              <div class="form-tip" style="margin-top: 8px;">
-                💡 <b>分时段防风控建议</b>：分时段投递能有效模拟真人求职作息，避免单一时段突击大量投递触发平台打招呼风控。各时段额度达标后将自动进入保护休眠，等待下一个时段。
+              <div class="form-tip" id="set-slot-hint-text" style="margin-top: 8px;">
+                💡 <b>分时段防风控建议</b>：分时段投递能有效模拟真人求职作息，避免单一时段突击大量投递触发平台打招呼风控。各时段额度达标后将自动进入保护休眠；若关闭此开关，则全天自由巡航，仅受下方每日总上限约束。
               </div>
             </div>
 

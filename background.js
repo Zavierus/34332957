@@ -129,6 +129,7 @@ function initOrUpdateStorage() {
     const today = getLocalDateStr();
     const initialConfig = {
       dailyLimit: 70,
+      enableTimeSlotLimit: true,
       timeSlotLimits: { morning: 20, afternoon: 30, evening: 20 },
       timeSlotCounts: { morning: 0, afternoon: 0, evening: 0 },
       acceptAllInPageFilter: true,
@@ -165,6 +166,7 @@ function initOrUpdateStorage() {
       if (mergedConfig.enableCampus2024Protection === undefined) mergedConfig.enableCampus2024Protection = true;
       if (mergedConfig.hrAlertCooldownMinutes === undefined) mergedConfig.hrAlertCooldownMinutes = 5;
       if (mergedConfig.acceptAllInPageFilter === undefined) mergedConfig.acceptAllInPageFilter = true;
+      if (mergedConfig.enableTimeSlotLimit === undefined) mergedConfig.enableTimeSlotLimit = true;
       if (!mergedConfig.timeSlotLimits) {
         mergedConfig.timeSlotLimits = { morning: 20, afternoon: 30, evening: 20 };
       }
@@ -451,6 +453,7 @@ function getDetailedPipelineStatus() {
     overallTarget,
     overallPercent,
     timeSlot: {
+      enabled: cfg.enableTimeSlotLimit !== false,
       slot,
       slotDisplayName: getTimeSlotDisplayName(slot),
       slotLimit,
@@ -498,6 +501,7 @@ function startCruisePipeline(perSiteTarget = 'follow_slot') {
     const config = res.config || {};
     cachedConfig = config;
 
+    const isSlotLimitEnabled = config.enableTimeSlotLimit !== false;
     const slot = getCurrentTimeSlot();
     const slotLimits = config.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
     const slotCounts = config.timeSlotCounts || { morning: 0, afternoon: 0, evening: 0 };
@@ -505,10 +509,19 @@ function startCruisePipeline(perSiteTarget = 'follow_slot') {
     const slotCount = slotCounts[slot] || 0;
     const slotRemaining = Math.max(0, slotLimit - slotCount);
 
+    const dailyLimit = config.dailyLimit || 70;
+    const todayCount = config.todayCount || 0;
+    const dailyRemaining = Math.max(0, dailyLimit - todayCount);
+
     let effectiveTarget = 20;
-    if (perSiteTarget === 'follow_slot' || perSiteTarget === 'follow_limit') {
-      // 深度对齐当前时段！若当前时段尚有剩余额度，以剩余额度为准；若已达成，以本时段上限为准
-      effectiveTarget = slotRemaining > 0 ? slotRemaining : slotLimit;
+    if (perSiteTarget === 'follow_slot') {
+      if (isSlotLimitEnabled) {
+        effectiveTarget = slotRemaining > 0 ? slotRemaining : slotLimit;
+      } else {
+        effectiveTarget = dailyRemaining > 0 ? dailyRemaining : dailyLimit;
+      }
+    } else if (perSiteTarget === 'follow_limit') {
+      effectiveTarget = dailyRemaining > 0 ? dailyRemaining : dailyLimit;
     } else if (Number(perSiteTarget) > 0) {
       effectiveTarget = Number(perSiteTarget);
     }
@@ -520,17 +533,21 @@ function startCruisePipeline(perSiteTarget = 'follow_slot') {
     cruisePipeline.siteStats = {};
     cruisePipeline.siteSkipped = {};
     cruisePipeline.slot = slot;
-    cruisePipeline.slotLimit = slotLimit;
+    cruisePipeline.slotLimit = isSlotLimitEnabled ? slotLimit : dailyLimit;
 
     updateExtensionBadge();
     broadcastPipelineStatus();
 
-    const slotName = getTimeSlotDisplayName(slot);
+    const titleSuffix = isSlotLimitEnabled ? `对齐 ${getTimeSlotDisplayName(slot)}` : `不限时段模式 (上限 ${dailyLimit})`;
+    const messageDesc = isSlotLimitEnabled
+      ? `目标: 本时段巡航 ${effectiveTarget} 个高契合岗位 (当前时段已投: ${slotCount}/${slotLimit})。首站：【${PIPELINE_SITES[0].name}】`
+      : `目标: 全网巡航 ${effectiveTarget} 个高契合岗位 (今日全天已投: ${todayCount}/${dailyLimit})。首站：【${PIPELINE_SITES[0].name}】`;
+
     chrome.notifications.create('pipeline_start_' + Date.now(), {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon_128.png'),
-      title: `🚀 全网巡航已开启 (对齐 ${slotName})`,
-      message: `目标: 本时段巡航 ${effectiveTarget} 个高契合岗位 (当前时段已投: ${slotCount}/${slotLimit})。首站：【${PIPELINE_SITES[0].name}】`,
+      title: `🚀 全网巡航已开启 (${titleSuffix})`,
+      message: messageDesc,
       priority: 2
     });
 

@@ -679,6 +679,34 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('set-accept-page-filter')) document.getElementById('set-accept-page-filter').checked = cfg.acceptAllInPageFilter !== false;
 
     // 分时段额度回填与求和计算
+    const enableSlotCheck = document.getElementById('set-enable-time-slot');
+    const slotContainer = document.getElementById('set-slot-grid-container');
+    const slotHintText = document.getElementById('set-slot-hint-text');
+
+    const syncDashboardSlotUI = (isEnabled) => {
+      if (slotContainer) {
+        slotContainer.style.opacity = isEnabled ? '1' : '0.45';
+        slotContainer.style.pointerEvents = isEnabled ? 'auto' : 'none';
+      }
+      ['set-slot-morning', 'set-slot-afternoon', 'set-slot-evening'].forEach(id => {
+        const inp = document.getElementById(id);
+        if (inp) inp.disabled = !isEnabled;
+      });
+      if (slotHintText) {
+        slotHintText.innerHTML = isEnabled
+          ? '💡 <b>分时段防风控建议</b>：分时段投递能有效模拟真人求职作息，避免单一时段突击大量投递触发平台打招呼风控。各时段额度达标后将自动进入保护休眠，等待下一个时段。'
+          : '⚠️ <b>时段限制已关闭</b>：插件将不会在早/中/晚时段额度达标后暂停，允许全天自由连续巡航投递，仅受下方「全天安全投递上限总额度」约束。';
+      }
+    };
+
+    if (enableSlotCheck) {
+      enableSlotCheck.checked = cfg.enableTimeSlotLimit !== false;
+      syncDashboardSlotUI(enableSlotCheck.checked);
+      enableSlotCheck.onchange = () => {
+        syncDashboardSlotUI(enableSlotCheck.checked);
+      };
+    }
+
     const slotLimits = cfg.timeSlotLimits || { morning: 20, afternoon: 30, evening: 20 };
     if (document.getElementById('set-slot-morning')) document.getElementById('set-slot-morning').value = slotLimits.morning || 20;
     if (document.getElementById('set-slot-afternoon')) document.getElementById('set-slot-afternoon').value = slotLimits.afternoon || 30;
@@ -820,6 +848,7 @@ document.addEventListener('DOMContentLoaded', () => {
       acceptAllInPageFilter: acceptPageFilterVal,
       enableCampus2024Protection: campusProtectionVal,
       gradYear: '2024',
+      enableTimeSlotLimit: document.getElementById('set-enable-time-slot') ? document.getElementById('set-enable-time-slot').checked : true,
       timeSlotLimits: {
         morning: morningVal,
         afternoon: afternoonVal,
